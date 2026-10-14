@@ -4,6 +4,7 @@ import type { SimPlayer } from '../src/shared/sim/entities';
 import { ITEMS } from '../src/shared/items';
 import { formOf } from '../src/shared/pokemon';
 import { SKILLS } from '../src/shared/skills';
+import { buildOf, type SavedBuild } from '../src/shared/pvp/build';
 
 function preferredRange(p: SimPlayer) {
   let r = 999;
@@ -137,7 +138,7 @@ function weakestSlot(p: SimPlayer) {
   return w;
 }
 
-export interface RunResult { wave: number; phase: string; levels: number[]; stages: number[]; kills: number[]; seconds: number }
+export interface RunResult { wave: number; phase: string; levels: number[]; stages: number[]; kills: number[]; seconds: number; builds: SavedBuild[] }
 
 export function runBotGame(inits: PlayerInit[], seed: number, maxWave = 20, difficulty: DifficultyId = 'easy'): RunResult {
   const sim = new GameSim(inits, seed, difficulty);
@@ -161,5 +162,6 @@ export function runBotGame(inits: PlayerInit[], seed: number, maxWave = 20, diff
     stages: sim.players.map((p) => p.stage),
     kills: sim.players.map((p) => p.stats.kills),
     seconds: Math.round(steps / 30),
+    builds: sim.players.map((p) => buildOf(p)),
   };
 }

@@ -3,10 +3,20 @@ import type { DifficultyId } from './difficulty';
 import type { LineId } from './pokemon';
 import type { RunSummary } from './meta';
 import type { Command, Ev, GameSim, MeState, PublicState } from './sim/game';
+import type { SavedBuild } from './pvp/build';
+import type { PvpMatchResult, PvpMode } from './pvp/sim';
 import { formOf } from './pokemon';
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const MAX_PLAYERS = 4;
+
+// ---------------------------------------------------------------- 对战
+
+export interface PvpRecord { mode: PvpMode; rating: number; best: number; wins: number; losses: number; draws: number; streak: number; games: number; rank: number }
+export interface PvpBoardRow { rank: number; name: string; rating: number; wins: number; losses: number; draws: number; streak: number; dex: number; you?: boolean }
+export interface PvpHistory { at: number; mode: PvpMode; result: 'win' | 'loss' | 'draw'; delta: number; dex: number; opp: string }
+export interface PvpRatingChange { mode: PvpMode; before: number; after: number; delta: number; record: PvpRecord }
+export interface PvpSeatInfo { id: number; name: string; team: number; bot: boolean; rating: number; line: LineId; dex: number; level: number }
 
 export interface LobbyPlayer { id: number; name: string; line: LineId | null; ready: boolean; host: boolean }
 
@@ -21,7 +31,7 @@ export interface RoomInfo {
   difficulty: DifficultyId;
 }
 
-export interface ServerStats { online: number; playing: number; rooms: number }
+export interface ServerStats { online: number; playing: number; rooms: number; pvpQueue?: number; pvpPlaying?: number }
 
 export interface BoardEntry { id: number; name: string; line: LineId; dex: number; level: number; kills: number; damage: number; taken: number; revives: number }
 
@@ -40,6 +50,9 @@ export type C2S =
   | { t: 'debug'; cmd: 'down' | 'endWave' | 'xp' }
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number }
   | { t: 'ping'; at: number }
+  | { t: 'pvpQueue'; mode: PvpMode; build: SavedBuild; name: string; meta: Record<string, number>; v: number; pid: string; secret: string }
+  | { t: 'pvpCancel' }
+  | { t: 'pvpBoard'; mode: PvpMode; pid?: string; secret?: string }
   | Command;
 
 export type S2C =
@@ -49,14 +62,18 @@ export type S2C =
   | { t: 'rooms'; stats: ServerStats; rooms: RoomInfo[] }
   | { t: 'stats'; stats: ServerStats }
   | { t: 'left' }
-  | { t: 'start'; w: number; h: number; players: { id: number; name: string; line: LineId }[] }
+  | { t: 'start'; w: number; h: number; players: { id: number; name: string; line: LineId }[]; pvp?: { mode: PvpMode; seats: PvpSeatInfo[] } }
   | { t: 'ev'; e: Ev[] }
   | { t: 'st'; s: PublicState }
   | { t: 'me'; s: MeState }
   | { t: 'paused'; on: boolean }
   | { t: 'end'; victory: boolean; summary: RunSummary | null; board: BoardEntry[] }
   | { t: 'pong'; at: number }
-  | { t: 'cmdErr'; msg: string };
+  | { t: 'cmdErr'; msg: string }
+  | { t: 'pvpQueued'; mode: PvpMode; wait: number; range: number; searching: number; botIn: number }
+  | { t: 'pvpCancelled' }
+  | { t: 'pvpBoard'; mode: PvpMode; rows: PvpBoardRow[]; me: PvpRecord | null; players: number; history: PvpHistory[] }
+  | { t: 'pvpEnd'; result: PvpMatchResult; you: number; rating: PvpRatingChange | null };
 
 // ---------------------------------------------------------------- 二进制快照
 

@@ -3,11 +3,14 @@ import { ENEMIES, ENEMY_INDEX } from '../enemies';
 import { ITEMS } from '../items';
 import type { RunSummary } from '../meta';
 import { LINES, formOf, type LineId } from '../pokemon';
+import { buildOf } from '../pvp/build';
+import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
 import { SKILLS } from '../skills';
 import { TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, spawnRateMult, waveDuration } from '../waves';
+import type { PType } from '../types';
 import { updateEnemy } from './ai';
-import { PLAYER_R, beamHit, healPlayer, hitEnemy, hurtPlayer, updateSkills } from './combat';
+import { PLAYER_R, beamHit, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
 import {
   addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, rerollCards,
@@ -81,12 +84,14 @@ export interface PublicState {
   biome: number;
   interLeft: number;
   boss: { name: string; hp: number; max: number } | null;
-  players: { id: number; name: string; line: LineId; dex: number; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number }[];
+  players: { id: number; name: string; line: LineId; dex: number; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean }[];
+  /** 对战模式的额外信息 */
+  pvp?: PvpPublic;
 }
 
 export class GameSim {
-  readonly w = ARENA_W;
-  readonly h = ARENA_H;
+  w = ARENA_W;
+  h = ARENA_H;
   rng: Rng;
   time = 0;
   phase: SimPhase = 'inter';
@@ -105,9 +110,11 @@ export class GameSim {
   bossKills: string[] = [];
   /** 每位玩家的私有状态是否需要重发 */
   dirty = new Set<number>();
-  private events: Ev[] = [];
+  protected events: Ev[] = [];
   private hits = new Map<number, { x: number; y: number; dmg: number; flags: number; type: number }>();
   private idSeq = 1;
+  /** 救援速度倍率（对战里救人更慢） */
+  protected reviveSpeed = 1;
   private spawnAcc = 0;
   private elitesDone = 0;
   private treasureAt = -1;
@@ -120,13 +127,23 @@ export class GameSim {
   horde = false;
   private extraElites: string[] = [];
 
-  constructor(inits: PlayerInit[], seed: number, difficulty: DifficultyId = 'easy') {
+  constructor(inits: PlayerInit[], seed: number, difficulty: DifficultyId = 'easy', start = true) {
     this.rng = new Rng(seed);
     this.diff = difficultyOf(difficulty);
     for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta));
     this.startPlayers = inits.length;
-    this.startWave();
+    if (start) this.startWave();
   }
+
+  // ------------------------------------------------------------ 队伍（对战模式会覆盖）
+
+  /** 某个玩家的技能可以打到的目标 */
+  targetsFor(_owner: number): Enemy[] { return this.enemies; }
+  isAlly(_p: SimPlayer, _q: SimPlayer): boolean { return true; }
+  /** 倒下的玩家身边有敌人时不能被救起 */
+  reviveBlocked(_p: SimPlayer): boolean { return false; }
+  /** 打到代表其他玩家的目标（对战模式），返回实际伤害 */
+  pvpHit(_e: Enemy, _p: SimPlayer | null, _raw: number, _type: PType, _o: HitOpts): number { return 0; }
 
   // ------------------------------------------------------------ 工具
 
@@ -506,26 +523,23 @@ export class GameSim {
     return { x, y };
   }
 
-  private updatePlayer(p: SimPlayer, dt: number) {
+  protected updatePlayer(p: SimPlayer, dt: number) {
     if (!p.alive) return;
     p.moveBudget = Math.min(p.moveBudget + this.moveSpeed(p) * 1.5 * dt, this.moveSpeed(p) * 0.5 + 10);
     if (p.down) {
       p.downT += dt;
-      let helpers = 0;
-      for (const q of this.players) {
-        if (q !== p && q.alive && !q.down && Math.hypot(q.x - p.x, q.y - p.y) < REVIVE_RADIUS) helpers++;
-      }
-      if (helpers) {
-        p.revive += (dt / REVIVE_TIME) * (1 + 0.5 * (helpers - 1));
+      const helpers = this.players.filter((q) => q !== p && q.alive && !q.down && this.isAlly(p, q) && Math.hypot(q.x - p.x, q.y - p.y) < REVIVE_RADIUS);
+      if (helpers.length && !this.reviveBlocked(p)) {
+        p.revive += (dt / REVIVE_TIME) * (1 + 0.5 * (helpers.length - 1)) * this.reviveSpeed;
         if (p.revive >= 1) {
           p.down = false;
           p.hp = Math.max(1, Math.round(p.d.maxHp * 0.35));
           p.invuln = 2;
           p.revive = 0;
           this.emit(['rev', p.id]);
-          for (const q of this.players) if (q !== p && q.alive && !q.down && Math.hypot(q.x - p.x, q.y - p.y) < REVIVE_RADIUS) q.stats.revives++;
+          for (const q of helpers) q.stats.revives++;
         }
-      } else p.revive = Math.max(0, p.revive - dt * 0.15);
+      } else p.revive = Math.max(0, p.revive - dt * (helpers.length ? 0.5 : 0.15));
       return;
     }
     if (p.invuln > 0) p.invuln -= dt;
@@ -619,7 +633,7 @@ export class GameSim {
     }
   }
 
-  private updateProjs(dt: number) {
+  protected updateProjs(dt: number) {
     const keep: Proj[] = [];
     for (const pr of this.projs) {
       pr.life -= dt;
@@ -632,7 +646,7 @@ export class GameSim {
         pr.y = owner.y - 6 + Math.sin(pr.orbit.ang) * pr.orbit.rad * 0.8;
       } else {
         if (pr.homing > 0) {
-          const tgt = pr.owner >= 0 ? this.nearestEnemyTo(pr.x, pr.y, 140) : this.nearestPlayer(pr.x, pr.y);
+          const tgt = pr.owner >= 0 ? this.nearestEnemyTo(pr.x, pr.y, 140, pr.owner) : this.nearestPlayer(pr.x, pr.y);
           if (tgt) {
             const want = Math.atan2(tgt.y - pr.y, tgt.x - pr.x);
             const cur = Math.atan2(pr.vy, pr.vx);
@@ -651,7 +665,7 @@ export class GameSim {
       }
       let alive = true;
       if (pr.owner >= 0) {
-        for (const e of this.enemies) {
+        for (const e of this.targetsFor(pr.owner)) {
           if (e.dead || e.hidden) continue;
           const rr = e.r + pr.r;
           if ((e.x - pr.x) ** 2 + (e.y - 6 - pr.y) ** 2 > rr * rr) continue;
@@ -689,10 +703,10 @@ export class GameSim {
     this.projs = keep;
   }
 
-  nearestEnemyTo(x: number, y: number, range: number): Enemy | null {
+  nearestEnemyTo(x: number, y: number, range: number, owner = -1): Enemy | null {
     let best: Enemy | null = null;
     let bd = range * range;
-    for (const e of this.enemies) {
+    for (const e of this.targetsFor(owner)) {
       if (e.dead || e.hidden) continue;
       const d = (e.x - x) ** 2 + (e.y - y) ** 2;
       if (d < bd) { bd = d; best = e; }
@@ -700,7 +714,7 @@ export class GameSim {
     return best;
   }
 
-  private updateZones(dt: number) {
+  protected updateZones(dt: number) {
     const keep: Zone[] = [];
     for (const z of this.zones) {
       z.life -= dt;
@@ -709,7 +723,7 @@ export class GameSim {
         z.t -= z.tick;
         if (z.owner >= 0) {
           const owner = this.players.find((p) => p.id === z.owner) ?? null;
-          for (const e of this.enemies) {
+          for (const e of this.targetsFor(z.owner)) {
             if (e.dead || e.hidden) continue;
             if ((e.x - z.x) ** 2 + (e.y - z.y) ** 2 <= (z.r + e.r) ** 2) {
               hitEnemy(this, e, owner, z.dmg, z.type, { status: z.skill?.status, skill: z.skill });
@@ -731,7 +745,7 @@ export class GameSim {
     this.zones = keep;
   }
 
-  private updateStrikes(dt: number) {
+  protected updateStrikes(dt: number) {
     const keep: Strike[] = [];
     for (const s of this.strikes) {
       s.t -= dt;
@@ -750,7 +764,7 @@ export class GameSim {
         continue;
       }
       this.emit(['boom', Math.round(s.x), Math.round(s.y), Math.round(s.r), s.fx]);
-      for (const e of this.enemies.slice()) {
+      for (const e of this.targetsFor(s.owner).slice()) {
         if (e.dead || e.hidden) continue;
         if (Math.hypot(e.x - s.x, e.y - s.y) <= s.r + e.r) {
           hitEnemy(this, e, owner, s.dmg, s.type, { crit: s.skill?.crit, status: s.skill?.status, knock: s.skill?.knock, kx: e.x - s.x, ky: e.y - s.y, skill: s.skill });
@@ -933,6 +947,7 @@ export class GameSim {
         waves: p.stats.waves,
         forms: p.stats.forms,
       },
+      build: buildOf(p),
     };
   }
 

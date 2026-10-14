@@ -4,3 +4,4 @@ dist-server/
 *.log
 .DS_Store
 .vite/
+data/
