@@ -1,13 +1,17 @@
 import './style.css';
 import { ENEMIES } from '../shared/enemies';
 import { LINES, type LineId } from '../shared/pokemon';
-import { PROTOCOL_VERSION, type C2S, type LobbyPlayer } from '../shared/protocol';
+import type { DifficultyId } from '../shared/difficulty';
+import { PROTOCOL_VERSION, type C2S, type LobbyPlayer, type ServerStats } from '../shared/protocol';
 import type { MeState, PublicState } from '../shared/sim/game';
 import { BIOMES } from '../shared/waves';
 import { initAudio, playMusic, setVolume, sfx } from './audio';
 import { GameView } from './game/view';
 import { Animator, dirRow, preload } from './gfx/sprites';
+import { iconUrl } from './gfx/icons';
+import { ITEMS } from '../shared/items';
 import { BORDER, arenaCanvas } from './gfx/tiles';
+import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
 import { LocalTransport, WsTransport, type Incoming, type Transport } from './net';
 import { applyRun, loadProfile, type Profile } from './save';
@@ -15,7 +19,7 @@ import { $, clear, toast } from './ui/dom';
 import { Hud } from './ui/hud';
 import { Intermission } from './ui/intermission';
 import {
-  achievementsScreen, creditsScreen, labScreen, lobbyScreen, pauseScreen, resultsScreen, selectScreen, settingsScreen, titleScreen,
+  BrowseScreen, achievementsScreen, creditsScreen, labScreen, lobbyScreen, onlineText, pauseScreen, resultsScreen, selectScreen, settingsScreen, titleScreen,
 } from './ui/screens';
 
 /** 触屏设备开局时尝试全屏并锁定横屏（需要在点击事件里调用）。 */
@@ -32,28 +36,41 @@ class App {
   canvas = $('#game') as HTMLCanvasElement;
   screen = $('#screen');
   ui = $('#ui');
+  /** 当前对局使用的连接：单人是 LocalTransport，联机是常驻的 ws */
   t: Transport | null = null;
+  /** 常驻的联机连接：用于在线人数统计、联机大厅和房间 */
+  ws: WsTransport | null = null;
+  stats: ServerStats | null = null;
+  private browser: BrowseScreen | null = null;
+  private joining = false;
   you = 0;
   code = '';
   solo = false;
   lobby: LobbyPlayer[] = [];
+  roomDifficulty: DifficultyId = 'easy';
+  roomPublic = true;
   pendingLine: LineId | null = null;
+  pendingDifficulty: DifficultyId = 'easy';
   view: GameView | null = null;
   hud: Hud | null = null;
   inter: Intermission | null = null;
   me: MeState | null = null;
   pub: PublicState | null = null;
   paused = false;
-  where: 'menu' | 'lobby' | 'game' | 'results' = 'menu';
+  where: 'menu' | 'browse' | 'lobby' | 'game' | 'results' = 'menu';
   private menu = new MenuScene(this.canvas);
 
   start() {
     initInput(this.canvas);
+    initGamepad({
+      pause: () => { if (this.where === 'game' && this.solo && this.pub?.phase === 'wave') this.setPause(!this.paused); },
+    });
     this.applySettings();
     const unlock = () => { initAudio(); setVolume(this.profile.settings.volume, this.profile.settings.music); };
     playMusic('shop');
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
+    window.addEventListener('gamepadconnected', unlock);
     window.addEventListener('keydown', (e) => {
       if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && this.where === 'game' && this.solo && this.pub?.phase === 'wave') this.setPause(!this.paused);
     });
@@ -69,9 +86,11 @@ class App {
     portrait.addEventListener('change', onOrient);
     $('#rotate-fs').addEventListener('click', () => mobileFullscreen());
     this.menu.start();
+    this.ensureWs();
     this.title();
     void preload(ALL_DEX);
     const params = new URLSearchParams(location.search);
+    if (params.has('debug')) Object.assign(window, { __send: (m: C2S) => this.send(m), __icons: { iconUrl, ITEMS } });
     const room = params.get('room');
     if (room && /^\d{5}$/.test(room)) this.joinRoom(room);
   }
@@ -83,45 +102,107 @@ class App {
     if (this.view) this.view.settings = s;
   }
 
+  // ------------------------------------------------------------ 常驻联机连接
+
+  private wsRetry = 0;
+  private ensureWs() {
+    if (this.ws) return this.ws;
+    const ws = new WsTransport();
+    this.ws = ws;
+    ws.onOpen = () => {
+      this.wsRetry = 0;
+      ws.send({ t: 'stats' });
+      if (this.where === 'browse') ws.send({ t: 'browse', on: true });
+      this.browser?.setStats(this.stats, true);
+    };
+    ws.onMessage = (m) => {
+      if (!(m instanceof ArrayBuffer) && (m.t === 'rooms' || m.t === 'stats')) {
+        this.stats = m.stats;
+        const el = document.getElementById('title-online');
+        if (el) el.textContent = onlineText(this.stats);
+        this.browser?.setStats(this.stats, true);
+        if (m.t === 'rooms') this.browser?.setRooms(m.rooms);
+        return;
+      }
+      if (this.t === ws) this.onMessage(m);
+    };
+    ws.onClose = (reason) => {
+      if (this.ws === ws) this.ws = null;
+      this.stats = null;
+      this.browser?.setStats(null, false);
+      if (this.t === ws) {
+        toast(reason, 'error', 4000);
+        this.t = null;
+        this.leaveGame();
+        this.title();
+      }
+      // 服务器重启或网络波动时自动重连
+      const delay = Math.min(30000, 2000 * 2 ** this.wsRetry++);
+      window.setTimeout(() => this.ensureWs(), delay);
+    };
+    return ws;
+  }
+
   // ------------------------------------------------------------ 菜单
 
   title() {
     this.where = 'menu';
+    this.browser = null;
     if (location.search.includes('room=')) history.replaceState(null, '', location.pathname);
     this.screen.classList.remove('hidden');
     titleScreen(this.screen, this.profile, {
       solo: () => this.select(),
-      create: () => this.createRoom(),
+      browse: () => this.browse(),
       join: (code) => this.joinRoom(code),
       lab: () => labScreen(this.screen, this.profile, () => this.title()),
       achievements: () => achievementsScreen(this.screen, this.profile, () => this.title()),
       settings: () => settingsScreen(this.screen, this.profile, () => this.applySettings(), () => this.title()),
       credits: () => creditsScreen(this.screen, () => this.title()),
-    });
+    }, this.stats);
+    this.ws?.send({ t: 'stats' });
   }
 
   select() {
-    selectScreen(this.screen, this.profile, (line) => this.startSolo(line), () => this.title());
+    selectScreen(this.screen, this.profile, (line, diff) => this.startSolo(line, diff), () => this.title());
+  }
+
+  /** 联机大厅：房间列表 + 在线人数 */
+  browse() {
+    this.where = 'browse';
+    this.screen.classList.remove('hidden');
+    const ws = this.ensureWs();
+    this.browser = new BrowseScreen(this.screen, {
+      create: (pub) => this.createRoom(pub),
+      join: (code) => this.joinRoom(code),
+      back: () => { this.ws?.send({ t: 'browse', on: false }); this.title(); },
+    }, ws.connected);
+    if (this.stats) this.browser.setStats(this.stats, ws.connected);
+    if (ws.connected) ws.send({ t: 'browse', on: true });
   }
 
   private meta() { return { ...this.profile.upgrades }; }
   private name() { return this.profile.name || '训练家'; }
 
-  startSolo(line: LineId) {
+  startSolo(line: LineId, difficulty: DifficultyId) {
     mobileFullscreen();
     this.close();
     this.solo = true;
     this.pendingLine = line;
-    this.open(new LocalTransport());
+    this.pendingDifficulty = difficulty;
+    const t = new LocalTransport();
+    this.t = t;
+    t.onMessage = (m) => this.onMessage(m);
     this.send({ t: 'create', name: this.name(), meta: this.meta(), v: PROTOCOL_VERSION });
   }
 
-  createRoom() {
+  createRoom(isPublic = true) {
     mobileFullscreen();
     this.close();
     this.solo = false;
-    this.open(new WsTransport());
-    this.send({ t: 'create', name: this.name(), meta: this.meta(), v: PROTOCOL_VERSION });
+    this.joining = true;
+    this.t = this.ensureWs();
+    this.browser = null;
+    this.send({ t: 'create', name: this.name(), meta: this.meta(), v: PROTOCOL_VERSION, public: isPublic });
     this.loading('正在创建房间…');
   }
 
@@ -129,7 +210,9 @@ class App {
     if (navigator.userActivation?.isActive) mobileFullscreen();
     this.close();
     this.solo = false;
-    this.open(new WsTransport());
+    this.joining = true;
+    this.t = this.ensureWs();
+    this.browser = null;
     this.send({ t: 'join', code, name: this.name(), meta: this.meta(), v: PROTOCOL_VERSION });
     this.loading(`正在加入房间 ${code}…`);
   }
@@ -140,20 +223,12 @@ class App {
     this.screen.innerHTML = `<div class="box"><h3>${text}</h3></div>`;
   }
 
-  private open(t: Transport) {
-    this.t = t;
-    t.onMessage = (m) => this.onMessage(m);
-    t.onClose = (reason) => {
-      if (this.t !== t) return;
-      toast(reason, 'error', 4000);
-      this.leaveGame();
-      this.t = null;
-      this.title();
-    };
-  }
-
+  /** 结束当前会话：单人关闭本地模拟，联机只是离开房间（连接保留） */
   close() {
-    if (this.t) { const t = this.t; this.t = null; t.close(); }
+    const t = this.t;
+    this.t = null;
+    if (t instanceof LocalTransport) t.close();
+    else if (t) t.send({ t: 'leave' });
     this.leaveGame();
   }
 
@@ -167,19 +242,28 @@ class App {
       case 'joined':
         this.you = m.you;
         this.code = m.code;
+        this.joining = false;
         if (this.solo && this.pendingLine) {
           this.send({ t: 'pick', line: this.pendingLine });
+          this.send({ t: 'difficulty', id: this.pendingDifficulty });
           this.send({ t: 'start' });
         }
         break;
       case 'lobby':
         this.lobby = m.players;
-        if (!this.solo && (this.where === 'menu' || this.where === 'lobby')) this.showLobby();
+        this.roomDifficulty = m.difficulty;
+        this.roomPublic = m.public;
+        if (!this.solo && (this.where === 'menu' || this.where === 'browse' || this.where === 'lobby')) this.showLobby();
         break;
       case 'error':
         toast(m.msg, 'error', 3500);
         sfx('error');
-        if (m.fatal) { this.close(); this.title(); }
+        if (this.joining || m.fatal) {
+          this.joining = false;
+          if (this.t === this.ws) this.t = null;
+          if (!this.solo) this.browse();
+          else this.title();
+        }
         break;
       case 'start': this.beginGame(m.w, m.h, m.players); break;
       case 'ev': this.view?.onEvents(m.e); break;
@@ -188,19 +272,22 @@ class App {
       case 'cmdErr': toast(m.msg, 'error'); sfx('error'); break;
       case 'paused': this.paused = m.on; this.renderPause(); break;
       case 'end': this.endGame(m.victory, m.summary, m.board); break;
-      case 'pong': break;
+      case 'pong': case 'left': case 'rooms': case 'stats': break;
     }
   }
 
   private showLobby() {
     this.where = 'lobby';
+    this.browser = null;
     this.screen.classList.remove('hidden');
     lobbyScreen(this.screen, this.profile, this.code, this.you, this.lobby, {
       pick: (line) => this.send({ t: 'pick', line }),
       ready: (on) => this.send({ t: 'ready', on }),
       start: () => this.send({ t: 'start' }),
-      leave: () => { this.close(); this.title(); },
-    });
+      leave: () => { this.close(); this.browse(); },
+      difficulty: (id) => this.send({ t: 'difficulty', id }),
+      visibility: (on) => this.send({ t: 'visibility', public: on }),
+    }, this.roomDifficulty, this.roomPublic);
     history.replaceState(null, '', `?room=${this.code}`);
   }
 

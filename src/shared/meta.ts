@@ -1,3 +1,4 @@
+import { DIFFICULTIES, type DifficultyId } from './difficulty';
 import type { LineId } from './pokemon';
 import type { Mods } from './stats';
 
@@ -54,6 +55,9 @@ export function metaBonus(levels: Record<string, number> | undefined): MetaBonus
 /** 一局结束后服务器发给每位玩家的战绩，用于成就判定与星之沙结算。 */
 export interface RunSummary {
   line: LineId;
+  difficulty: DifficultyId;
+  /** 有进化型的精灵全程没有进化 */
+  neverEvolved: boolean;
   wavesCleared: number;
   victory: boolean;
   kills: number;
@@ -87,6 +91,8 @@ export interface AchievementDef {
   desc: string;
   reward: number;
   unlocks?: LineId;
+  /** 解锁的难度（仅用于展示） */
+  unlocksDifficulty?: DifficultyId;
   check: (r: RunSummary, s: LifetimeStats) => boolean;
 }
 
@@ -97,7 +103,10 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'final_form', name: '最终形态', desc: '进化到最终形态', reward: 60, check: (r) => r.finalForm },
   { id: 'beat_snorlax', name: '叫醒卡比兽', desc: '击败第 10 波首领卡比兽', reward: 100, check: (r) => r.bossKills.includes('snorlax') },
   { id: 'reach_wave_15', name: '月见山探险家', desc: '完成第 15 波', reward: 150, check: (r) => r.wavesCleared >= 15 },
-  { id: 'victory', name: '宝可梦大师', desc: '击败梦幻，通关第 20 波（解锁超梦）', reward: 300, unlocks: 'mewtwo', check: (r) => r.victory },
+  { id: 'victory', name: '宝可梦大师', desc: '击败梦幻，通关任意难度（解锁普通难度）', reward: 300, unlocksDifficulty: 'normal', check: (r) => r.victory },
+  { id: 'victory_normal', name: '道馆馆主', desc: '通关普通模式（解锁困难难度）', reward: 400, unlocksDifficulty: 'hard', check: (r) => r.victory && r.difficulty !== 'easy' },
+  { id: 'victory_hard', name: '冠军之路', desc: '通关困难模式（解锁超梦）', reward: 600, unlocks: 'mewtwo', check: (r) => r.victory && r.difficulty === 'hard' },
+  { id: 'no_evolve_win', name: '坚持自我', desc: '用会进化的宝可梦不进化通关', reward: 150, check: (r) => r.victory && r.neverEvolved },
   { id: 'full_slots', name: '技能大师', desc: '技能栏全部填满', reward: 30, check: (r) => r.skillsFull },
   { id: 'foreign', name: '博采众长', desc: '学会一个不在自身技能表中的技能', reward: 30, check: (r) => r.foreignSkill },
   { id: 'collector', name: '道具收藏家', desc: '一局中持有 12 件道具', reward: 50, check: (r) => r.items >= 12 },
@@ -121,6 +130,6 @@ export function stardustFor(r: RunSummary): number {
   if (r.bossKills.includes('snorlax')) s += 40;
   if (r.bossKills.includes('mew')) s += 120;
   if (r.victory) s += 150;
-  if (r.players > 1) s = Math.round(s * 1.2);
-  return s;
+  if (r.players > 1) s *= 1.2;
+  return Math.round(s * DIFFICULTIES[r.difficulty].stardust);
 }

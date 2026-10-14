@@ -4,6 +4,13 @@ let joy: { id: number; sx: number; sy: number; x: number; y: number } | null = n
 let joyEl: HTMLElement | null = null;
 let knobEl: HTMLElement | null = null;
 let enabled = false;
+const pad = { x: 0, y: 0 };
+
+/** 手柄摇杆 / 十字键的方向（由 gamepad.ts 每帧写入） */
+export function setPadVector(x: number, y: number) {
+  pad.x = x;
+  pad.y = y;
+}
 
 export function initInput(canvas: HTMLCanvasElement) {
   window.addEventListener('keydown', (e) => {
@@ -72,6 +79,7 @@ export function moveVector(): { x: number; y: number } {
   if (keys.has('KeyD') || keys.has('ArrowRight')) x += 1;
   if (keys.has('KeyW') || keys.has('ArrowUp')) y -= 1;
   if (keys.has('KeyS') || keys.has('ArrowDown')) y += 1;
+  if (!x && !y && (pad.x || pad.y)) { x = pad.x; y = pad.y; }
   if (joy) {
     const dx = joy.x - joy.sx, dy = joy.y - joy.sy;
     const d = Math.hypot(dx, dy);

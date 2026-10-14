@@ -28,6 +28,8 @@ export class WsTransport implements Transport {
   private closed = false;
   onMessage: (m: Incoming) => void = () => {};
   onClose: (reason: string) => void = () => {};
+  onOpen: () => void = () => {};
+  get connected() { return this.ws.readyState === WebSocket.OPEN; }
 
   constructor() {
     this.ws = new WebSocket(serverUrl());
@@ -35,6 +37,7 @@ export class WsTransport implements Transport {
     this.ws.onopen = () => {
       for (const q of this.queue) this.ws.send(q);
       this.queue = [];
+      this.onOpen();
     };
     this.ws.onmessage = (ev) => {
       if (typeof ev.data === 'string') {
@@ -77,6 +80,7 @@ export class LocalTransport implements Transport {
   constructor() {
     const params = new URLSearchParams(location.search);
     if (params.has('debug')) {
+      Room.allowDebug = true;
       (window as unknown as { __room: Room }).__room = this.room;
       // 调试：?debug=1&skills=ember,surf,... 开局直接装备这些技能，方便查看特效
       const skills = (params.get('skills') ?? '').split(',').filter((id) => SKILLS[id]);

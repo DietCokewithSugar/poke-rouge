@@ -1,18 +1,19 @@
 import { ACHIEVEMENTS, META_UPGRADES, metaCost, type RunSummary } from '../../shared/meta';
 import { LINES, LINE_IDS, type LineId } from '../../shared/pokemon';
-import type { LobbyPlayer } from '../../shared/protocol';
+import { DIFFICULTIES, DIFFICULTY_IDS, type DifficultyId } from '../../shared/difficulty';
+import type { LobbyPlayer, RoomInfo, ServerStats } from '../../shared/protocol';
 import { SKILLS } from '../../shared/skills';
 import { TYPE_NAME } from '../../shared/types';
 import { sfx } from '../audio';
 import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
-import { buyUpgrade, isUnlocked, refundUpgrades, saveProfile, type Profile, type RunReward } from '../save';
+import { buyUpgrade, isDifficultyUnlocked, isUnlocked, refundUpgrades, saveProfile, type Profile, type RunReward } from '../save';
 import { clear, h, tip, toast } from './dom';
 import { STAT_LABEL_6, skillIcon, skillInfo, typeBadge } from './describe';
 
 export interface TitleActions {
   solo(): void;
-  create(): void;
+  browse(): void;
   join(code: string): void;
   lab(): void;
   achievements(): void;
@@ -20,7 +21,7 @@ export interface TitleActions {
   credits(): void;
 }
 
-export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions) {
+export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stats: ServerStats | null) {
   clear(root);
   const name = h('input', { class: 'field', maxlength: 12, placeholder: '训练家名字', value: p.name }) as HTMLInputElement;
   name.addEventListener('change', () => { p.name = name.value.trim().slice(0, 12); saveProfile(p); });
@@ -34,7 +35,8 @@ export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions) {
       h('label', null, '训练家名字'),
       name,
       h('button', { class: 'menu-item play', onclick: () => { keepName(); sfx('click'); a.solo(); } }, '单人冒险', h('small', null, '选择一只宝可梦，挑战 20 波野生宝可梦')),
-      h('button', { class: 'menu-item', onclick: () => { keepName(); sfx('click'); a.create(); } }, '创建房间', h('small', null, '最多 4 人联机，把房间号发给朋友')),
+      h('button', { class: 'menu-item', onclick: () => { keepName(); sfx('click'); a.browse(); } }, '联机大厅',
+        h('small', { id: 'title-online' }, onlineText(stats))),
       h('div', { class: 'join-row' },
         code,
         h('button', { class: 'btn', onclick: () => { keepName(); if (code.value.length !== 5) { toast('请输入 5 位房间号', 'error'); return; } sfx('click'); a.join(code.value); } }, '加入房间'),
@@ -104,18 +106,44 @@ export function pickGrid(p: Profile, selected: LineId | null, onPick: (l: LineId
   }));
 }
 
-export function selectScreen(root: HTMLElement, p: Profile, onStart: (l: LineId) => void, onBack: () => void) {
+/** 难度选择：未解锁的显示锁定与解锁条件 */
+export function difficultyPicker(p: Profile, current: DifficultyId, onPick: ((d: DifficultyId) => void) | null) {
+  return h('div', { class: 'diff-row' },
+    h('span', { class: 'muted' }, '难度'),
+    DIFFICULTY_IDS.map((id) => {
+      const D = DIFFICULTIES[id];
+      const open = isDifficultyUnlocked(p, id);
+      const el = h('button', {
+        class: `diff ${current === id ? 'on' : ''} ${open ? '' : 'locked'}`,
+        style: `--dc:${D.color}`,
+        disabled: !onPick && current !== id,
+        onclick: () => {
+          if (!onPick) return;
+          if (!open) { toast(D.unlockHint, 'error'); sfx('error'); return; }
+          sfx('click');
+          onPick(id);
+        },
+      }, D.name, open ? null : h('i', null, '未解锁'));
+      tip(el, () => h('div', { class: 'info' }, h('b', null, `${D.name}模式`), ...D.desc.map((d) => h('div', { class: 'small' }, d)), h('div', { class: 'small gold' }, `星之沙 ×${D.stardust}`), open ? null : h('div', { class: 'small neg' }, D.unlockHint)));
+      return el;
+    }),
+  );
+}
+
+export function selectScreen(root: HTMLElement, p: Profile, onStart: (l: LineId, d: DifficultyId) => void, onBack: () => void) {
   let sel: LineId = isUnlocked(p, p.lastLine) ? p.lastLine : 'charmander';
+  let diff: DifficultyId = isDifficultyUnlocked(p, p.lastDifficulty) ? p.lastDifficulty : 'easy';
   const render = () => {
     clear(root);
     root.appendChild(h('div', { class: 'box select' },
       h('div', { class: 'row between' },
         h('h2', null, '选择你的伙伴'),
         h('div', { class: 'row' },
-          h('button', { class: 'btn small ghost', onclick: onBack }, '返回'),
-          h('button', { class: 'btn gold', onclick: () => { p.lastLine = sel; saveProfile(p); sfx('wave'); onStart(sel); } }, `就决定是你了，${LINES[sel].name}！`),
+          h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回'),
+          h('button', { class: 'btn gold', onclick: () => { p.lastLine = sel; p.lastDifficulty = diff; saveProfile(p); sfx('wave'); onStart(sel, diff); } }, `就决定是你了，${LINES[sel].name}！`),
         ),
       ),
+      difficultyPicker(p, diff, (d) => { diff = d; render(); }),
       pickGrid(p, sel, (l) => { sel = l; render(); }),
       lineDetail(sel),
     ));
@@ -131,9 +159,20 @@ function copy(text: string, ok: string) {
   else prompt('复制下面的内容：', text);
 }
 
-export interface LobbyActions { pick(l: LineId): void; ready(on: boolean): void; start(): void; leave(): void }
+export function onlineText(stats: ServerStats | null) {
+  return stats ? `当前在线 ${stats.online} 人 · ${stats.rooms} 个房间 · 最多 4 人联机` : '最多 4 人联机 · 查看房间列表、创建或加入房间';
+}
 
-export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: number, players: LobbyPlayer[], a: LobbyActions) {
+export interface LobbyActions {
+  pick(l: LineId): void;
+  ready(on: boolean): void;
+  start(): void;
+  leave(): void;
+  difficulty(id: DifficultyId): void;
+  visibility(on: boolean): void;
+}
+
+export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: number, players: LobbyPlayer[], a: LobbyActions, difficulty: DifficultyId, isPublic: boolean) {
   clear(root);
   const me = players.find((x) => x.id === you);
   const taken = new Map<LineId, string>();
@@ -153,12 +192,17 @@ export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: nu
     h('div', { class: 'row between' },
       h('div', null, h('div', { class: 'muted small' }, '房间号'), h('div', { class: 'room-code' }, code)),
       h('div', { class: 'row' },
+        me?.host
+          ? h('button', { class: `btn small ${isPublic ? '' : 'ghost'}`, title: '公开房间会出现在联机大厅的列表里', onclick: () => a.visibility(!isPublic) }, isPublic ? '公开房间' : '私密房间')
+          : h('span', { class: 'muted small' }, isPublic ? '公开房间' : '私密房间'),
         h('button', { class: 'btn small', onclick: () => copy(code, '房间号已复制') }, '复制房间号'),
         h('button', { class: 'btn small', onclick: () => copy(`${location.origin}${location.pathname}?room=${code}`, '邀请链接已复制，发给朋友直接打开即可加入') }, '复制邀请链接'),
-        h('button', { class: 'btn small ghost', onclick: a.leave }, '离开房间'),
+        h('button', { class: 'btn small ghost', 'data-back': '1', onclick: a.leave }, '离开房间'),
       ),
     ),
     h('div', { class: 'slots' }, slots),
+    difficultyPicker(p, difficulty, me?.host ? (d) => a.difficulty(d) : null),
+    me?.host ? null : h('p', { class: 'muted small' }, '难度由房主决定。'),
     h('h3', null, '选择你的宝可梦'),
     pickGrid(p, me?.line ?? null, (l) => a.pick(l), taken),
     me?.line ? lineDetail(me.line) : h('p', { class: 'sub' }, '点击上方的宝可梦进行选择（可以和队友重复）'),
@@ -170,12 +214,80 @@ export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: nu
   ));
 }
 
+// ---------------------------------------------------------------- 联机大厅（匹配）
+
+export interface BrowseActions { create(isPublic: boolean): void; join(code: string): void; back(): void }
+
+export class BrowseScreen {
+  private list = h('div', { class: 'room-list' });
+  private statsEl = h('div', { class: 'browse-stats' });
+  private isPublic = true;
+  constructor(root: HTMLElement, private a: BrowseActions, connected: boolean) {
+    clear(root);
+    const code = h('input', { class: 'field code', maxlength: 5, inputmode: 'numeric', placeholder: '房间号' }) as HTMLInputElement;
+    code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 5); });
+    const join = () => { if (code.value.length !== 5) { toast('请输入 5 位房间号', 'error'); return; } sfx('click'); a.join(code.value); };
+    code.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
+    const pubBtn = h('button', { class: 'btn small', onclick: () => { this.isPublic = !this.isPublic; pubBtn.textContent = this.isPublic ? '公开房间' : '私密房间'; pubBtn.classList.toggle('ghost', !this.isPublic); } }, '公开房间');
+    root.appendChild(h('div', { class: 'box browse' },
+      h('div', { class: 'row between' },
+        h('div', null, h('h2', null, '联机大厅'), this.statsEl),
+        h('button', { class: 'btn small ghost', 'data-back': '1', onclick: a.back }, '返回'),
+      ),
+      h('div', { class: 'browse-actions row between' },
+        h('div', { class: 'row' }, h('button', { class: 'btn gold', onclick: () => { sfx('click'); a.create(this.isPublic); } }, '创建房间'), pubBtn),
+        h('div', { class: 'row' }, code, h('button', { class: 'btn', onclick: join }, '加入房间')),
+      ),
+      h('h3', null, '公开房间'),
+      this.list,
+    ));
+    this.setStats(null, connected);
+    this.setRooms([]);
+  }
+
+  setStats(st: ServerStats | null, connected = true) {
+    clear(this.statsEl);
+    if (!connected) { this.statsEl.appendChild(h('span', { class: 'neg' }, '正在连接联机服务器……')); return; }
+    if (!st) return;
+    this.statsEl.append(
+      h('span', { class: 'stat-pill' }, h('b', null, st.online), ' 人在线'),
+      h('span', { class: 'stat-pill' }, h('b', null, st.playing), ' 人游戏中'),
+      h('span', { class: 'stat-pill' }, h('b', null, st.rooms), ' 个房间'),
+    );
+  }
+
+  setRooms(rooms: RoomInfo[]) {
+    clear(this.list);
+    if (!rooms.length) {
+      this.list.appendChild(h('div', { class: 'room-empty muted' }, '还没有公开房间，创建一个等朋友加入吧！'));
+      return;
+    }
+    for (const r of rooms) {
+      const full = r.players.length >= r.max;
+      const D = DIFFICULTIES[r.difficulty];
+      this.list.appendChild(h('div', { class: `room-card ${r.inGame ? 'busy' : ''}` },
+        h('div', { class: 'room-main' },
+          h('div', { class: 'room-title' }, h('b', null, `${r.host} 的房间`), h('span', { class: 'muted small' }, ` #${r.code}`)),
+          h('div', { class: 'room-mons' }, r.players.map((pl) => h('div', { class: 'room-mon', title: pl.name }, pl.line ? Animator.portrait(LINES[pl.line].forms[0].dex, 1) : h('span', { class: 'slot-q small' }, '?'), h('span', { class: 'small' }, pl.name)))),
+        ),
+        h('div', { class: 'room-side' },
+          h('span', { class: 'diff-tag', style: `--dc:${D.color}` }, D.name),
+          h('span', { class: 'small' }, `${r.players.length}/${r.max} 人`),
+          h('span', { class: `small ${r.inGame ? 'gold' : 'ok'}` }, r.inGame ? `游戏中 · 第 ${r.wave} 波` : '等待中'),
+          h('button', { class: 'btn small', disabled: r.inGame || full, onclick: () => { sfx('click'); this.a.join(r.code); } }, r.inGame ? '进行中' : full ? '已满' : '加入'),
+        ),
+      ));
+    }
+  }
+}
+
 // ---------------------------------------------------------------- 结算
 
 export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: { id: number; name: string; line: LineId; level: number; kills: number; damage: number }[], you: number, onContinue: () => void, label: string) {
   clear(root);
   root.appendChild(h('div', { class: 'box results' },
     h('h2', { class: victory ? 'gold' : '' }, victory ? '通关！你是真正的宝可梦大师！' : '眼前一片漆黑……'),
+    s ? h('div', { class: 'muted' }, `${DIFFICULTIES[s.difficulty].name}模式 · ${LINES[s.line].name}`) : null,
     s ? h('div', { class: 'result-grid' },
       h('div', null, h('span', { class: 'muted' }, '完成波次'), h('b', null, `${s.wavesCleared} / 20`)),
       h('div', null, h('span', { class: 'muted' }, '等级'), h('b', null, `Lv${s.level}`)),
@@ -187,7 +299,12 @@ export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary
     reward ? h('div', { class: 'reward' }, iconImg('stardust', 3), `获得星之沙 +${reward.stardust}`) : null,
     reward?.newAchievements.length ? h('div', { class: 'new-ach' },
       h('h3', null, '达成新成就！'),
-      reward.newAchievements.map((a) => h('div', { class: 'ach on' }, h('b', null, a.name), ` +${a.reward} 星之沙`, a.unlocks ? h('span', { class: 'gold' }, ` · 解锁 ${LINES[a.unlocks].name}！`) : null)),
+      reward.newAchievements.map((a) => {
+        const def = ACHIEVEMENTS.find((x) => x.id === a.id);
+        return h('div', { class: 'ach on' }, h('b', null, a.name), ` +${a.reward} 星之沙`,
+          a.unlocks ? h('span', { class: 'gold' }, ` · 解锁 ${LINES[a.unlocks].name}！`) : null,
+          def?.unlocksDifficulty ? h('span', { class: 'gold' }, ` · 解锁${DIFFICULTIES[def.unlocksDifficulty].name}难度！`) : null);
+      }),
     ) : null,
     board.length > 1 ? h('table', { class: 'board' },
       h('tr', null, h('th', null, '训练家'), h('th', null, '宝可梦'), h('th', null, '等级'), h('th', null, '击败'), h('th', null, '伤害')),
@@ -205,7 +322,7 @@ export function labScreen(root: HTMLElement, p: Profile, onBack: () => void) {
     root.appendChild(h('div', { class: 'box lab' },
       h('div', { class: 'row between' },
         h('div', null, h('h2', null, '大木研究所'), h('p', { class: 'sub' }, '用冒险中获得的星之沙，永久强化所有宝可梦的基础属性。')),
-        h('div', { class: 'row' }, h('div', { class: 'money big' }, `星之沙 ${p.stardust}`), h('button', { class: 'btn small ghost', onclick: onBack }, '返回')),
+        h('div', { class: 'row' }, h('div', { class: 'money big' }, `星之沙 ${p.stardust}`), h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回')),
       ),
       h('div', { class: 'lab-grid' }, META_UPGRADES.map((u) => {
         const lv = p.upgrades[u.id] ?? 0;
@@ -230,12 +347,12 @@ export function labScreen(root: HTMLElement, p: Profile, onBack: () => void) {
 export function achievementsScreen(root: HTMLElement, p: Profile, onBack: () => void) {
   clear(root);
   root.appendChild(h('div', { class: 'box ach-screen' },
-    h('div', { class: 'row between' }, h('h2', null, `成就 ${Object.keys(p.achievements).length} / ${ACHIEVEMENTS.length}`), h('button', { class: 'btn small ghost', onclick: onBack }, '返回')),
+    h('div', { class: 'row between' }, h('h2', null, `成就 ${Object.keys(p.achievements).length} / ${ACHIEVEMENTS.length}`), h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回')),
     h('div', { class: 'muted small' }, `累计：${p.stats.runs} 局 · 通关 ${p.stats.wins} 次 · 击败 ${p.stats.kills} 只 · 最佳 ${p.stats.bestWave} 波`),
     h('div', { class: 'ach-list' }, ACHIEVEMENTS.map((a) => h('div', { class: `ach ${p.achievements[a.id] ? 'on' : ''}` },
       h('b', null, p.achievements[a.id] ? '★ ' : '☆ ', a.name),
       h('span', { class: 'small' }, a.desc),
-      h('span', { class: 'small gold' }, `+${a.reward} 星之沙${a.unlocks ? ` · 解锁${LINES[a.unlocks].name}` : ''}`),
+      h('span', { class: 'small gold' }, `+${a.reward} 星之沙${a.unlocks ? ` · 解锁${LINES[a.unlocks].name}` : ''}${a.unlocksDifficulty ? ` · 解锁${DIFFICULTIES[a.unlocksDifficulty].name}难度` : ''}`),
     ))),
   ));
 }
@@ -255,7 +372,7 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
     return h('label', { class: 'set-row' }, h('span', null, label), inp);
   };
   root.appendChild(h('div', { class: 'box settings' },
-    h('div', { class: 'row between' }, h('h2', null, '设置'), h('button', { class: 'btn small ghost', onclick: onBack }, '返回')),
+    h('div', { class: 'row between' }, h('h2', null, '设置'), h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回')),
     slider('音效音量', 'volume'),
     slider('音乐音量', 'music'),
     toggle('显示伤害数字', 'damageNumbers'),
@@ -267,16 +384,19 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
 export function creditsScreen(root: HTMLElement, onBack: () => void) {
   clear(root);
   root.appendChild(h('div', { class: 'box credits' },
-    h('div', { class: 'row between' }, h('h2', null, '说明与致谢'), h('button', { class: 'btn small ghost', onclick: onBack }, '返回')),
+    h('div', { class: 'row between' }, h('h2', null, '说明与致谢'), h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回')),
     h('h3', null, '玩法'),
     h('ul', null,
       h('li', null, '普通波次 30~60 秒，撑到倒计时结束就算过关；第 10 波和第 20 波是 90 秒的首领波。'),
       h('li', null, '技能会自动瞄准最近的敌人释放。物理技能吃「物攻」（偏近身），特殊技能吃「特攻」（偏远程）。'),
       h('li', null, '敌人的接触伤害由「物防」减免，弹幕与爆炸由「特防」减免。'),
       h('li', null, '属性克制只是锦上添花：效果拔群伤害 +10%，效果不好 -10%；和自身属性相同的技能有 1.5 倍本系加成。'),
-      h('li', null, '击败敌人掉落经验糖果（经验 + 金钱）。升级时选择强化，到达特定等级会进化并领悟新技能。'),
-      h('li', null, '每波结束后进入商店：购买道具、学习其它宝可梦的招式（越贵越高级）、刷新或锁定商品。'),
-      h('li', null, '联机时倒下的队友可以靠近救援；整局结束会获得星之沙，在大木研究所永久强化。'),
+      h('li', null, '击败敌人掉落经验糖果（经验 + 金钱）。升级时选择强化，到达特定等级会领悟新技能。'),
+      h('li', null, '等级够了以后，波次结束时会询问是否进化：可以按 B 取消，保持当前形态（配合进化奇石、不变之石更强），之后的商店里随时可以再进化。'),
+      h('li', null, '每波结束后进入商店：购买道具、学习其它宝可梦的招式（越贵越高级）、刷新或锁定商品。香水会吸引更多敌人（收获也更多），喷雾、玻璃哨和洁净之符能减少敌人。'),
+      h('li', null, '难度分简单 / 普通 / 困难：通关上一档才能解锁下一档，通关困难模式可以得到超梦。'),
+      h('li', null, '联机时倒下的队友身边会出现绿色救援圈，站进去就能把它救起来；整局结束会获得星之沙，在大木研究所永久强化。'),
+      h('li', null, '支持 Xbox / PlayStation 手柄：左摇杆或十字键移动，A 确认，B 返回，X 刷新商店，Y 出发，Start 暂停。'),
     ),
     h('h3', null, '致谢'),
     h('p', { class: 'small' }, '宝可梦像素精灵：PMDCollab / SpriteCollab 的众多画师（CC BY-NC 4.0，非商业使用），完整名单见仓库 CREDITS.md。'),

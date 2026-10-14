@@ -1,4 +1,4 @@
-import { ITEMS } from '../../shared/items';
+import { GROUP_NAME, ITEMS } from '../../shared/items';
 import { LINES, type LineId } from '../../shared/pokemon';
 import { CAT_NAME, SKILLS, TIER_COLOR, TIER_NAME, skillLevelCd, skillLevelDmg } from '../../shared/skills';
 import { MOD_LABEL, fmtMod, type ModKey } from '../../shared/stats';
@@ -53,7 +53,7 @@ export function itemInfo(id: string, count = 0) {
   const it = ITEMS[id];
   return h('div', { class: 'info' },
     h('div', { class: 'info-head' }, iconImg(it.icon, 2), h('b', null, it.name, count > 1 ? ` ×${count}` : ''), tierBadge(it.tier)),
-    it.tcg ? h('div', { class: 'muted small' }, '宝可梦卡牌 · 宝可梦道具') : null,
+    h('div', { class: 'muted small' }, GROUP_NAME[it.group]),
     ...itemLines(id).map((l) => h('div', { class: l.includes('-') && !l.includes('技能栏') ? 'neg' : 'pos' }, l)),
   );
 }
@@ -82,6 +82,7 @@ export const STAT_ROWS: [string, string, (v: number) => string][] = [
   ['physTaken', '承受物理伤害', (v) => `${v}%`],
   ['specTaken', '承受特殊伤害', (v) => `${v}%`],
   ['moveSpeed', '移动速度', (v) => String(v)],
+  ['enemies', '敌人数量', (v) => `${v >= 0 ? '+' : ''}${v}%`],
 ];
 
 export function statCardText(stat: ModKey, amount: number) {

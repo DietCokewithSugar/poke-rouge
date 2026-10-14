@@ -1,3 +1,4 @@
+import { ITEMS } from '../items';
 import { LINES, formOf } from '../pokemon';
 import { SKILLS, skillLevelCd, skillLevelDmg, type SkillDef } from '../skills';
 import { TYPES, gameEffectiveness, type PType } from '../types';
@@ -134,17 +135,23 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
     if (p.line === 'pikachu' && sim.rng.chance(0.3)) applyStatus(src, { kind: 'para', chance: 1, dur: 2 }, 0, p.id);
   }
   if (p.hp <= 0) {
+    const reviveItem = Object.keys(p.items).find((id) => ITEMS[id]?.special === 'revive' && p.items[id] > 0);
     if (p.items.focus_sash && !p.sashUsed) {
       p.hp = 1;
       p.sashUsed = true;
       p.invuln = 1;
       sim.emit(['txt', p.x, p.y - 26, '气势披带！', '#ffd23f']);
-    } else if (p.items.max_revive) {
-      delete p.items.max_revive;
-      p.hp = p.d.maxHp;
+    } else if (p.items.focus_band && sim.rng.chance(0.15)) {
+      p.hp = 1;
+      p.invuln = 1;
+      sim.emit(['txt', p.x, p.y - 26, '气势头带！', '#ffd23f']);
+    } else if (reviveItem) {
+      delete p.items[reviveItem];
+      p.hp = Math.max(1, Math.round(p.d.maxHp * (ITEMS[reviveItem].reviveHp ?? 1)));
       p.invuln = 2.5;
       sim.emit(['rev', p.id]);
-      sim.emit(['txt', p.x, p.y - 26, '活力块！', '#ffd23f']);
+      sim.emit(['txt', p.x, p.y - 26, `${ITEMS[reviveItem].name}！`, '#ffd23f']);
+      sim.recompute(p);
     } else {
       sim.downPlayer(p);
     }
@@ -194,7 +201,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
     case 'heal': return castHeal(sim, p, s);
     case 'shield': {
       if (!nearest(sim, p.x, p.y, range)) return false;
-      const mult = p.line === 'squirtle' ? 1.5 : 1;
+      const mult = (p.line === 'squirtle' ? 1.5 : 1) * (p.items.light_clay ? 1.6 : 1);
       p.shield = Math.max(p.shield, p.d.maxHp * (s.shield ?? 0.15) * mult);
       p.shieldT = s.duration ?? 4;
       sim.emit(['fx', s.fx, p.x, p.y, 0, 16, 0, p.id]);
@@ -348,7 +355,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
 }
 
 function castHeal(sim: GameSim, p: SimPlayer, s: SkillDef): boolean {
-  const mult = p.line === 'bulbasaur' ? 1.3 : 1;
+  const mult = (p.line === 'bulbasaur' ? 1.3 : 1) * (p.items.big_root ? 1.3 : 1);
   const targets = s.team
     ? sim.players.filter((q) => q.alive && !q.down && Math.hypot(q.x - p.x, q.y - p.y) <= (s.radius ?? 120))
     : [p];

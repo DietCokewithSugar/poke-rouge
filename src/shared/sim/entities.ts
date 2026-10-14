@@ -64,6 +64,8 @@ export interface SimPlayer {
   cards: LevelCard[] | null;
   cardRerolls: number;
   crates: string[];
+  /** 波次结束后要询问是否进化 */
+  evoPrompt: boolean;
   shop: ShopState;
   ready: boolean;
   castFlag: number;

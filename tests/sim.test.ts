@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ACHIEVEMENTS, metaBonus } from '../src/shared/meta';
-import { LINES, LINE_IDS } from '../src/shared/pokemon';
+import { LINES, LINE_IDS, formOf } from '../src/shared/pokemon';
 import { decodeSnapshot, encodeSnapshot } from '../src/shared/protocol';
 import { GameSim } from '../src/shared/sim/game';
-import { learnSkill } from '../src/shared/sim/player';
+import { learnSkill, levelUp } from '../src/shared/sim/player';
 import { SKILLS } from '../src/shared/skills';
 import { gameEffectiveness, rawEffectiveness } from '../src/shared/types';
 import { WAVES, waveDuration } from '../src/shared/waves';
@@ -158,4 +158,82 @@ test('最终波：必须击败梦幻才能通关', () => {
   sim.step(1 / 30);
   assert.equal(sim.phase, 'won');
   assert.ok(sim.summary(p).victory);
+});
+
+function toIntermission(sim: GameSim) {
+  sim.waveT = sim.waveDur;
+  sim.step(1 / 30);
+  assert.equal(sim.phase, 'inter');
+}
+
+test('进化可以选择：取消后保持形态，之后还能再进化', () => {
+  const sim = new GameSim([{ id: 1, name: 'a', line: 'charmander', meta: {} }], 11);
+  const p = sim.players[0];
+  for (let i = 0; i < 8; i++) levelUp(sim, p);
+  assert.equal(p.stage, 0, '战斗中不会自动进化');
+  toIntermission(sim);
+  assert.ok(sim.privateState(p).evo?.prompt, '波次结束后询问进化');
+  assert.ok(sim.command(1, { t: 'waveReady', on: true }), '不回答就不能出发');
+  assert.equal(sim.command(1, { t: 'evolve', yes: false }), null);
+  assert.equal(p.stage, 0);
+  assert.equal(sim.privateState(p).evo?.prompt, false);
+  assert.ok(sim.privateState(p).evo, '之后仍然可以进化');
+  assert.equal(sim.command(1, { t: 'evolve', yes: true }), null);
+  assert.equal(p.stage, 1);
+  assert.equal(formOf('charmander', p.stage).name, '火恐龙');
+});
+
+test('不变之石：不会再进化，并给予加成', () => {
+  const sim = new GameSim([{ id: 1, name: 'a', line: 'squirtle', meta: {} }], 12);
+  const p = sim.players[0];
+  const dmg0 = p.d.dmgMult;
+  sim.debugGive(1, 'everstone');
+  assert.ok(p.d.dmgMult > dmg0);
+  for (let i = 0; i < 20; i++) levelUp(sim, p);
+  toIntermission(sim);
+  assert.equal(sim.privateState(p).evo, null);
+  assert.ok(sim.command(1, { t: 'evolve', yes: true }));
+  assert.equal(p.stage, 0);
+});
+
+test('香水增加敌人、喷雾减少敌人', () => {
+  const count = (item?: string) => {
+    const sim = new GameSim([{ id: 1, name: 'a', line: 'mewtwo', meta: {} }], 21);
+    const p = sim.players[0];
+    if (item) sim.debugGive(1, item);
+    p.levelMods.maxHp += 99999;
+    sim.recompute(p);
+    let spawned = 0;
+    const orig = sim.spawnEnemy.bind(sim);
+    sim.spawnEnemy = (id: string, x: number, y: number) => { spawned++; return orig(id, x, y); };
+    for (let i = 0; i < 30 * 25; i++) { p.hp = p.d.maxHp; sim.step(1 / 30); }
+    return spawned;
+  };
+  const base = count(), lure = count('max_lure'), repel = count('max_repel');
+  assert.ok(lure > base * 1.15, `香水 ${lure} vs ${base}`);
+  assert.ok(repel < base * 0.9, `喷雾 ${repel} vs ${base}`);
+});
+
+test('难度：困难模式的敌人更强', () => {
+  const easy = new GameSim([{ id: 1, name: 'a', line: 'pikachu', meta: {} }], 3, 'easy');
+  const hard = new GameSim([{ id: 1, name: 'a', line: 'pikachu', meta: {} }], 3, 'hard');
+  const a = easy.spawnEnemy('machop', 100, 100), b = hard.spawnEnemy('machop', 100, 100);
+  assert.ok(b.maxHp > a.maxHp * 1.4);
+  assert.ok(b.dmg > a.dmg * 1.4);
+  assert.ok(b.speed > a.speed);
+  assert.equal(hard.publicState().difficulty, 'hard');
+});
+
+test('联机救援：站在倒下的队友身边把它救起来', () => {
+  const sim = new GameSim([{ id: 1, name: 'a', line: 'charmander', meta: {} }, { id: 2, name: 'b', line: 'squirtle', meta: {} }], 4);
+  const [a, b] = sim.players;
+  for (const p of sim.players) { p.levelMods.maxHp += 99999; sim.recompute(p); }
+  sim.downPlayer(b);
+  sim.step(1 / 30);
+  assert.ok(b.down);
+  for (let i = 0; i < 40; i++) { sim.setPlayerPos(1, b.x + 10, b.y, true, 0); sim.step(1 / 30); }
+  for (let i = 0; i < 30 * 3; i++) { a.hp = a.d.maxHp; sim.step(1 / 30); }
+  assert.equal(b.down, false, '被救起');
+  assert.ok(b.hp > 0);
+  assert.equal(a.stats.revives, 1);
 });

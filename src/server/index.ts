@@ -7,7 +7,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { C2S, S2C } from '../shared/protocol';
+import type { C2S, RoomInfo, S2C, ServerStats } from '../shared/protocol';
 import { Room } from '../shared/room';
 import { TICK_RATE } from '../shared/sim/game';
 
@@ -26,12 +26,14 @@ const MIME: Record<string, string> = {
 };
 
 const rooms = new Map<string, Room>();
+Room.allowDebug = process.env.POKE_DEBUG === '1';
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || '/', 'http://x');
-  if (url.pathname === '/healthz') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, rooms: rooms.size, players: [...rooms.values()].reduce((a, r) => a + r.members.size, 0) }));
+  if (url.pathname === '/healthz' || url.pathname === '/api/stats' || url.pathname === '/api/rooms') {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+    const body = url.pathname === '/api/rooms' ? { stats: stats(), rooms: publicRooms() } : { ok: true, ...stats() };
+    res.end(JSON.stringify(body));
     return;
   }
   let file = path.normalize(path.join(STATIC_DIR, decodeURIComponent(url.pathname)));
@@ -67,10 +69,29 @@ function newCode(): string {
   throw new Error('no room code available');
 }
 
-interface Client { ws: WebSocket; room: Room | null; id: number; alive: boolean; budget: number }
+interface Client { ws: WebSocket; room: Room | null; id: number; alive: boolean; budget: number; browsing: boolean; lastStats: string }
+
+/** 在线人数 = 打开着游戏页面的连接数（单人游戏、浏览大厅、房间里的都算） */
+function stats(): ServerStats {
+  let playing = 0;
+  for (const r of rooms.values()) if (r.inGame) playing += r.members.size;
+  return { online: clients.size, playing, rooms: rooms.size };
+}
+
+function publicRooms(): RoomInfo[] {
+  return [...rooms.values()]
+    .filter((r) => r.isPublic && r.members.size > 0)
+    .map((r) => r.info())
+    .sort((a, b) => Number(a.inGame) - Number(b.inGame) || b.players.length - a.players.length)
+    .slice(0, 60);
+}
+
+function sendJson(c: Client, msg: S2C) {
+  if (c.ws.readyState === c.ws.OPEN) c.ws.send(JSON.stringify(msg));
+}
 
 wss.on('connection', (ws: WebSocket) => {
-  const c: Client = { ws, room: null, id: 0, alive: true, budget: 200 };
+  const c: Client = { ws, room: null, id: 0, alive: true, budget: 200, browsing: false, lastStats: '' };
   const conn = {
     send(data: string | ArrayBuffer) {
       if (ws.readyState !== ws.OPEN) return;
@@ -79,7 +100,7 @@ wss.on('connection', (ws: WebSocket) => {
       ws.send(data);
     },
   };
-  const fail = (msg: string) => conn.send(JSON.stringify({ t: 'error', msg, fatal: true } satisfies S2C));
+  const fail = (msg: string) => conn.send(JSON.stringify({ t: 'error', msg } satisfies S2C));
   ws.on('pong', () => { c.alive = true; });
   ws.on('message', (raw, isBinary) => {
     if (isBinary) return;
@@ -87,22 +108,35 @@ wss.on('connection', (ws: WebSocket) => {
     let msg: C2S;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (!msg || typeof msg !== 'object') return;
+    if (msg.t === 'stats') { sendJson(c, { t: 'stats', stats: stats() }); return; }
+    if (msg.t === 'browse') {
+      c.browsing = !!msg.on;
+      if (c.browsing) sendJson(c, { t: 'rooms', stats: stats(), rooms: publicRooms() });
+      return;
+    }
+    if (msg.t === 'leave') {
+      c.room?.leave(c.id);
+      c.room = null;
+      sendJson(c, { t: 'left' });
+      return;
+    }
     if (!c.room) {
       if (msg.t === 'create') {
         if (rooms.size >= MAX_ROOMS) return fail('服务器房间已满，请稍后再试');
         const room = new Room(newCode());
+        room.isPublic = msg.public !== false;
         room.onEmpty = () => rooms.delete(room.code);
         const res = room.join(conn, msg.name, msg.meta, msg.v);
         if (typeof res === 'string') return fail(res);
         rooms.set(room.code, room);
-        c.room = room; c.id = res;
+        c.room = room; c.id = res; c.browsing = false;
         log(`房间 ${room.code} 创建`);
       } else if (msg.t === 'join') {
         const room = rooms.get(String(msg.code).trim());
         if (!room) return fail('找不到这个房间号');
         const res = room.join(conn, msg.name, msg.meta, msg.v);
         if (typeof res === 'string') return fail(res);
-        c.room = room; c.id = res;
+        c.room = room; c.id = res; c.browsing = false;
       }
       return;
     }
@@ -117,6 +151,21 @@ wss.on('connection', (ws: WebSocket) => {
 });
 
 const clients = new Set<Client>();
+
+// 大厅：每 2 秒给浏览房间列表的人推送一次；不在对局里的人收到在线人数变化
+let lastRooms = '';
+setInterval(() => {
+  const st = stats();
+  const roomsJson = JSON.stringify({ t: 'rooms', stats: st, rooms: publicRooms() } satisfies S2C);
+  const changed = roomsJson !== lastRooms;
+  lastRooms = roomsJson;
+  const statsJson = JSON.stringify({ t: 'stats', stats: st } satisfies S2C);
+  for (const c of clients) {
+    if (c.ws.readyState !== c.ws.OPEN) continue;
+    if (c.browsing && changed) c.ws.send(roomsJson);
+    else if (!c.room?.inGame && c.lastStats !== statsJson) { c.lastStats = statsJson; c.ws.send(statsJson); }
+  }
+}, 2000);
 
 // 消息额度：每秒恢复，防止刷屏
 setInterval(() => { for (const c of clients) c.budget = Math.min(200, c.budget + 120); }, 1000);

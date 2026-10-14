@@ -15,7 +15,7 @@ export interface Line {
   id: LineId;
   name: string;
   forms: Form[];
-  /** 进化等级；超梦为"基因觉醒"等级（不换形态，只加属性）。 */
+  /** 可以进化的等级（波次结束后由玩家决定是否进化）；超梦为"基因觉醒"等级（自动，只加属性）。 */
   evoLevels: number[];
   /** 需要进化道具时（皮卡丘 → 雷丘）为道具 id。 */
   evoItem?: string;
@@ -148,12 +148,19 @@ export const LINES: Record<LineId, Line> = {
       { lv: 16, skill: 'psychic' }, { lv: 19, skill: 'shadow_ball' }, { lv: 21, skill: 'future_sight' },
       { lv: 24, skill: 'psystrike' },
     ],
-    unlock: 'victory', unlockHint: '成就「宝可梦大师」：通关第 20 波',
+    unlock: 'victory_hard', unlockHint: '成就「冠军之路」：通关困难模式',
     flavor: '以基因改造诞生的最强宝可梦。属性碾压，但技能栏最少。',
   },
 };
 
 export const LINE_IDS = Object.keys(LINES) as LineId[];
+
+/** 按等级最多可以进化到第几阶段（皮卡丘靠雷之石，不按等级）。 */
+export function maxStageByLevel(line: LineId, level: number): number {
+  const L = LINES[line];
+  if (line === 'mewtwo' || L.evoItem) return 0;
+  return Math.min(L.forms.length - 1, L.evoLevels.filter((lv) => level >= lv).length);
+}
 
 export function formOf(line: LineId, stage: number): Form {
   const l = LINES[line];

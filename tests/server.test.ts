@@ -54,7 +54,7 @@ test('房间号联机：创建、加入、开局、同步', async () => {
   assert.match(ja.code, /^\d{5}$/);
   b.send({ t: 'join', code: '00000', name: 'x', meta: {}, v: PROTOCOL_VERSION });
   const bad = await b.wait('error');
-  assert.ok(bad.fatal);
+  assert.match(bad.msg, /找不到/);
   b.send({ t: 'join', code: ja.code, name: '小霞', meta: {}, v: PROTOCOL_VERSION });
   const jb = await b.wait('joined');
   assert.notEqual(jb.you, ja.you);
@@ -87,4 +87,33 @@ test('房间号联机：创建、加入、开局、同步', async () => {
   const busy = await c.wait('error');
   assert.match(busy.msg, /游戏中/);
   a.ws.close(); b.ws.close(); c.ws.close();
+});
+
+test('联机大厅：房间列表、私密房间、在线人数', async () => {
+  const host = new Client(), priv = new Client(), viewer = new Client();
+  await Promise.all([host.open(), priv.open(), viewer.open()]);
+  host.send({ t: 'create', name: '小刚', meta: {}, v: PROTOCOL_VERSION });
+  const j = await host.wait('joined');
+  priv.send({ t: 'create', name: '小遥', meta: {}, v: PROTOCOL_VERSION, public: false });
+  const jp = await priv.wait('joined');
+  host.send({ t: 'difficulty', id: 'normal' });
+  await new Promise((r) => setTimeout(r, 100));
+  viewer.send({ t: 'browse', on: true });
+  const list = await viewer.wait('rooms');
+  const mine = list.rooms.find((r) => r.code === j.code);
+  assert.ok(mine, '公开房间出现在列表');
+  assert.equal(mine!.host, '小刚');
+  assert.equal(mine!.difficulty, 'normal');
+  assert.ok(!list.rooms.some((r) => r.code === jp.code), '私密房间不出现');
+  assert.ok(list.stats.online >= 3, `在线 ${list.stats.online}`);
+  // 离开房间后连接还在，房间被删除
+  priv.send({ t: 'leave' });
+  await priv.wait('left');
+  viewer.send({ t: 'stats' });
+  const st = await viewer.wait('stats');
+  assert.ok(st.stats.online >= 3);
+  const res = await fetch(`http://localhost:${PORT}/api/stats`);
+  const body = await res.json() as { online: number };
+  assert.ok(body.online >= 3);
+  host.ws.close(); priv.ws.close(); viewer.ws.close();
 });

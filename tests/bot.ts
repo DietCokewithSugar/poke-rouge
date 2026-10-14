@@ -1,3 +1,4 @@
+import type { DifficultyId } from '../src/shared/difficulty';
 import { GameSim, type PlayerInit } from '../src/shared/sim/game';
 import type { SimPlayer } from '../src/shared/sim/entities';
 import { ITEMS } from '../src/shared/items';
@@ -80,6 +81,7 @@ export function botShop(sim: GameSim, p: SimPlayer) {
   let guard = 0;
   while (guard++ < 40) {
     const me = sim.privateState(p);
+    if (me.evo?.prompt) { sim.command(p.id, { t: 'evolve', yes: true }); continue; }
     if (me.cards) {
       const i = me.cards.findIndex((c) => c.kind === 'skill');
       if (i >= 0) {
@@ -137,8 +139,8 @@ function weakestSlot(p: SimPlayer) {
 
 export interface RunResult { wave: number; phase: string; levels: number[]; stages: number[]; kills: number[]; seconds: number }
 
-export function runBotGame(inits: PlayerInit[], seed: number, maxWave = 20): RunResult {
-  const sim = new GameSim(inits, seed);
+export function runBotGame(inits: PlayerInit[], seed: number, maxWave = 20, difficulty: DifficultyId = 'easy'): RunResult {
+  const sim = new GameSim(inits, seed, difficulty);
   const dt = 1 / 30;
   let steps = 0;
   while (steps < 30 * 60 * 40) {
