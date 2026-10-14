@@ -28,6 +28,8 @@ export class WsTransport implements Transport {
   private closed = false;
   onMessage: (m: Incoming) => void = () => {};
   onClose: (reason: string) => void = () => {};
+  onOpen: () => void = () => {};
+  get connected() { return this.ws.readyState === WebSocket.OPEN; }
 
   constructor() {
     this.ws = new WebSocket(serverUrl());
@@ -35,6 +37,7 @@ export class WsTransport implements Transport {
     this.ws.onopen = () => {
       for (const q of this.queue) this.ws.send(q);
       this.queue = [];
+      this.onOpen();
     };
     this.ws.onmessage = (ev) => {
       if (typeof ev.data === 'string') {

@@ -1,7 +1,7 @@
 import { ENEMIES, ENEMY_IDS } from '../../shared/enemies';
 import { decodeSnapshot, type SnapEnemy, type SnapPlayer, type SnapProj, type SnapZone, type Snapshot } from '../../shared/protocol';
 import { FX_KINDS, SKILLS } from '../../shared/skills';
-import type { Ev, MeState, PublicState } from '../../shared/sim/game';
+import { REVIVE_RADIUS, type Ev, type MeState, type PublicState } from '../../shared/sim/game';
 import { sfx } from '../audio';
 import { FxLayer, drawPickup, drawProj, drawZone, pxCircle, pxRing } from '../gfx/fx';
 import { vis, type Trail } from '../gfx/vfx';
@@ -240,6 +240,14 @@ export class GameView {
         break;
       }
       case 'down': sfx('down'); break;
+      case 'evoReady':
+        if (n(1) === this.you) {
+          const pos = this.playerPos(this.you);
+          if (pos) this.fx.text(pos.x, pos.y - 36, '咦？', '#ffffff', 13, 1.4);
+          this.hooks.onMessage(`${ev[2] as string}的样子有些不对劲……这一波结束后可以选择进化`);
+        }
+        break;
+      case 'evoCancel': break;
       case 'rev': {
         sfx('revive');
         const pos = this.playerPos(n(1));
@@ -470,8 +478,36 @@ export class GameView {
 
     this.fx.drawAir(ctx, this.settings.damageNumbers);
 
-    // 屏幕层：受伤红闪
+    // 屏幕层：指向画面外倒下的队友
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (ip && this.names.size > 1) {
+      for (const p of ip.b.s.players) {
+        if (p.id === this.you || !(p.flags & 1)) continue;
+        const sx = (p.x - cx) * S, sy = (p.y - 10 - cy) * S;
+        const W = this.canvas.width, H = this.canvas.height, m = 28 * S;
+        if (sx >= 0 && sy >= 0 && sx <= W && sy <= H) continue;
+        const ex = Math.max(m, Math.min(W - m, sx)), ey = Math.max(m, Math.min(H - m, sy));
+        const a = Math.atan2(sy - ey, sx - ex);
+        ctx.save();
+        ctx.translate(ex, ey);
+        ctx.fillStyle = Math.floor(t * 4) % 2 ? '#78f878' : '#ffffff';
+        ctx.rotate(a);
+        ctx.beginPath();
+        ctx.moveTo(10 * S, 0);
+        ctx.lineTo(-4 * S, -6 * S);
+        ctx.lineTo(-4 * S, 6 * S);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        ctx.font = `${10 * S}px FusionPixel, monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#101018';
+        ctx.fillText(`救援 ${this.names.get(p.id) ?? ''}`, ex + S, ey + 18 * S + S);
+        ctx.fillStyle = '#78f878';
+        ctx.fillText(`救援 ${this.names.get(p.id) ?? ''}`, ex, ey + 18 * S);
+      }
+    }
+    // 屏幕层：受伤红闪
     if (this.hurtFlash > 0) {
       this.hurtFlash -= dt;
       ctx.fillStyle = `rgba(255,40,60,${Math.max(0, this.hurtFlash) * 0.3})`;
@@ -532,6 +568,14 @@ export class GameView {
   private drawPlayer(p: SnapPlayer, x: number, y: number, v: PlayerVis, t: number) {
     const ctx = this.ctx;
     const mine = p.id === this.you;
+    if (p.flags & 1 && this.names.size > 1) {
+      // 救援圈：队友站进圈里就能把它救起来
+      ctx.globalAlpha = Math.floor(t * 4) % 2 ? 0.9 : 0.6;
+      pxRing(ctx, x, y, REVIVE_RADIUS, '#78f878', 2, 0.55, 4);
+      ctx.globalAlpha = 0.3;
+      if (p.revive > 0) pxCircle(ctx, x, y, Math.max(2, REVIVE_RADIUS * p.revive), '#78f878');
+      ctx.globalAlpha = 1;
+    }
     this.drawShadow(x, y, shadowSize(p.dex), 1);
     if (mine) {
       ctx.globalAlpha = 0.5;
@@ -571,10 +615,11 @@ export class GameView {
     ctx.fillStyle = frac > 0.5 ? '#58d858' : frac > 0.2 ? '#f8c838' : '#f84848';
     ctx.fillRect(bx, by, Math.round(w * frac), 2);
     if (p.flags & 1) {
+      const label = this.names.size <= 1 ? '濒死' : mine ? '等待救援…' : p.revive > 0 ? `救援中 ${Math.round(p.revive * 100)}%` : '站上来救援！';
       ctx.fillStyle = '#101018';
-      ctx.fillText('濒死', Math.round(x) + 1, ny - 9);
-      ctx.fillStyle = '#ff8c8c';
-      ctx.fillText('濒死', Math.round(x), ny - 10);
+      ctx.fillText(label, Math.round(x) + 1, ny - 9);
+      ctx.fillStyle = mine || this.names.size <= 1 ? '#ff8c8c' : '#78f878';
+      ctx.fillText(label, Math.round(x), ny - 10);
       if (p.revive > 0) {
         ctx.strokeStyle = '#78f878';
         ctx.lineWidth = 2;

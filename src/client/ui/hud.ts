@@ -1,6 +1,7 @@
 import { LINES } from '../../shared/pokemon';
 import { SKILLS } from '../../shared/skills';
 import { BIOMES } from '../../shared/waves';
+import { DIFFICULTIES } from '../../shared/difficulty';
 import type { MeState, PublicState } from '../../shared/sim/game';
 import { Animator } from '../gfx/sprites';
 import { clear, h, tip } from './dom';
@@ -25,6 +26,8 @@ export class Hud {
   private team = h('div', { class: 'hud-team' });
   private skills = h('div', { class: 'hud-skills' });
   private banner = h('div', { class: 'hud-banner' });
+  private downBox = h('div', { class: 'hud-down hidden' }, h('b', null, '你倒下了！'), h('div', null, '队友站到你身边就能把你救起来'));
+  private hordeEl = h('div', { class: 'hud-horde hidden' }, '群聚波！');
   private sub = h('div', { class: 'hud-sub' });
   pauseBtn: HTMLButtonElement;
   private lastDex = -1;
@@ -47,7 +50,7 @@ export class Hud {
         ),
       ),
       h('div', { class: 'hud-center' },
-        h('div', { class: 'box tight hud-wavebox' }, this.wave, this.timer),
+        h('div', { class: 'box tight hud-wavebox' }, this.wave, this.timer, this.hordeEl),
         this.bossBox,
       ),
       this.team,
@@ -55,6 +58,7 @@ export class Hud {
       this.skills,
       this.banner,
       this.sub,
+      this.downBox,
     );
     this.bossBox.append(this.bossName, h('div', { class: 'bar boss' }, this.bossFill));
     parent.appendChild(this.root);
@@ -103,7 +107,10 @@ export class Hud {
       });
     }
     if (pub) {
-      set(this.wave, `第 ${pub.wave} / ${pub.total} 波 · ${BIOMES[pub.biome]?.name ?? ''}`);
+      const D = DIFFICULTIES[pub.difficulty];
+      set(this.wave, `${D.name} · 第 ${pub.wave} / ${pub.total} 波 · ${BIOMES[pub.biome]?.name ?? ''}`);
+      this.hordeEl.classList.toggle('hidden', !(pub.horde && pub.phase === 'wave'));
+      this.downBox.classList.toggle('hidden', !(me?.down && pub.players.length > 1 && pub.phase === 'wave'));
       if (pub.phase === 'wave') {
         const left = Math.max(0, pub.dur - pub.time);
         set(this.timer, left <= 0 && pub.boss ? '击败首领！' : `${Math.ceil(left)}`);
