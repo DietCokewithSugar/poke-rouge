@@ -19,7 +19,10 @@ test('属性克制表', () => {
   assert.equal(rawEffectiveness('electric', ['rock', 'ground']), 0);
   assert.equal(rawEffectiveness('fire', ['bug', 'grass']), 4);
   assert.equal(rawEffectiveness('psychic', ['ghost', 'poison']), 2);
-  assert.ok(gameEffectiveness('electric', ['ground']) > 0, '免疫在游戏里只是大幅削弱');
+  assert.ok(gameEffectiveness('electric', ['ground']) > 0, '免疫在游戏里只是削弱');
+  assert.equal(gameEffectiveness('fire', ['grass']), 1.1, '效果拔群只多 10%');
+  assert.equal(gameEffectiveness('water', ['grass']), 0.9);
+  assert.equal(gameEffectiveness('normal', ['normal']), 1);
 });
 
 test('数据引用完整', () => {
@@ -35,8 +38,14 @@ test('数据引用完整', () => {
     if (w.boss) assert.ok(ENEMIES[w.boss]);
   }
   assert.equal(WAVES.length, 20);
-  assert.equal(waveDuration(1), 60);
-  assert.equal(waveDuration(20), 90);
+  assert.equal(waveDuration(1), 30);
+  assert.equal(waveDuration(19), 60);
+  assert.equal(waveDuration(10), 90, '首领波 90 秒');
+  assert.equal(waveDuration(20), 90, '首领波 90 秒');
+  for (let w = 1; w <= 20; w++) {
+    const d = waveDuration(w);
+    assert.ok(WAVES[w - 1].boss ? d === 90 : d >= 30 && d <= 60, `第 ${w} 波 ${d} 秒`);
+  }
 });
 
 test('每只精灵都能完整跑完若干波（不报错）', () => {

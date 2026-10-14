@@ -4,7 +4,7 @@ import type { RunSummary } from '../meta';
 import { LINES, formOf, type LineId } from '../pokemon';
 import { Rng } from '../rng';
 import { SKILLS } from '../skills';
-import { TOTAL_WAVES, WAVES, enemyDmgMult, enemyHpMult, spawnRateMult, waveDuration } from '../waves';
+import { TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, spawnRateMult, waveDuration } from '../waves';
 import { updateEnemy } from './ai';
 import { PLAYER_R, beamHit, healPlayer, hitEnemy, hurtPlayer, updateSkills } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
@@ -200,18 +200,19 @@ export class GameSim {
       this.emit(['msg', `${e.def.name}被打倒了！`]);
       if (this.boss === e) this.boss = null;
     }
+    const cm = candyMult(this.wave);
     if (silent && e.def.ai === 'bomber') {
-      this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)));
+      this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)) * cm);
       return;
     }
-    this.dropCandy(e.x, e.y, e.def.candy);
+    this.dropCandy(e.x, e.y, e.def.candy * cm);
     const luck = 1 + Math.max(0, this.players.reduce((a, p) => a + p.d.luck, 0) / Math.max(1, this.players.length)) / 100;
     if (e.def.rank !== 'minion' || this.rng.chance(0.004 * luck)) this.dropPickup('ball', e.x + this.rng.range(-8, 8), e.y + this.rng.range(-8, 8), 1);
     if (e.def.id === 'chansey' || this.rng.chance(0.012 * luck)) this.dropPickup('berry', e.x + this.rng.range(-6, 6), e.y + this.rng.range(-6, 6), 1);
   }
 
   private dropCandy(x: number, y: number, value: number) {
-    const pieces = Math.min(value, value > 20 ? 10 : 5);
+    const pieces = Math.max(1, Math.min(Math.floor(value), value > 20 ? 10 : 5));
     const each = value / pieces;
     for (let i = 0; i < pieces; i++) {
       const a = this.rng.range(0, Math.PI * 2), r = pieces > 1 ? this.rng.range(3, 6 + pieces * 2) : 0;
