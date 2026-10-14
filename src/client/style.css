@@ -285,6 +285,12 @@ button.card:hover { transform: translateY(-3px); background: rgba(255, 255, 255,
 .card .lock { position: absolute; left: 6px; top: 6px; font-size: 11px; padding: 0 5px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, .4); background: rgba(0, 0, 0, .3); cursor: pointer; color: var(--muted); }
 .card .lock.on { background: var(--gold); color: #3a2300; text-shadow: none; }
 .card img.ico { margin: 4px 0; }
+.preview { margin-top: 6px; }
+.preview-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.preview-mon { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 6px; background: rgba(0, 0, 0, .2); border-radius: 6px; min-width: 64px; }
+.preview-mon .portrait { height: 44px; width: auto; }
+.preview-mon.special { border: 1px solid var(--red); }
+@media (max-height: 520px) { .preview { display: none; } }
 .crate { display: flex; justify-content: center; margin: 12px 0; }
 .shop-actions { margin-top: auto; padding-top: 10px; }
 .btn.go { font-size: 18px; padding: 10px 24px; }

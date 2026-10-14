@@ -5,6 +5,8 @@ import type { Command, MeState, PublicState } from '../../shared/sim/game';
 import type { LevelCard, ShopOffer } from '../../shared/sim/entities';
 import { MOD_LABEL } from '../../shared/stats';
 import { TYPE_NAME, type PType } from '../../shared/types';
+import { ENEMIES } from '../../shared/enemies';
+import { BIOMES, TOTAL_WAVES, WAVES, waveDuration } from '../../shared/waves';
 import { sfx } from '../audio';
 import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
@@ -138,6 +140,7 @@ export class Intermission {
     const grid = h('div', { class: 'cards shop' });
     me.shop.offers.forEach((o, i) => grid.appendChild(this.offerEl(me, o, i)));
     this.main.appendChild(grid);
+    this.main.appendChild(this.preview());
     const team = h('div', { class: 'team-ready' });
     this.renderTeam(team);
     this.main.appendChild(h('div', { class: 'row between shop-actions' },
@@ -147,6 +150,26 @@ export class Intermission {
       h('button', { class: `btn ${me.ready ? '' : 'gold'} go`, onclick: () => { sfx('click'); this.send({ t: 'waveReady', on: !me.ready }); } },
         me.ready ? '取消准备' : '出发！下一波'),
     ));
+  }
+
+  /** 下一波预告：出现的宝可梦与精英/首领，方便提前准备属性克制。 */
+  private preview() {
+    const next = (this.pub?.wave ?? 0) + 1;
+    const W = WAVES[next - 1];
+    if (!W || next > TOTAL_WAVES) return h('div');
+    const mon = (id: string, tag?: string) => {
+      const e = ENEMIES[id];
+      const el = h('div', { class: `preview-mon ${tag ? 'special' : ''}` }, Animator.portrait(e.dex, 1), h('div', { class: 'small' }, e.name), h('div', null, ...e.types.map(typeBadge)), tag ? h('div', { class: 'small gold' }, tag) : null);
+      return el;
+    };
+    return h('div', { class: 'preview' },
+      h('h3', null, `下一波：第 ${next} 波 · ${BIOMES[W.biome].name} · ${waveDuration(next)} 秒`),
+      h('div', { class: 'preview-row' },
+        W.boss ? mon(W.boss, '首领') : null,
+        ...[...new Set(W.elites ?? [])].map((id) => mon(id, '精英')),
+        ...Object.keys(W.pool).map((id) => mon(id)),
+      ),
+    );
   }
 
   private renderTeam(box: HTMLElement) {
