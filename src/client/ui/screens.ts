@@ -1,4 +1,4 @@
-import { ACHIEVEMENTS, META_UPGRADES, metaCost, type RunSummary } from '../../shared/meta';
+import { ACHIEVEMENTS, META_UPGRADES, metaCost } from '../../shared/meta';
 import { LINES, LINE_IDS, type LineId } from '../../shared/pokemon';
 import { DIFFICULTIES, DIFFICULTY_IDS, type DifficultyId } from '../../shared/difficulty';
 import type { LobbyPlayer, RoomInfo, ServerStats } from '../../shared/protocol';
@@ -7,8 +7,24 @@ import { TYPE_NAME } from '../../shared/types';
 import { sfx } from '../audio';
 import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
-import { buyUpgrade, isDifficultyUnlocked, isUnlocked, refundUpgrades, saveProfile, type Profile, type RunReward } from '../save';
+import { buyUpgrade, isDifficultyUnlocked, isUnlocked, refundUpgrades, saveProfile, type Profile, } from '../save';
 import { clear, h, tip, toast } from './dom';
+
+/**
+ * 把界面放进容器。同一个界面重新渲染时（切换宝可梦、研究所升级、大厅刷新……）
+ * 不再播放弹出动画，并保留滚动位置，看起来就是原地更新而不是关掉再打开。
+ */
+export function mount(root: HTMLElement, el: HTMLElement, key: string) {
+  const prev = root.firstElementChild as HTMLElement | null;
+  const same = root.dataset.screen === key && !!prev;
+  const scroll = root.scrollTop;
+  const inner = same ? prev!.scrollTop : 0;
+  clear(root);
+  if (same) el.classList.add('no-anim');
+  root.dataset.screen = key;
+  root.appendChild(el);
+  if (same) { root.scrollTop = scroll; el.scrollTop = inner; }
+}
 import { STAT_LABEL_6, skillIcon, skillInfo, typeBadge } from './describe';
 
 export interface TitleActions {
@@ -22,14 +38,13 @@ export interface TitleActions {
 }
 
 export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stats: ServerStats | null) {
-  clear(root);
   const name = h('input', { class: 'field', maxlength: 12, placeholder: '训练家名字', value: p.name }) as HTMLInputElement;
   name.addEventListener('change', () => { p.name = name.value.trim().slice(0, 12); saveProfile(p); });
   const code = h('input', { class: 'field code', maxlength: 5, inputmode: 'numeric', placeholder: '房间号' }) as HTMLInputElement;
   code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 5); });
   const keepName = () => { p.name = name.value.trim().slice(0, 12) || p.name; saveProfile(p); };
   const unlockedAch = Object.keys(p.achievements).length;
-  root.appendChild(h('div', { class: 'title-wrap' },
+  mount(root, h('div', { class: 'title-wrap' },
     h('div', { class: 'logo' }, h('div', { class: 'logo-main' }, '宝可肉鸽'), h('div', { class: 'logo-sub' }, 'POKé ROUGE · 宝可梦割草肉鸽')),
     h('div', { class: 'box menu' },
       h('label', null, '训练家名字'),
@@ -49,7 +64,7 @@ export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stat
       ),
     ),
     h('div', { class: 'title-foot muted small' }, 'WASD / 方向键移动 · 技能自动释放 · 存活到倒计时结束即可过关'),
-  ));
+  ), 'title');
   code.addEventListener('keydown', (e) => { if (e.key === 'Enter') (code.nextElementSibling as HTMLButtonElement).click(); });
 }
 
@@ -134,8 +149,7 @@ export function selectScreen(root: HTMLElement, p: Profile, onStart: (l: LineId,
   let sel: LineId = isUnlocked(p, p.lastLine) ? p.lastLine : 'charmander';
   let diff: DifficultyId = isDifficultyUnlocked(p, p.lastDifficulty) ? p.lastDifficulty : 'easy';
   const render = () => {
-    clear(root);
-    root.appendChild(h('div', { class: 'box select' },
+    mount(root, h('div', { class: 'box select' },
       h('div', { class: 'row between' },
         h('h2', null, '选择你的伙伴'),
         h('div', { class: 'row' },
@@ -146,7 +160,7 @@ export function selectScreen(root: HTMLElement, p: Profile, onStart: (l: LineId,
       difficultyPicker(p, diff, (d) => { diff = d; render(); }),
       pickGrid(p, sel, (l) => { sel = l; render(); }),
       lineDetail(sel),
-    ));
+    ), 'select');
   };
   render();
 }
@@ -173,7 +187,6 @@ export interface LobbyActions {
 }
 
 export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: number, players: LobbyPlayer[], a: LobbyActions, difficulty: DifficultyId, isPublic: boolean) {
-  clear(root);
   const me = players.find((x) => x.id === you);
   const taken = new Map<LineId, string>();
   for (const x of players) if (x.line && x.id !== you) taken.set(x.line, x.name);
@@ -188,7 +201,7 @@ export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: nu
     );
   });
   const canStart = me?.host && players.every((x) => x.line) && players.every((x) => x.host || x.ready);
-  root.appendChild(h('div', { class: 'box lobby' },
+  mount(root, h('div', { class: 'box lobby' },
     h('div', { class: 'row between' },
       h('div', null, h('div', { class: 'muted small' }, '房间号'), h('div', { class: 'room-code' }, code)),
       h('div', { class: 'row' },
@@ -211,7 +224,7 @@ export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: nu
         ? h('button', { class: 'btn gold big', disabled: !canStart, onclick: a.start }, canStart ? '开始冒险！' : '等待所有人选择并准备')
         : h('button', { class: `btn big ${me?.ready ? '' : 'gold'}`, disabled: !me?.line, onclick: () => a.ready(!me?.ready) }, me?.ready ? '取消准备' : '准备！'),
     ),
-  ));
+  ), 'lobby');
 }
 
 // ---------------------------------------------------------------- 联机大厅（匹配）
@@ -223,13 +236,12 @@ export class BrowseScreen {
   private statsEl = h('div', { class: 'browse-stats' });
   private isPublic = true;
   constructor(root: HTMLElement, private a: BrowseActions, connected: boolean) {
-    clear(root);
     const code = h('input', { class: 'field code', maxlength: 5, inputmode: 'numeric', placeholder: '房间号' }) as HTMLInputElement;
     code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 5); });
     const join = () => { if (code.value.length !== 5) { toast('请输入 5 位房间号', 'error'); return; } sfx('click'); a.join(code.value); };
     code.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
     const pubBtn = h('button', { class: 'btn small', onclick: () => { this.isPublic = !this.isPublic; pubBtn.textContent = this.isPublic ? '公开房间' : '私密房间'; pubBtn.classList.toggle('ghost', !this.isPublic); } }, '公开房间');
-    root.appendChild(h('div', { class: 'box browse' },
+    mount(root, h('div', { class: 'box browse' },
       h('div', { class: 'row between' },
         h('div', null, h('h2', null, '联机大厅'), this.statsEl),
         h('button', { class: 'btn small ghost', 'data-back': '1', onclick: a.back }, '返回'),
@@ -240,7 +252,7 @@ export class BrowseScreen {
       ),
       h('h3', null, '公开房间'),
       this.list,
-    ));
+    ), 'browse');
     this.setStats(null, connected);
     this.setRooms([]);
   }
@@ -281,45 +293,11 @@ export class BrowseScreen {
   }
 }
 
-// ---------------------------------------------------------------- 结算
-
-export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: { id: number; name: string; line: LineId; level: number; kills: number; damage: number }[], you: number, onContinue: () => void, label: string) {
-  clear(root);
-  root.appendChild(h('div', { class: 'box results' },
-    h('h2', { class: victory ? 'gold' : '' }, victory ? '通关！你是真正的宝可梦大师！' : '眼前一片漆黑……'),
-    s ? h('div', { class: 'muted' }, `${DIFFICULTIES[s.difficulty].name}模式 · ${LINES[s.line].name}`) : null,
-    s ? h('div', { class: 'result-grid' },
-      h('div', null, h('span', { class: 'muted' }, '完成波次'), h('b', null, `${s.wavesCleared} / 20`)),
-      h('div', null, h('span', { class: 'muted' }, '等级'), h('b', null, `Lv${s.level}`)),
-      h('div', null, h('span', { class: 'muted' }, '击败'), h('b', null, s.kills)),
-      h('div', null, h('span', { class: 'muted' }, '总伤害'), h('b', null, s.damage)),
-      h('div', null, h('span', { class: 'muted' }, '效果拔群'), h('b', null, s.superEff)),
-      h('div', null, h('span', { class: 'muted' }, '获得金钱'), h('b', null, `₽${s.moneyEarned}`)),
-    ) : null,
-    reward ? h('div', { class: 'reward' }, iconImg('stardust', 3), `获得星之沙 +${reward.stardust}`) : null,
-    reward?.newAchievements.length ? h('div', { class: 'new-ach' },
-      h('h3', null, '达成新成就！'),
-      reward.newAchievements.map((a) => {
-        const def = ACHIEVEMENTS.find((x) => x.id === a.id);
-        return h('div', { class: 'ach on' }, h('b', null, a.name), ` +${a.reward} 星之沙`,
-          a.unlocks ? h('span', { class: 'gold' }, ` · 解锁 ${LINES[a.unlocks].name}！`) : null,
-          def?.unlocksDifficulty ? h('span', { class: 'gold' }, ` · 解锁${DIFFICULTIES[def.unlocksDifficulty].name}难度！`) : null);
-      }),
-    ) : null,
-    board.length > 1 ? h('table', { class: 'board' },
-      h('tr', null, h('th', null, '训练家'), h('th', null, '宝可梦'), h('th', null, '等级'), h('th', null, '击败'), h('th', null, '伤害')),
-      board.map((b) => h('tr', { class: b.id === you ? 'me' : '' }, h('td', null, b.name), h('td', null, LINES[b.line].name), h('td', null, b.level), h('td', null, b.kills), h('td', null, b.damage))),
-    ) : null,
-    h('div', { class: 'row end' }, h('button', { class: 'btn gold big', onclick: onContinue }, label)),
-  ));
-}
-
 // ---------------------------------------------------------------- 研究所 / 成就 / 设置
 
 export function labScreen(root: HTMLElement, p: Profile, onBack: () => void) {
   const render = () => {
-    clear(root);
-    root.appendChild(h('div', { class: 'box lab' },
+    mount(root, h('div', { class: 'box lab' },
       h('div', { class: 'row between' },
         h('div', null, h('h2', null, '大木研究所'), h('p', { class: 'sub' }, '用冒险中获得的星之沙，永久强化所有宝可梦的基础属性。')),
         h('div', { class: 'row' }, h('div', { class: 'money big' }, `星之沙 ${p.stardust}`), h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回')),
@@ -339,14 +317,13 @@ export function labScreen(root: HTMLElement, p: Profile, onBack: () => void) {
         );
       })),
       h('div', { class: 'row end' }, h('button', { class: 'btn small ghost', onclick: () => { if (confirm('返还全部星之沙并重置研究？')) { refundUpgrades(p); render(); } } }, '重置并返还')),
-    ));
+    ), 'lab');
   };
   render();
 }
 
 export function achievementsScreen(root: HTMLElement, p: Profile, onBack: () => void) {
-  clear(root);
-  root.appendChild(h('div', { class: 'box ach-screen' },
+  mount(root, h('div', { class: 'box ach-screen' },
     h('div', { class: 'row between' }, h('h2', null, `成就 ${Object.keys(p.achievements).length} / ${ACHIEVEMENTS.length}`), h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回')),
     h('div', { class: 'muted small' }, `累计：${p.stats.runs} 局 · 通关 ${p.stats.wins} 次 · 击败 ${p.stats.kills} 只 · 最佳 ${p.stats.bestWave} 波`),
     h('div', { class: 'ach-list' }, ACHIEVEMENTS.map((a) => h('div', { class: `ach ${p.achievements[a.id] ? 'on' : ''}` },
@@ -354,11 +331,10 @@ export function achievementsScreen(root: HTMLElement, p: Profile, onBack: () => 
       h('span', { class: 'small' }, a.desc),
       h('span', { class: 'small gold' }, `+${a.reward} 星之沙${a.unlocks ? ` · 解锁${LINES[a.unlocks].name}` : ''}${a.unlocksDifficulty ? ` · 解锁${DIFFICULTIES[a.unlocksDifficulty].name}难度` : ''}`),
     ))),
-  ));
+  ), 'ach-screen');
 }
 
 export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => void, onBack: () => void) {
-  clear(root);
   const s = p.settings;
   const slider = (label: string, key: 'volume' | 'music') => {
     const inp = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: String(s[key]) }) as HTMLInputElement;
@@ -371,19 +347,18 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
     inp.addEventListener('change', () => { s[key] = inp.checked; saveProfile(p); onChange(); });
     return h('label', { class: 'set-row' }, h('span', null, label), inp);
   };
-  root.appendChild(h('div', { class: 'box settings' },
+  mount(root, h('div', { class: 'box settings' },
     h('div', { class: 'row between' }, h('h2', null, '设置'), h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回')),
     slider('音效音量', 'volume'),
     slider('音乐音量', 'music'),
     toggle('显示伤害数字', 'damageNumbers'),
     toggle('屏幕震动', 'shake'),
     toggle('初代 GB 绿屏滤镜', 'gbFilter'),
-  ));
+  ), 'settings');
 }
 
 export function creditsScreen(root: HTMLElement, onBack: () => void) {
-  clear(root);
-  root.appendChild(h('div', { class: 'box credits' },
+  mount(root, h('div', { class: 'box credits' },
     h('div', { class: 'row between' }, h('h2', null, '说明与致谢'), h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回')),
     h('h3', null, '玩法'),
     h('ul', null,
@@ -402,17 +377,16 @@ export function creditsScreen(root: HTMLElement, onBack: () => void) {
     h('p', { class: 'small' }, '宝可梦像素精灵：PMDCollab / SpriteCollab 的众多画师（CC BY-NC 4.0，非商业使用），完整名单见仓库 CREDITS.md。'),
     h('p', { class: 'small' }, '界面风格参考 JPTER78/pokesurvivor；字体：缝合像素字体 Fusion Pixel Font（OFL 1.1）。'),
     h('p', { class: 'small muted' }, 'Pokémon 及相关名称为 Nintendo / Creatures Inc. / GAME FREAK / The Pokémon Company 的商标。本作为非营利粉丝作品。'),
-  ));
+  ), 'credits');
 }
 
 export function pauseScreen(root: HTMLElement, onResume: () => void, onSettings: () => void, onQuit: () => void) {
-  clear(root);
-  root.appendChild(h('div', { class: 'box pause' },
+  mount(root, h('div', { class: 'box pause' },
     h('h2', null, '暂停'),
     h('div', { class: 'menu-list' },
       h('button', { class: 'menu-item play', onclick: onResume }, '继续'),
       h('button', { class: 'menu-item', onclick: onSettings }, '设置'),
       h('button', { class: 'menu-item', onclick: onQuit }, '放弃本局'),
     ),
-  ));
+  ), 'pause');
 }

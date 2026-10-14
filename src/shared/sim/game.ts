@@ -208,7 +208,11 @@ export class GameSim {
     e.hp = 0;
     this.emit(['die', e.id, Math.round(e.x), Math.round(e.y), e.kind]);
     const credit = killer ?? this.players.find((p) => p.id === e.lastHit) ?? null;
-    if (credit) credit.stats.kills++;
+    if (credit) {
+      credit.stats.kills++;
+      credit.stats.killsBy[e.def.id] = (credit.stats.killsBy[e.def.id] ?? 0) + 1;
+      credit.stats.rankKills[e.def.rank]++;
+    }
     if (e.def.rank === 'boss') {
       this.bossDown = true;
       this.bossKills.push(e.def.id);
@@ -314,7 +318,18 @@ export class GameSim {
     if (this.horde) this.emit(['msg', '群聚出现了！野生宝可梦成群结队地来了！']);
   }
 
+  /** 记录每位玩家这一波的数据（结算界面的柱状图） */
+  private logWave() {
+    for (const p of this.players) {
+      const s = p.stats;
+      if (s.waves.some((w) => w.w === this.wave)) continue;
+      s.waves.push({ w: this.wave, kills: s.kills - s.mark.kills, dmg: Math.round(s.damage - s.mark.damage), taken: Math.round(s.taken - s.mark.taken), time: Math.round(this.waveT) });
+      s.mark = { kills: s.kills, damage: s.damage, taken: s.taken };
+    }
+  }
+
   private endWave() {
+    this.logWave();
     const victory = this.wave >= TOTAL_WAVES;
     for (const e of this.enemies) this.emit(['die', e.id, Math.round(e.x), Math.round(e.y), e.kind]);
     if (this.boss && !this.boss.dead) this.emit(['msg', `${this.boss.def.name}逃走了……`]);
@@ -402,6 +417,7 @@ export class GameSim {
     this.enemies = this.enemies.filter((e) => !e.dead);
 
     if (this.players.every((p) => p.down || !p.alive)) {
+      this.logWave();
       this.phase = 'over';
       this.emit(['msg', '全员倒下了……']);
       return;
@@ -523,7 +539,9 @@ export class GameSim {
       if (p.regenAcc >= 1) {
         const n = Math.floor(p.regenAcc);
         p.regenAcc -= n;
+        const before = p.hp;
         p.hp = Math.min(p.d.maxHp, p.hp + n);
+        p.stats.healed += p.hp - before;
       }
     }
     updateSkills(this, p, dt);
@@ -898,6 +916,23 @@ export class GameSim {
       revives: p.stats.revives,
       bossKills: p.stats.bossKills,
       damage: Math.round(p.stats.damage),
+      detail: {
+        time: Math.round(this.time),
+        dex: formOf(p.line, p.stage).dex,
+        form: formOf(p.line, p.stage).name,
+        kills: { ...p.stats.rankKills },
+        topKills: Object.entries(p.stats.killsBy).sort((a, b) => b[1] - a[1]).slice(0, 8),
+        damageTaken: Math.round(p.stats.taken),
+        healed: Math.round(p.stats.healed),
+        crits: p.stats.crits,
+        dodges: p.stats.dodges,
+        moneySpent: Math.round(p.stats.moneySpent),
+        skillDmg: Object.entries(p.stats.skillDmg).map(([k, v]) => [k, Math.round(v)] as [string, number]).sort((a, b) => b[1] - a[1]),
+        skills: p.skills.map((s) => ({ id: s.id, lv: s.lv })),
+        items: Object.entries(p.items).filter(([, n]) => n > 0),
+        waves: p.stats.waves,
+        forms: p.stats.forms,
+      },
     };
   }
 

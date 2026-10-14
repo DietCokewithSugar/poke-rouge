@@ -1,0 +1,202 @@
+import { DIFFICULTIES } from '../../shared/difficulty';
+import { ENEMIES } from '../../shared/enemies';
+import { ITEMS } from '../../shared/items';
+import { ACHIEVEMENTS, type RunSummary } from '../../shared/meta';
+import { LINES } from '../../shared/pokemon';
+import type { BoardEntry } from '../../shared/protocol';
+import { SKILLS, TIER_COLOR } from '../../shared/skills';
+import { TYPE_COLOR } from '../../shared/types';
+import { TOTAL_WAVES, WAVES } from '../../shared/waves';
+import { iconImg } from '../gfx/icons';
+import { Animator } from '../gfx/sprites';
+import type { RunReward } from '../save';
+import { h, tip } from './dom';
+import { itemInfo, skillIcon, skillInfo, typeBadge } from './describe';
+import { mount } from './screens';
+
+function fmtTime(sec: number) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m ? `${m} 分 ${String(s).padStart(2, '0')} 秒` : `${s} 秒`;
+}
+
+function fmtNum(n: number) {
+  return n >= 100000 ? `${(n / 10000).toFixed(1)} 万` : n.toLocaleString('zh-CN');
+}
+
+function tile(label: string, value: string | number, sub?: string, color?: string) {
+  return h('div', { class: 'r-tile' },
+    h('div', { class: 'r-tile-label' }, label),
+    h('div', { class: 'r-tile-value', style: color ? `color:${color}` : undefined }, String(value)),
+    sub ? h('div', { class: 'r-tile-sub' }, sub) : null,
+  );
+}
+
+function section(title: string, ...children: (Node | null)[]) {
+  return h('div', { class: 'r-section' }, h('h3', null, title), ...children);
+}
+
+/** 20 格的波次进度条：完成的点亮，首领波标金色 */
+function waveStrip(s: RunSummary) {
+  return h('div', { class: 'r-strip' }, Array.from({ length: TOTAL_WAVES }, (_, i) => {
+    const w = i + 1;
+    const boss = !!WAVES[i].boss;
+    const cls = w <= s.wavesCleared ? 'done' : w === s.wavesCleared + 1 && !s.victory ? 'fail' : '';
+    const el = h('div', { class: `r-cell ${cls} ${boss ? 'boss' : ''}` }, boss ? '★' : '');
+    tip(el, () => `第 ${w} 波${boss ? `（首领：${ENEMIES[WAVES[i].boss!].name}）` : ''}${cls === 'done' ? ' · 已完成' : cls === 'fail' ? ' · 在这一波倒下' : ''}`);
+    return el;
+  }));
+}
+
+/** 每波击败数柱状图 */
+function waveChart(s: RunSummary) {
+  const waves = s.detail.waves;
+  if (!waves.length) return h('div', { class: 'muted small' }, '没有记录');
+  const max = Math.max(1, ...waves.map((w) => w.kills));
+  return h('div', { class: 'r-chart' }, waves.map((w) => {
+    const boss = !!WAVES[w.w - 1]?.boss;
+    const bar = h('div', { class: 'r-bar-wrap' },
+      h('div', { class: 'r-bar-num' }, w.kills),
+      h('div', { class: `r-bar ${boss ? 'boss' : ''}`, style: `height:${Math.max(4, (w.kills / max) * 100)}%` }),
+      h('div', { class: 'r-bar-label' }, w.w),
+    );
+    tip(bar, () => h('div', { class: 'info' },
+      h('b', null, `第 ${w.w} 波${boss ? ' · 首领波' : ''}`),
+      h('div', { class: 'small' }, `击败 ${w.kills} 只`),
+      h('div', { class: 'small' }, `造成伤害 ${fmtNum(w.dmg)}`),
+      h('div', { class: 'small' }, `承受伤害 ${fmtNum(w.taken)}`),
+      h('div', { class: 'small' }, `用时 ${w.time} 秒`),
+    ));
+    return bar;
+  }));
+}
+
+/** 技能伤害占比 */
+function skillChart(s: RunSummary) {
+  const rows = s.detail.skillDmg.filter(([, v]) => v > 0);
+  const total = rows.reduce((a, [, v]) => a + v, 0) || 1;
+  const held = new Map(s.detail.skills.map((x) => [x.id, x.lv]));
+  const list = h('div', { class: 'r-skills' });
+  const max = rows[0]?.[1] ?? 1;
+  for (const [id, v] of rows) {
+    const def = SKILLS[id];
+    const lv = held.get(id);
+    const name = def ? def.name : id === '_dot' ? '灼伤 / 中毒 / 寄生' : '反伤等其它';
+    const color = def ? TYPE_COLOR[def.type] : '#a0a8b8';
+    const row = h('div', { class: `r-skill ${def && lv === undefined ? 'forgot' : ''}` },
+      def ? skillIcon(id, lv ?? 1, true) : h('div', { class: 'skill-ico small', style: `--tc:${color}` }, h('span', null, id === '_dot' ? '毒' : '反')),
+      h('div', { class: 'r-skill-name' }, name, lv && lv > 1 ? ` +${lv - 1}` : '', def && lv === undefined ? h('span', { class: 'muted small' }, ' （已遗忘）') : null),
+      h('div', { class: 'r-skill-bar' }, h('div', { style: `width:${(v / max) * 100}%;background:${color}` })),
+      h('div', { class: 'r-skill-num' }, `${fmtNum(v)} · ${Math.round((v / total) * 100)}%`),
+    );
+    if (def) tip(row, () => skillInfo(id, lv ?? 1, s.line));
+    list.appendChild(row);
+  }
+  // 持有但没有造成伤害的技能（护盾、回复等）
+  for (const x of s.detail.skills) {
+    if (rows.some(([id]) => id === x.id)) continue;
+    const row = h('div', { class: 'r-skill' }, skillIcon(x.id, x.lv, true), h('div', { class: 'r-skill-name' }, SKILLS[x.id].name, x.lv > 1 ? ` +${x.lv - 1}` : ''), h('div', { class: 'r-skill-bar' }), h('div', { class: 'r-skill-num muted' }, '辅助技能'));
+    tip(row, () => skillInfo(x.id, x.lv, s.line));
+    list.appendChild(row);
+  }
+  return list;
+}
+
+function itemGrid(s: RunSummary) {
+  const items = s.detail.items.filter(([id]) => ITEMS[id]).sort((a, b) => ITEMS[b[0]].tier - ITEMS[a[0]].tier || b[1] - a[1]);
+  if (!items.length) return h('div', { class: 'muted small' }, '这一局没有持有道具');
+  return h('div', { class: 'r-items' }, items.map(([id, n]) => {
+    const it = ITEMS[id];
+    const cell = h('div', { class: `item-cell tier${it.tier}`, style: `--tc:${TIER_COLOR[it.tier]}` }, iconImg(it.icon, 3), n > 1 ? h('i', null, `×${n}`) : null);
+    tip(cell, () => itemInfo(id, n));
+    return cell;
+  }));
+}
+
+function topKills(s: RunSummary) {
+  const list = s.detail.topKills.filter(([id]) => ENEMIES[id]);
+  if (!list.length) return h('div', { class: 'muted small' }, '没有击败任何宝可梦');
+  return h('div', { class: 'r-kills' }, list.map(([id, n]) => {
+    const e = ENEMIES[id];
+    return h('div', { class: 'r-kill' }, Animator.portrait(e.dex, 1), h('div', { class: 'small' }, e.name), h('b', null, `×${n}`));
+  }));
+}
+
+export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: BoardEntry[], you: number, onContinue: () => void, label: string) {
+  const head = h('div', { class: 'r-head' },
+    h('h2', { class: victory ? 'gold' : '' }, victory ? '通关！你是真正的宝可梦大师！' : '眼前一片漆黑……'),
+    h('button', { class: 'btn gold big', onclick: onContinue }, label),
+  );
+  if (!s) {
+    mount(root, h('div', { class: 'box results' }, head), 'results');
+    return;
+  }
+  const d = s.detail;
+  const D = DIFFICULTIES[s.difficulty];
+  const L = LINES[s.line];
+  const kills = d.kills.minion + d.kills.elite + d.kills.boss;
+  const evoPath = h('div', { class: 'r-evo' }, d.forms.map((dex, i) => [
+    i ? h('span', { class: 'evo-arrow' }, '→') : null,
+    h('div', { class: 'r-evo-form' }, Animator.portrait(dex, 1)),
+  ]));
+  const hero = h('div', { class: 'r-hero' },
+    h('div', { class: 'r-hero-portrait' }, Animator.portrait(d.dex, 3)),
+    h('div', null,
+      h('div', { class: 'big' }, `${d.form}  Lv${s.level}`),
+      h('div', null, ...L.forms.find((f) => f.dex === d.dex)!.types.map(typeBadge)),
+      h('div', { class: 'small', style: `color:${D.color}` }, `${D.name}模式${s.players > 1 ? ` · ${s.players} 人联机` : ' · 单人'}`),
+      d.forms.length > 1 ? evoPath : h('div', { class: 'muted small' }, L.forms.length > 1 ? '全程没有进化' : ''),
+    ),
+  );
+  const tiles = h('div', { class: 'r-tiles' },
+    tile('游戏时长', fmtTime(d.time)),
+    tile('完成波次', `${s.wavesCleared} / ${TOTAL_WAVES}`, victory ? '通关' : `倒在第 ${s.wavesCleared + 1} 波`, victory ? '#ffd23f' : undefined),
+    tile('击败', kills, `小怪 ${d.kills.minion} · 精英 ${d.kills.elite} · 首领 ${d.kills.boss}`),
+    tile('造成伤害', fmtNum(s.damage), `暴击 ${d.crits} 次 · 效果拔群 ${s.superEff} 次`),
+    tile('承受伤害', fmtNum(d.damageTaken), `闪避 ${d.dodges} 次`),
+    tile('回复', fmtNum(d.healed)),
+    tile('获得金钱', `₽${fmtNum(s.moneyEarned)}`, `花费 ₽${fmtNum(d.moneySpent)}`),
+    tile('道具 / 技能', `${d.items.reduce((a, [, n]) => a + n, 0)} / ${d.skills.length}`),
+  );
+
+  const rewards = reward ? h('div', { class: 'r-reward' },
+    h('div', { class: 'reward' }, iconImg('stardust', 3), `获得星之沙 +${reward.stardust}`),
+    reward.newAchievements.length ? h('div', { class: 'r-achs' },
+      h('div', { class: 'small gold' }, `达成 ${reward.newAchievements.length} 个新成就`),
+      reward.newAchievements.map((a) => {
+        const def = ACHIEVEMENTS.find((x) => x.id === a.id);
+        const unlock = a.unlocks ? `解锁 ${LINES[a.unlocks].name}！` : def?.unlocksDifficulty ? `解锁${DIFFICULTIES[def.unlocksDifficulty].name}难度！` : '';
+        const el = h('div', { class: `r-ach ${unlock ? 'unlock' : ''}` }, h('b', null, `★ ${a.name}`), h('span', { class: 'muted' }, ` +${a.reward}`), unlock ? h('span', { class: 'gold' }, ` · ${unlock}`) : null);
+        if (def) tip(el, () => def.desc);
+        return el;
+      }),
+    ) : null,
+  ) : null;
+
+  const boardEl = board.length > 1 ? section('队伍',
+    h('table', { class: 'board' },
+      h('tr', null, h('th', null, '训练家'), h('th', null, '宝可梦'), h('th', null, '等级'), h('th', null, '击败'), h('th', null, '伤害'), h('th', null, '承伤'), h('th', null, '救援')),
+      board.map((b) => h('tr', { class: b.id === you ? 'me' : '' },
+        h('td', null, b.name),
+        h('td', { class: 'board-mon' }, Animator.portrait(b.dex, 1), LINES[b.line].forms.find((f) => f.dex === b.dex)?.name ?? LINES[b.line].name),
+        h('td', null, b.level), h('td', null, b.kills), h('td', null, fmtNum(b.damage)), h('td', null, fmtNum(b.taken)), h('td', null, b.revives))),
+    )) : null;
+
+  mount(root, h('div', { class: 'box results' },
+    head,
+    h('div', { class: 'r-grid' },
+      h('div', { class: 'r-col' },
+        hero,
+        tiles,
+        section('波次进度', waveStrip(s)),
+        section('每波击败数', waveChart(s)),
+        section('技能伤害', skillChart(s)),
+      ),
+      h('div', { class: 'r-col' },
+        rewards,
+        section(`持有道具（${d.items.reduce((a, [, n]) => a + n, 0)}）`, itemGrid(s)),
+        section('最常击败的宝可梦', topKills(s)),
+        boardEl,
+      ),
+    ),
+  ), 'results');
+}

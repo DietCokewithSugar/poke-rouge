@@ -4,6 +4,8 @@ import type { SkillDef, StatusKind } from '../skills';
 import type { Derived, Mods, TypeMods } from '../stats';
 import type { PType } from '../types';
 
+export interface WaveLog { w: number; kills: number; dmg: number; taken: number; time: number }
+
 export interface OwnedSkill {
   id: string;
   lv: number;
@@ -75,6 +77,14 @@ export interface SimPlayer {
   stats: {
     kills: number; damage: number; superEff: number; moneyEarned: number; revives: number;
     evolved: boolean; skillsFull: boolean; foreignSkill: boolean; bossKills: string[]; maxItems: number;
+    // 结算界面用的详细统计
+    killsBy: Record<string, number>;
+    rankKills: { minion: number; elite: number; boss: number };
+    skillDmg: Record<string, number>;
+    taken: number; healed: number; crits: number; dodges: number; moneySpent: number;
+    forms: number[];
+    waves: WaveLog[];
+    mark: { kills: number; damage: number; taken: number };
   };
 }
 

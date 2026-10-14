@@ -74,6 +74,28 @@ export interface RunSummary {
   revives: number;
   bossKills: string[];
   damage: number;
+  /** 结算界面的详细统计 */
+  detail: RunDetail;
+}
+
+export interface RunDetail {
+  /** 本局总时长（秒，包括商店，不含暂停） */
+  time: number;
+  dex: number;
+  form: string;
+  kills: { minion: number; elite: number; boss: number };
+  topKills: [string, number][];
+  damageTaken: number;
+  healed: number;
+  crits: number;
+  dodges: number;
+  moneySpent: number;
+  /** 各技能造成的伤害；_dot 为灼伤/中毒等持续伤害，_other 为反伤等 */
+  skillDmg: [string, number][];
+  skills: { id: string; lv: number }[];
+  items: [string, number][];
+  waves: { w: number; kills: number; dmg: number; taken: number; time: number }[];
+  forms: number[];
 }
 
 export interface LifetimeStats {

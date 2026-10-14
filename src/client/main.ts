@@ -2,7 +2,7 @@ import './style.css';
 import { ENEMIES } from '../shared/enemies';
 import { LINES, type LineId } from '../shared/pokemon';
 import type { DifficultyId } from '../shared/difficulty';
-import { PROTOCOL_VERSION, type C2S, type LobbyPlayer, type ServerStats } from '../shared/protocol';
+import { PROTOCOL_VERSION, type BoardEntry, type C2S, type LobbyPlayer, type ServerStats } from '../shared/protocol';
 import type { MeState, PublicState } from '../shared/sim/game';
 import { BIOMES } from '../shared/waves';
 import { initAudio, playMusic, setVolume, sfx } from './audio';
@@ -19,8 +19,9 @@ import { $, clear, toast } from './ui/dom';
 import { Hud } from './ui/hud';
 import { Intermission } from './ui/intermission';
 import {
-  BrowseScreen, achievementsScreen, creditsScreen, labScreen, lobbyScreen, onlineText, pauseScreen, resultsScreen, selectScreen, settingsScreen, titleScreen,
+  BrowseScreen, achievementsScreen, creditsScreen, labScreen, lobbyScreen, onlineText, pauseScreen, selectScreen, settingsScreen, titleScreen,
 } from './ui/screens';
+import { resultsScreen } from './ui/results';
 
 /** 触屏设备开局时尝试全屏并锁定横屏（需要在点击事件里调用）。 */
 function mobileFullscreen() {
@@ -219,6 +220,7 @@ class App {
 
   private loading(text: string) {
     clear(this.screen);
+    this.screen.dataset.screen = 'loading';
     this.screen.classList.remove('hidden');
     this.screen.innerHTML = `<div class="box"><h3>${text}</h3></div>`;
   }
@@ -360,11 +362,9 @@ class App {
     }
   }
 
-  private endGame(victory: boolean, summary: import('../shared/meta').RunSummary | null, board: { id: number; name: string; line: LineId; level: number; kills: number; damage: number }[]) {
+  private endGame(victory: boolean, summary: import('../shared/meta').RunSummary | null, board: BoardEntry[]) {
     const reward = summary ? applyRun(this.profile, summary) : null;
-    for (const a of reward?.newAchievements ?? []) {
-      toast(`成就达成：${a.name}${a.unlocks ? `（解锁 ${LINES[a.unlocks].name}）` : ''}`, 'gold', 4500);
-    }
+    // 新成就直接在结算界面里列出，不再弹提示挡住统计
     if (reward?.newAchievements.length) sfx('achieve');
     this.leaveGame();
     this.where = 'results';
