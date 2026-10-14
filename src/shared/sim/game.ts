@@ -4,7 +4,7 @@ import type { RunSummary } from '../meta';
 import { LINES, formOf, type LineId } from '../pokemon';
 import { Rng } from '../rng';
 import { SKILLS } from '../skills';
-import { TOTAL_WAVES, WAVES, enemyDmgMult, enemyHpMult, waveDuration } from '../waves';
+import { TOTAL_WAVES, WAVES, enemyDmgMult, enemyHpMult, spawnRateMult, waveDuration } from '../waves';
 import { updateEnemy } from './ai';
 import { PLAYER_R, beamHit, healPlayer, hitEnemy, hurtPlayer, updateSkills } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
@@ -102,6 +102,7 @@ export class GameSim {
   private elitesDone = 0;
   private treasureAt = -1;
   private bossSpawned = false;
+  private bossDown = false;
   private enraged = false;
   private readonly startPlayers: number;
 
@@ -193,6 +194,7 @@ export class GameSim {
     const credit = killer ?? this.players.find((p) => p.id === e.lastHit) ?? null;
     if (credit) credit.stats.kills++;
     if (e.def.rank === 'boss') {
+      this.bossDown = true;
       this.bossKills.push(e.def.id);
       for (const p of this.players) p.stats.bossKills.push(e.def.id);
       this.emit(['msg', `${e.def.name}被打倒了！`]);
@@ -248,6 +250,7 @@ export class GameSim {
     this.spawnAcc = 0;
     this.elitesDone = 0;
     this.bossSpawned = false;
+    this.bossDown = false;
     this.enraged = false;
     this.enemies = [];
     this.projs = [];
@@ -329,12 +332,17 @@ export class GameSim {
   private collect(p: SimPlayer, pk: Pickup, emit = true) {
     if (emit) this.emit(['pick', pk.id, p.id]);
     if (pk.kind === 'candy') {
-      const xp = pk.value * p.d.xpMult;
-      const money = pk.value * p.d.moneyMult;
-      p.money += money;
-      p.stats.moneyEarned += money;
-      addXp(this, p, xp);
-      for (const q of this.players) if (q !== p && q.items.exp_share) addXp(this, q, pk.value * 0.25 * q.d.xpMult);
+      // 联机时糖果全队共享（类似学习装置），每人分到的份额让收入与单人大致相当
+      const n = this.players.length;
+      const share = n === 1 ? 1 : 1.05 / (1 + 0.6 * (n - 1));
+      for (const q of this.players) {
+        const v = pk.value * share;
+        const money = v * q.d.moneyMult;
+        q.money += money;
+        q.stats.moneyEarned += money;
+        addXp(this, q, v * q.d.xpMult);
+        this.dirty.add(q.id);
+      }
     } else if (pk.kind === 'berry') {
       healPlayer(this, p, 4 + p.d.maxHp * 0.06);
     } else {
@@ -371,14 +379,15 @@ export class GameSim {
       return;
     }
     const W = WAVES[this.wave - 1];
-    if (this.waveT >= this.waveDur) {
-      if (this.wave === TOTAL_WAVES && W.boss && this.boss && !this.boss.dead) {
+    const finalBoss = this.wave === TOTAL_WAVES && !!W.boss;
+    if (finalBoss && this.bossDown) {
+      this.endWave();
+    } else if (this.waveT >= this.waveDur) {
+      if (finalBoss) {
         if (!this.enraged) { this.enraged = true; this.emit(['msg', '梦幻发怒了！击败它才能通关！']); }
       } else {
         this.endWave();
       }
-    } else if (this.wave === TOTAL_WAVES && this.bossSpawned && !this.boss) {
-      this.endWave();
     }
   }
 
@@ -416,7 +425,7 @@ export class GameSim {
     }
     if (this.waveT > this.waveDur - 1.5) return;
     const progress = this.waveT / this.waveDur;
-    let rate = W.rate * (0.7 + 0.6 * progress) * (1 + 0.6 * (n - 1));
+    let rate = W.rate * spawnRateMult(this.wave) * (0.7 + 0.6 * progress) * (1 + 0.6 * (n - 1));
     if (this.boss) rate *= 0.6;
     this.spawnAcc += rate * dt;
     const maxAlive = 100 + 30 * (n - 1);

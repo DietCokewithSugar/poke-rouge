@@ -130,7 +130,7 @@ export function enemyShoot(sim: GameSim, e: Enemy, ang: number, override?: { cou
   const spread = override?.spread ?? shot.spread ?? 0;
   const speed = override?.speed ?? shot.speed;
   const ring = spread >= TAU - 0.01;
-  const power = (override?.power ?? shot.power) * enemyDmgMult(sim.wave);
+  const power = (override?.power ?? shot.power) * enemyDmgMult(sim.wave) * 0.85;
   for (let i = 0; i < n; i++) {
     const a = ring ? ang + (i / n) * TAU : n > 1 ? ang + spread * (i / (n - 1) - 0.5) : ang;
     sim.spawnProj({
@@ -258,7 +258,7 @@ function snorlax(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number, d
         ai.state = 0;
         sim.emit(['boom', r1(e.x), r1(e.y), 56, 'e_slam']);
         for (const p of sim.players) {
-          if (Math.hypot(p.x - e.x, p.y - e.y) <= 56 + PLAYER_R) hurtPlayer(sim, p, e.dmg * 1.6, 'phys', e);
+          if (Math.hypot(p.x - e.x, p.y - e.y) <= 56 + PLAYER_R) hurtPlayer(sim, p, e.dmg * 1.3, 'phys', e);
         }
         enemyShoot(sim, e, 0, { count: 12, spread: TAU, speed: 120, fx: 'e_ring' });
       }

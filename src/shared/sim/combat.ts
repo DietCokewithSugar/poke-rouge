@@ -307,9 +307,13 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
       }
       const rad = (s.radius ?? 30) * Math.sqrt(rm);
       for (let i = 0; i < n; i++) {
-        const e = targets[i % targets.length];
-        const jitter = i >= targets.length ? 24 : 0;
-        const x = e.x + sim.rng.range(-jitter, jitter), y = e.y + sim.rng.range(-jitter, jitter);
+        let x: number, y: number;
+        if (i < targets.length) { x = targets[i].x; y = targets[i].y; }
+        else {
+          // 目标不够时，多出来的打击随机落在附近，不会全部叠在同一个敌人身上
+          const a = sim.rng.range(0, Math.PI * 2), d = sim.rng.range(rad * 1.6, rad * 3);
+          x = t.x + Math.cos(a) * d; y = t.y + Math.sin(a) * d;
+        }
         const delay = (s.delay ?? 0.3) + i * 0.08;
         sim.strikes.push({ owner: p.id, skill: s, x, y, r: rad, t: delay, dmg: base, type: s.type, fx: s.fx, cat: s.cat === 'phys' ? 'phys' : 'spec' });
         sim.emit(['fx', s.fx + '_pre', Math.round(x), Math.round(y), 0, Math.round(rad), Math.round(delay * 1000), p.id]);

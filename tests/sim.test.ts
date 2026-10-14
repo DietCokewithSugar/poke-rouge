@@ -124,3 +124,29 @@ test('商店：购买、锁定、刷新', () => {
   assert.equal(sim.phase, 'wave');
   assert.equal(sim.wave, 2);
 });
+
+test('最终波：必须击败梦幻才能通关', () => {
+  const sim = new GameSim([{ id: 1, name: 'a', line: 'mewtwo', meta: {} }], 5);
+  const p = sim.players[0];
+  p.levelMods.maxHp += 5000;
+  sim.recompute(p);
+  sim.wave = 19;
+  sim.waveT = sim.waveDur;
+  sim.step(1 / 30);
+  assert.equal(sim.phase, 'inter');
+  while (p.cards) sim.command(1, { t: 'level', i: 0, slot: 0 });
+  p.crates = [];
+  sim.command(1, { t: 'waveReady', on: true });
+  sim.step(1 / 30);
+  assert.equal(sim.wave, 20);
+  for (let i = 0; i < 30 * 8; i++) { p.hp = p.d.maxHp; sim.step(1 / 30); }
+  assert.equal(sim.phase, 'wave', '梦幻出场前后都不应提前通关');
+  assert.ok(sim.boss && sim.boss.def.id === 'mew');
+  sim.waveT = sim.waveDur + 1;
+  for (let i = 0; i < 30; i++) { p.hp = p.d.maxHp; sim.step(1 / 30); }
+  assert.equal(sim.phase, 'wave', '倒计时结束后梦幻发怒，战斗继续');
+  sim.killEnemy(sim.boss!, p);
+  sim.step(1 / 30);
+  assert.equal(sim.phase, 'won');
+  assert.ok(sim.summary(p).victory);
+});

@@ -27,6 +27,18 @@ export function botMove(sim: GameSim, p: SimPlayer, dt: number) {
     const danger = e.def.rank === 'minion' ? 1 : 2.5;
     if (d < 70) { fx += (dx / d) * danger * (70 - d) / 70 * 2.2; fy += (dy / d) * danger * (70 - d) / 70 * 2.2; }
   }
+  for (const st of sim.strikes) {
+    if (!st.enemy) continue;
+    const dx = p.x - st.x, dy = p.y - st.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if (d < st.r + 14) { fx += (dx / d) * 4; fy += (dy / d) * 4; }
+  }
+  for (const e of sim.enemies) {
+    if (e.def.ai !== 'bomber' || e.ai.state !== 1) continue;
+    const dx = p.x - e.x, dy = p.y - e.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if (d < (e.def.blast?.radius ?? 30) + 12) { fx += (dx / d) * 4; fy += (dy / d) * 4; }
+  }
   for (const pr of sim.projs) {
     if (pr.owner >= 0) continue;
     const dx = p.x - pr.x, dy = p.y - pr.y;

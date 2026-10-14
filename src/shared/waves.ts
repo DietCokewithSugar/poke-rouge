@@ -43,15 +43,23 @@ export function waveDuration(wave: number): number {
 
 export function enemyHpMult(wave: number): number {
   const w = wave - 1;
-  return 1 + 0.3 * w + 0.012 * w * w;
+  const late = 1 + 0.1 * Math.max(0, wave - 10);
+  return (1 + 0.3 * w + 0.012 * w * w) * late;
 }
 
 export function enemyDmgMult(wave: number): number {
-  return 1 + 0.1 * (wave - 1);
+  const w = wave - 1;
+  return 1 + 0.1 * w + 0.004 * w * w;
+}
+
+/** 后期刷怪更密集 */
+export function spawnRateMult(wave: number): number {
+  return 1 + 0.035 * Math.max(0, wave - 10);
 }
 
 export function priceMult(wave: number): number {
-  return 1 + 0.08 * (wave - 1);
+  const w = wave - 1;
+  return 1 + 0.09 * w + 0.003 * w * w;
 }
 
 export const BIOMES = [

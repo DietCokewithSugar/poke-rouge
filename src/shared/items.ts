@@ -13,7 +13,7 @@ export interface ItemDef {
   typeMods?: TypeMods;
   max?: number;
   /** 特殊效果标记，由模拟层处理 */
-  special?: 'sash' | 'revive' | 'rare_candy' | 'evo_stone' | 'eviolite' | 'exp_share';
+  special?: 'sash' | 'revive' | 'rare_candy' | 'evo_stone' | 'eviolite';
   /** 只对某个精灵系列出现 */
   only?: string;
   icon: string;
@@ -40,7 +40,7 @@ const LIST: ItemDef[] = [
   { id: 'black_belt', name: '黑带', tier: 1, price: 18, typeMods: { fighting: 12 }, icon: 'belt' },
   { id: 'amulet_coin', name: '护符金币', tier: 1, price: 24, mods: { money: 10 }, icon: 'coin' },
   { id: 'oran_berry', name: '橙橙果', tier: 1, price: 16, mods: { regen: 3 }, icon: 'berry' },
-  { id: 'exp_share', name: '学习装置', tier: 1, price: 24, mods: { xp: 15 }, special: 'exp_share', icon: 'expshare', tcg: true, desc: '联机时，队友击败敌人也会分给你少量经验。' },
+  { id: 'exp_share', name: '学习装置', tier: 1, price: 24, mods: { xp: 15, pickup: 20 }, icon: 'expshare', tcg: true },
   { id: 'protein', name: '攻击增强剂', tier: 1, price: 22, mods: { atk: 6 }, icon: 'vitamin_r' },
   { id: 'calcium', name: '特攻增强剂', tier: 1, price: 22, mods: { spa: 6 }, icon: 'vitamin_b' },
   { id: 'iron', name: '防御增强剂', tier: 1, price: 20, mods: { def: 6 }, icon: 'vitamin_g' },

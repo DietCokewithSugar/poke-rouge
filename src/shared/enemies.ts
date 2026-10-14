@@ -66,7 +66,7 @@ const LIST: EnemyDef[] = [
   E({ id: 'ekans', dex: 23, name: '阿柏蛇', types: ['poison'], hp: 18, dmg: 6, speed: 46, r: 8, ai: 'charge', rank: 'minion', candy: 1 }),
   E({ id: 'geodude', dex: 74, name: '小拳石', types: ['rock', 'ground'], hp: 42, dmg: 7, speed: 30, r: 9, ai: 'tank', rank: 'minion', candy: 2, knockResist: 0.7 }),
   E({ id: 'magnemite', dex: 81, name: '小磁怪', types: ['electric', 'steel'], hp: 18, dmg: 4, speed: 36, r: 7, ai: 'shooter', rank: 'minion', candy: 1, flying: true,
-    shot: { power: 5, speed: 150, cd: 2.4, range: 160, fx: 'e_shock' } }),
+    shot: { power: 5, speed: 125, cd: 2.4, range: 160, fx: 'e_shock' } }),
   E({ id: 'gastly', dex: 92, name: '鬼斯', types: ['ghost', 'poison'], hp: 16, dmg: 5, speed: 44, r: 8, ai: 'shooter', rank: 'minion', candy: 1, flying: true,
     shot: { power: 5, speed: 110, cd: 2.6, range: 150, fx: 'e_shadow' } }),
   E({ id: 'voltorb', dex: 100, name: '霹雳电球', types: ['electric'], hp: 14, dmg: 2, speed: 68, r: 7, ai: 'bomber', rank: 'minion', candy: 1,
@@ -87,7 +87,7 @@ const LIST: EnemyDef[] = [
     shot: { power: 6, speed: 85, cd: 2.8, range: 150, count: 2, spread: 0.4, fx: 'e_spore', slow: 0.45 } }),
   E({ id: 'graveler', dex: 75, name: '隆隆石', types: ['rock', 'ground'], hp: 95, dmg: 12, speed: 26, r: 10, ai: 'tank', rank: 'minion', candy: 3, knockResist: 0.8 }),
   E({ id: 'magneton', dex: 82, name: '三合一磁怪', types: ['electric', 'steel'], hp: 44, dmg: 6, speed: 34, r: 9, ai: 'shooter', rank: 'minion', candy: 2, flying: true,
-    shot: { power: 6, speed: 160, cd: 2.4, range: 170, count: 3, spread: 0.35, fx: 'e_shock' } }),
+    shot: { power: 6, speed: 130, cd: 2.6, range: 170, count: 3, spread: 0.45, fx: 'e_shock' } }),
   E({ id: 'haunter', dex: 93, name: '鬼斯通', types: ['ghost', 'poison'], hp: 40, dmg: 8, speed: 46, r: 9, ai: 'shooter', rank: 'minion', candy: 2, flying: true,
     shot: { power: 7, speed: 120, cd: 2.2, range: 160, fx: 'e_shadow' } }),
   E({ id: 'electrode', dex: 101, name: '顽皮雷弹', types: ['electric'], hp: 32, dmg: 3, speed: 88, r: 9, ai: 'bomber', rank: 'minion', candy: 2,
@@ -108,15 +108,15 @@ const LIST: EnemyDef[] = [
   // 精英
   E({ id: 'beedrill', dex: 15, name: '大针蜂', types: ['bug', 'poison'], hp: 210, dmg: 10, speed: 56, r: 10, ai: 'elite_beedrill', rank: 'elite', candy: 16, flying: true, knockResist: 0.7,
     shot: { power: 7, speed: 170, cd: 2.0, range: 180, count: 3, spread: 0.3, fx: 'e_sting' } }),
-  E({ id: 'onix', dex: 95, name: '大岩蛇', types: ['rock', 'ground'], hp: 520, dmg: 16, speed: 30, r: 15, ai: 'elite_onix', rank: 'elite', candy: 26, knockResist: 0.95,
+  E({ id: 'onix', dex: 95, name: '大岩蛇', types: ['rock', 'ground'], hp: 440, dmg: 16, speed: 30, r: 15, ai: 'elite_onix', rank: 'elite', candy: 26, knockResist: 0.95,
     shot: { power: 14, speed: 0, cd: 3.0, range: 220, fx: 'e_rock' } }),
   E({ id: 'gengar', dex: 94, name: '耿鬼', types: ['ghost', 'poison'], hp: 430, dmg: 12, speed: 50, r: 11, ai: 'elite_gengar', rank: 'elite', candy: 26, knockResist: 0.9,
     shot: { power: 10, speed: 130, cd: 1.6, range: 200, size: 6, fx: 'e_shadow' } }),
 
   // 首领
-  E({ id: 'snorlax', dex: 143, name: '卡比兽', types: ['normal'], hp: 560, dmg: 18, speed: 26, r: 18, ai: 'boss_snorlax', rank: 'boss', candy: 70, knockResist: 1, scale: 2,
+  E({ id: 'snorlax', dex: 143, name: '卡比兽', types: ['normal'], hp: 500, dmg: 18, speed: 26, r: 18, ai: 'boss_snorlax', rank: 'boss', candy: 70, knockResist: 1, scale: 2,
     shot: { power: 9, speed: 80, cd: 4, range: 300, count: 8, spread: Math.PI * 2, fx: 'e_bubble', slow: 0.4 } }),
-  E({ id: 'mew', dex: 151, name: '梦幻', types: ['psychic'], hp: 760, dmg: 16, speed: 60, r: 14, ai: 'boss_mew', rank: 'boss', candy: 150, knockResist: 1, scale: 2, flying: true,
+  E({ id: 'mew', dex: 151, name: '梦幻', types: ['psychic'], hp: 1900, dmg: 16, speed: 60, r: 14, ai: 'boss_mew', rank: 'boss', candy: 150, knockResist: 1, scale: 2, flying: true,
     shot: { power: 11, speed: 110, cd: 2, range: 400, size: 5, fx: 'e_psy' } }),
 ];
 

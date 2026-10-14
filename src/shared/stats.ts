@@ -108,7 +108,7 @@ export function derive(base: BaseStats, m: Mods): Derived {
     physTaken: 100 / (50 + def),
     specTaken: 100 / (50 + spd),
     moveSpeed: clamp(80 + spe * 0.5, 50, 220),
-    cdMult: m.haste >= 0 ? 1 / (1 + m.haste / 100) : 1 + -m.haste / 100,
+    cdMult: m.haste >= 0 ? Math.max(0.5, 1 / (1 + m.haste / 100)) : 1 + -m.haste / 100,
     crit: clamp(0.05 + m.crit / 100, 0, 1),
     rangeMult: clamp(1 + m.range / 100, 0.5, 3),
     dodge: clamp(m.dodge / 100, 0, 0.6),
