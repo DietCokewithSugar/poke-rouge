@@ -3,10 +3,18 @@ import { DIFFICULTIES, type DifficultyId } from '../shared/difficulty';
 import { LINES, LINE_IDS, type LineId } from '../shared/pokemon';
 import { validateBuild, type SavedBuild } from '../shared/pvp/build';
 import type { PvpMode } from '../shared/pvp/sim';
+import { defaultUiScale } from './ui/layout';
 
 const KEY = 'poke-rouge-save-v1';
 
-export interface Settings { volume: number; music: number; damageNumbers: boolean; gbFilter: boolean; shake: boolean }
+export interface Settings {
+  volume: number; music: number; damageNumbers: boolean; gbFilter: boolean; shake: boolean;
+  /** 界面大小：100% 时最大的界面占画面 90% */
+  uiScale: number;
+  fps: 30 | 60 | 120;
+  /** 流畅：高分屏上按 1 倍像素渲染画面，减轻显卡负担 */
+  quality: 'high' | 'smooth';
+}
 
 export const PARTY_MAX = 6;
 
@@ -45,7 +53,7 @@ function fresh(): Profile {
     stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0 },
     lastLine: 'charmander',
     lastDifficulty: 'easy',
-    settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true },
+    settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true, uiScale: defaultUiScale(), fps: 60, quality: 'high' },
     seenEnemies: [],
     party: [],
     pvpId: null,

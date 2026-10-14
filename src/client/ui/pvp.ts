@@ -18,7 +18,8 @@ import { Animator } from '../gfx/sprites';
 import { PARTY_MAX, type PartyMon, type Profile } from '../save';
 import { h, tip } from './dom';
 import { itemInfo, skillIcon, skillInfo, typeBadge } from './describe';
-import { mount } from './screens';
+import { mount, portraitSlot, tabs } from './screens';
+import { confirmButton, pager } from './layout';
 
 const TEAM_COLOR = ['#5aa0ff', '#ff6a6a'];
 const fmt = (n: number) => (n >= 100000 ? `${(n / 10000).toFixed(1)} 万` : Math.round(n).toLocaleString('zh-CN'));
@@ -50,19 +51,17 @@ export function monCard(m: PartyMon, opts: { selected?: boolean; onClick?: () =>
   const items = b.items.reduce((a, [, n]) => a + n, 0);
   const rec = m.pvp.wins + m.pvp.losses + m.pvp.draws ? `${m.pvp.wins} 胜 ${m.pvp.losses} 负` : '还没有对战';
   return h('div', { class: `mon-card ${opts.selected ? 'on' : ''}`, onclick: opts.onClick, tabindex: opts.onClick ? 0 : undefined, 'data-pad': opts.onClick ? '1' : undefined },
-    h('div', { class: 'mon-portrait' }, Animator.portrait(f.dex, 2)),
+    portraitSlot(f.dex, 2, 'mon-portrait'),
     h('div', { class: 'mon-body' },
       h('div', { class: 'mon-name' }, f.name, h('span', { class: 'mon-lv' }, ` Lv${b.level}`)),
-      h('div', { class: 'mon-types' }, ...f.types.map(typeBadge)),
-      h('div', { class: 'small muted', title: `道具 ${items} 件 · 技能 ${b.skills.length} 个` }, `强度 ${buildPower(b)}`),
-      h('div', { class: 'small muted' }, originText(m)),
-      h('div', { class: 'small' }, rec),
+      h('div', { class: 'small muted', title: `道具 ${items} 件 · 技能 ${b.skills.length} 个` }, ...f.types.map(typeBadge), ` 强度 ${buildPower(b)}`),
+      h('div', { class: 'small mon-rec' }, rec),
     ),
     opts.action ?? null,
   );
 }
 
-export function buildDetail(b: SavedBuild, meta: Record<string, number>) {
+export function buildDetail(b: SavedBuild, meta: Record<string, number>, page = 0, onPage: (n: number) => void = () => {}) {
   const p = buildStats(b, meta);
   const d = p.d;
   const stat = (label: string, v: string | number) => h('div', { class: 'bd-stat' }, h('span', null, label), h('b', null, v));
@@ -78,13 +77,15 @@ export function buildDetail(b: SavedBuild, meta: Record<string, number>) {
       tip(el, () => skillInfo(s.id, s.lv, b.line));
       return el;
     })),
-    items.length ? h('div', { class: 'bd-items' }, items.map(([id, n]) => {
-      const it = ITEMS[id];
-      const cell = h('div', { class: `item-cell tier${it.tier}`, style: `--tc:${TIER_COLOR[it.tier]}` }, iconImg(it.icon, 2), n > 1 ? h('i', null, `×${n}`) : null);
-      tip(cell, () => itemInfo(id, n));
-      return cell;
-    })) : h('div', { class: 'small muted' }, '没有道具'),
-    h('div', { class: 'small muted' }, '数值已计入大木研究所的强化'),
+    (() => {
+      const pg = pager(items, 18, page, ([id, n]) => {
+        const it = ITEMS[id];
+        const cell = h('div', { class: `item-cell tier${it.tier}`, style: `--tc:${TIER_COLOR[it.tier]}` }, iconImg(it.icon, 2), n > 1 ? h('i', null, `×${n}`) : null);
+        tip(cell, () => itemInfo(id, n));
+        return cell;
+      }, { cls: 'bd-items', empty: () => h('div', { class: 'small muted' }, '没有道具'), filler: () => h('div', { class: 'item-cell empty' }), onPage, keys: null, label: `道具 ${items.reduce((a, [, n]) => a + n, 0)}` });
+      return h('div', { class: 'bd-items-wrap' }, pg.list, pg.nav);
+    })(),
   );
 }
 
@@ -130,6 +131,8 @@ export class PvpScreen {
   private queued: Queued | null = null;
   private waiting = false;
   private connected: boolean;
+  private itemPage = 0;
+  private boardPage = 0;
 
   constructor(private root: HTMLElement, private p: Profile, private a: PvpActions, connected: boolean) {
     this.connected = connected;
@@ -175,7 +178,7 @@ export class PvpScreen {
     const party = h('div', { class: 'pvp-col pvp-party' },
       h('h3', null, `背包 ${p.party.length} / ${PARTY_MAX}`),
       p.party.length ? h('div', { class: 'party-grid' },
-        p.party.map((m) => monCard(m, { selected: m === sel, onClick: busy ? undefined : () => { sfx('click'); p.pvpPick = m.uid; this.render(); } })),
+        p.party.map((m) => monCard(m, { selected: m === sel, onClick: busy ? undefined : () => { sfx('click'); p.pvpPick = m.uid; this.itemPage = 0; this.render(); } })),
         Array.from({ length: PARTY_MAX - p.party.length }, () => h('div', { class: 'mon-card empty' }, h('span', { class: 'muted small' }, '空位'))),
       ) : h('div', { class: 'party-empty' },
         h('p', null, '背包里还没有宝可梦。'),
@@ -184,14 +187,10 @@ export class PvpScreen {
       ),
       sel ? h('div', { class: 'pvp-detail' },
         h('div', { class: 'row between' },
-          h('b', null, `${formName(sel.build)} 的构筑`),
-          h('button', { class: 'btn small ghost danger', disabled: busy, onclick: () => {
-            if (!confirm(`确定要放生 ${formName(sel.build)} Lv${sel.build.level} 吗？放生后无法找回。`)) return;
-            this.a.release(sel.uid);
-            this.render();
-          } }, '放生'),
+          h('div', { class: 'pvp-detail-title' }, h('b', null, `${formName(sel.build)} Lv${sel.build.level}`), h('span', { class: 'small muted' }, ` ${originText(sel)} · 含研究所强化`)),
+          confirmButton('放生', '再点一次放生', 'btn tiny ghost danger', () => { this.a.release(sel.uid); this.itemPage = 0; this.render(); }, { disabled: busy, title: '放生后无法找回' }),
         ),
-        buildDetail(sel.build, p.upgrades),
+        buildDetail(sel.build, p.upgrades, this.itemPage, (n) => { this.itemPage = n; this.render(); }),
       ) : null,
     );
 
@@ -206,7 +205,7 @@ export class PvpScreen {
         onclick: () => { if (busy) return; sfx('click'); p.pvpMode = id; this.boardMode = id; this.a.board(id); this.render(); },
       },
       h('b', null, M.name),
-      h('small', null, id === '1v1' ? '一对一 · 90 秒' : '四对四 · 120 秒 · 可以救援队友'),
+      h('small', null, id === '1v1' ? '一对一 · 90 秒' : '四对四 · 120 秒 · 可救援'),
       h('small', { class: 'muted' }, r?.games ? `${r.rating} 分 · ${r.wins} 胜 ${r.losses} 负` : '未定级'));
     }));
 
@@ -216,7 +215,7 @@ export class PvpScreen {
         h('div', { class: 'pvp-score' }, h('b', null, rating), h('span', { class: 'muted small' }, rec?.rank ? ` 第 ${rec.rank} 名` : rec?.games ? '' : ' 定级中')),
         h('div', { class: 'tier-bar' }, h('div', { style: `width:${Math.round(T.progress * 100)}%;background:${T.tier.color}` })),
         h('div', { class: 'small muted' }, T.next ? `距离${T.next.name}还差 ${T.next.min - rating} 分` : '最高段位'),
-        rec?.games ? h('div', { class: 'small' }, `${rec.wins} 胜 ${rec.losses} 负 ${rec.draws ? `${rec.draws} 平 ` : ''}· 胜率 ${Math.round((rec.wins / rec.games) * 100)}%${rec.streak > 1 ? ` · ${rec.streak} 连胜` : ''} · 最高 ${rec.best}`) : null,
+        h('div', { class: 'small' }, rec?.games ? `${rec.wins} 胜 ${rec.losses} 负${rec.draws ? ` ${rec.draws} 平` : ''} · 胜率 ${Math.round((rec.wins / rec.games) * 100)}%${rec.streak > 1 ? ` · ${rec.streak} 连胜` : ''}` : '还没有排位记录'),
       ),
     );
 
@@ -239,22 +238,32 @@ export class PvpScreen {
       );
     } else {
       action = h('button', {
-        class: 'btn gold big go pvp-go', disabled: !sel,
+        class: 'btn gold big go pvp-go', 'data-key': 'y', disabled: !sel,
         onclick: () => { if (!sel) return; sfx('click'); this.waiting = true; this.render(); this.a.queue(mode, sel); },
       }, '开始匹配', h('small', null, sel ? `${formName(sel.build)} Lv${sel.build.level} · ${PVP_MODES[mode].name}` : '先选择一只宝可梦'));
     }
 
     const history = this.boards[mode]?.history ?? [];
+    const rules = h('button', { class: 'btn small ghost', 'data-pad': '1' }, '规则');
+    tip(rules, () => h('div', { class: 'info' },
+      h('b', null, '对战规则'),
+      h('div', { class: 'small' }, '技能自动释放，走位躲开对手的招式；只会打到对手。'),
+      h('div', { class: 'small' }, '30% 时间后场地开始缩小，圈外持续掉血；缩到最小后进入加时，伤害逐渐提高。'),
+      h('div', { class: 'small' }, '击倒全部对手获胜；时间到时存活人数多、剩余 HP 多的一方获胜。团战可以站在倒下的队友身边救援。'),
+      h('div', { class: 'small' }, '优先匹配分数接近的训练家，等待越久范围越大，没有真人时由 AI 训练家补位。'),
+    ));
     const arena = h('div', { class: 'pvp-col pvp-arena' },
       modeTabs,
       ratingCard,
       action,
-      h('button', { class: 'btn small ghost', disabled: !sel || busy, onclick: () => { if (sel) { sfx('click'); this.a.practice(mode, sel); } } }, '练习赛（离线 · AI 对手 · 不计分）'),
-      h('div', { class: 'small muted pvp-rules' },
-        '规则：技能自动释放，走位躲开对手的招式。30% 时间后场地开始缩小，圈外会持续掉血。',
-        '击倒全部对手获胜；时间到时存活人数多、剩余 HP 多的一方获胜。优先匹配分数接近的训练家，等待越久范围越大，没有真人时由 AI 训练家补位。',
+      h('div', { class: 'row pvp-sub-actions' },
+        h('button', { class: 'btn small ghost grow', disabled: !sel || busy, onclick: () => { if (sel) { sfx('click'); this.a.practice(mode, sel); } } }, '练习赛（离线 · 不计分）'),
+        rules,
       ),
-      history.length ? h('div', { class: 'pvp-history' }, h('h3', null, '最近对战'), history.map(histRow)) : null,
+      h('div', { class: 'pvp-history' }, h('h3', null, '最近对战'),
+        history.length ? history.slice(0, 3).map(histRow) : h('div', { class: 'small muted' }, '还没有排位记录'),
+        Array.from({ length: Math.max(0, 3 - Math.max(1, history.length)) }, () => h('div', { class: 'hist filler' })),
+      ),
     );
 
     const bm = this.boardMode;
@@ -262,21 +271,27 @@ export class PvpScreen {
     const boardEl = h('div', { class: 'pvp-col pvp-board' },
       h('div', { class: 'row between' },
         h('h3', null, '排行榜'),
-        h('div', { class: 'tabs' }, PVP_MODE_IDS.map((id) => h('button', { class: `tab ${bm === id ? 'on' : ''}`, onclick: () => { this.boardMode = id; this.a.board(id); this.render(); } }, id))),
+        h('div', { class: 'tabs' }, PVP_MODE_IDS.map((id) => h('button', { class: `tab ${bm === id ? 'on' : ''}`, onclick: () => { this.boardMode = id; this.boardPage = 0; this.a.board(id); this.render(); } }, id))),
       ),
-      !this.connected ? h('div', { class: 'muted small' }, '连接服务器后可以查看排行榜') :
-        !board ? h('div', { class: 'muted small' }, '加载中…') :
-          board.rows.length ? h('table', { class: 'board lb' },
-            h('tr', null, h('th', null, '#'), h('th', null, '训练家'), h('th', null, '段位'), h('th', null, '积分'), h('th', null, '胜/负')),
-            board.rows.map(boardRow),
-            board.me && board.me.rank > board.rows.length ? boardRow({ rank: board.me.rank, name: p.name || '训练家', rating: board.me.rating, wins: board.me.wins, losses: board.me.losses, draws: board.me.draws, streak: board.me.streak, dex: sel ? formOf(sel.build.line, sel.build.stage).dex : 0, you: true }) : null,
-          ) : h('div', { class: 'muted small' }, '还没有人上榜，快来成为第一名！'),
-      board ? h('div', { class: 'small muted' }, `共 ${board.players} 位训练家参与排位`) : null,
+      h('div', { class: 'lb-head' }, h('span', null, '#'), h('span', null, '训练家'), h('span', null, '段位'), h('span', null, '积分'), h('span', null, '胜/负')),
+      (() => {
+        const rows = board?.rows ?? [];
+        const pg = pager(rows, 10, this.boardPage, boardRow, {
+          cls: 'lb',
+          empty: () => h('div', { class: 'muted small' }, !this.connected ? '连接服务器后可以查看排行榜' : !board ? '加载中…' : '还没有人上榜，快来成为第一名！'),
+          filler: () => h('div', { class: 'lb-row filler' }),
+          onPage: (n) => { this.boardPage = n; this.render(); },
+        });
+        this.boardPage = pg.page;
+        return h('div', { class: 'lb-wrap' }, pg.list, pg.nav);
+      })(),
+      board?.me?.games ? boardRow({ rank: board.me.rank, name: p.name || '训练家', rating: board.me.rating, wins: board.me.wins, losses: board.me.losses, draws: board.me.draws, streak: board.me.streak, dex: sel ? formOf(sel.build.line, sel.build.stage).dex : 0, you: true }) : h('div', { class: 'lb-row filler' }),
+      h('div', { class: 'small muted' }, board ? `共 ${board.players} 位训练家参与排位` : ''),
     );
 
-    mount(this.root, h('div', { class: 'box pvp' },
-      h('div', { class: 'row between' },
-        h('div', null, h('h2', null, '宝可梦对战'), h('p', { class: 'sub' }, '用背包里的宝可梦和其他训练家一决高下 · 数值受大木研究所强化影响')),
+    mount(this.root, h('div', { class: 'box panel pvp' },
+      h('div', { class: 'panel-head' },
+        h('div', { class: 'row' }, h('h2', null, '宝可梦对战'), h('span', { class: 'sub small' }, '用背包里的宝可梦和其他训练家一决高下 · 数值受大木研究所强化影响')),
         h('button', { class: 'btn small ghost', 'data-back': '1', onclick: () => { if (busy) this.a.cancel(); this.a.back(); } }, '返回'),
       ),
       h('div', { class: 'pvp-grid' }, party, arena, boardEl),
@@ -286,12 +301,12 @@ export class PvpScreen {
 
 function boardRow(r: PvpBoardRow) {
   const T = tierOf(r.rating).tier;
-  return h('tr', { class: r.you ? 'me' : '' },
-    h('td', { class: r.rank <= 3 ? `top${r.rank}` : '' }, r.rank),
-    h('td', { class: 'board-mon' }, r.dex ? Animator.portrait(r.dex, 1) : null, r.name),
-    h('td', { style: `color:${T.color}` }, iconImg(T.icon, 1), ` ${T.name}`),
-    h('td', null, h('b', null, r.rating)),
-    h('td', null, `${r.wins}/${r.losses}`),
+  return h('div', { class: `lb-row ${r.you ? 'me' : ''}` },
+    h('span', { class: r.rank <= 3 ? `top${r.rank}` : '' }, r.rank || '-'),
+    h('span', { class: 'board-mon' }, r.dex ? portraitSlot(r.dex, 1, 'tiny') : null, h('span', { class: 'lb-name' }, r.name)),
+    h('span', { class: 'lb-tier', style: `color:${T.color}` }, iconImg(T.icon, 1), ` ${T.name}`),
+    h('span', null, h('b', null, r.rating)),
+    h('span', null, `${r.wins}/${r.losses}`),
   );
 }
 
@@ -409,19 +424,22 @@ function scoreboard(res: PvpMatchResult, you: number, myTeam: number, seats: Pvp
   return h('div', { class: 'scoreboard' }, team(myTeam), team(1 - myTeam));
 }
 
-function feedList(res: PvpMatchResult, myTeam: number) {
-  if (!res.feed.length) return h('div', { class: 'muted small' }, '没有人被击倒');
+function feedList(res: PvpMatchResult, myTeam: number, page: number, onPage: (n: number) => void) {
   const name = (id: number) => {
     const p = res.players.find((x) => x.id === id);
     return p ? h('span', { style: `color:${TEAM_COLOR[p.team === myTeam ? 0 : 1]}` }, `${p.name}的${p.form}`) : h('span', { class: 'muted' }, '缩圈');
   };
-  return h('div', { class: 'ko-feed' }, res.feed.map(([t, k, v]) => h('div', { class: 'small' },
-    h('span', { class: 'muted' }, fmtTime(t), ' '), k >= 0 ? name(k) : h('span', { class: 'muted' }, '缩小的场地'), ' 击倒了 ', name(v))));
+  const pg = pager(res.feed, 10, page, ([t, k, v]) => h('div', { class: 'small ko-row' },
+    h('span', { class: 'muted' }, fmtTime(t), ' '), k >= 0 ? name(k) : h('span', { class: 'muted' }, '缩小的场地'), ' 击倒了 ', name(v)), {
+    cls: 'ko-feed', empty: () => h('div', { class: 'muted small' }, '没有人被击倒'), filler: () => h('div', { class: 'ko-row filler' }), onPage, keys: null,
+  });
+  return h('div', { class: 'r-paged' }, pg.list, pg.nav);
 }
 
 export interface PvpResultActions { again(): void; back(): void }
 
-export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: number, rating: PvpRatingChange | null, seats: PvpSeatInfo[], practice: boolean, a: PvpResultActions) {
+export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: number, rating: PvpRatingChange | null, seats: PvpSeatInfo[], practice: boolean, a: PvpResultActions, tab = 0, feedPage = 0) {
+  const again = (t: number, f: number) => pvpResultsScreen(root, res, you, rating, seats, practice, a, t, f);
   const me = res.players.find((p) => p.id === you) ?? res.players[0];
   const myTeam = me.team;
   const outcome = res.winner < 0 ? 'draw' : res.winner === myTeam ? 'win' : 'loss';
@@ -431,7 +449,7 @@ export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: nu
     h('div', null, h('h2', { class: outcome === 'win' ? 'gold' : outcome === 'loss' ? 'neg' : '' }, title), h('div', { class: 'small muted' }, `${PVP_MODES[res.mode].name} · ${reason}${practice ? ' · 练习赛（不计分）' : ''}`)),
     h('div', { class: 'row' },
       h('button', { class: 'btn ghost', 'data-back': '1', onclick: a.back }, '返回对战中心'),
-      h('button', { class: 'btn gold big', onclick: a.again }, '再来一场'),
+      h('button', { class: 'btn gold big', 'data-key': 'y', onclick: a.again }, '再来一场'),
     ),
   );
   let ratingEl: Node | null = null;
@@ -451,7 +469,7 @@ export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: nu
     );
   }
   const hero = h('div', { class: 'r-hero' },
-    h('div', { class: 'r-hero-portrait' }, Animator.portrait(me.dex, 3)),
+    portraitSlot(me.dex, 3, 'r-hero-portrait'),
     h('div', null,
       h('div', { class: 'big' }, `${me.form}  Lv${me.level}`),
       h('div', null, ...(LINES[me.line].forms.find((f) => f.dex === me.dex)?.types ?? []).map(typeBadge)),
@@ -468,21 +486,20 @@ export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: nu
     tile('暴击', me.crits),
     tile('伤害占比', `${Math.round((me.damage / Math.max(1, res.players.filter((p) => p.team === myTeam).reduce((x, p) => x + p.damage, 0))) * 100)}%`, '在我方中'),
   );
-  mount(root, h('div', { class: 'box results pvp-results' },
+  const content = tab === 0
+    ? h('div', { class: 'r-grid' },
+      h('div', { class: 'r-col' }, hero, tiles),
+      h('div', { class: 'r-col' }, section('两队剩余 HP', hpChart(res, myTeam))))
+    : tab === 1
+      ? h('div', { class: 'r-full' }, section('计分板', scoreboard(res, you, myTeam, seats)))
+      : h('div', { class: 'r-grid' },
+        h('div', { class: 'r-col' }, section('我的技能伤害', skillBars(me))),
+        h('div', { class: 'r-col' }, section('击倒记录', feedList(res, myTeam, feedPage, (n) => again(tab, n)))));
+  mount(root, h('div', { class: 'box panel results pvp-results' },
     head,
-    ratingEl,
-    h('div', { class: 'r-grid' },
-      h('div', { class: 'r-col' },
-        hero,
-        tiles,
-        section('两队剩余 HP', hpChart(res, myTeam)),
-        section('技能伤害', skillBars(me)),
-      ),
-      h('div', { class: 'r-col' },
-        section('计分板', scoreboard(res, you, myTeam, seats)),
-        section('击倒记录', feedList(res, myTeam)),
-      ),
-    ),
+    ratingEl ?? h('div', { class: 'pvp-rating result empty' }, h('span', { class: 'muted' }, practice ? '练习赛不计分，积分与段位不变' : '本场不计分')),
+    tabs(['概览', '计分板', '技能与击倒'], tab, (t) => again(t, feedPage)),
+    h('div', { class: 'tab-body' }, content),
   ), 'pvp-results');
 }
 

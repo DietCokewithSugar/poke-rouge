@@ -11,6 +11,10 @@ import { sfx } from '../audio';
 import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
 import { clear, h, hideTip, tip } from './dom';
+import { confirmButton, pager } from './layout';
+
+const INV_PER_PAGE = 26;
+const STATS_PER_PAGE = 12;
 import { STAT_ROWS, itemInfo, itemLines, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
 
 const STAT_ICON: Record<string, string> = {
@@ -30,13 +34,23 @@ export class Intermission {
   private animating = false;
   /** 玩家在侧栏点了「进化」：重新打开进化询问 */
   private askEvo = false;
+  private invPage = 0;
+  private statPage = 0;
 
   constructor(parent: HTMLElement, private send: (c: Command) => void) {
     this.root.append(this.main, this.side, this.modal);
     parent.appendChild(this.root);
+    window.addEventListener('keydown', this.onKey);
   }
 
-  destroy() { this.root.remove(); }
+  destroy() {
+    this.root.remove();
+    window.removeEventListener('keydown', this.onKey);
+  }
+
+  private onKey = (e: KeyboardEvent) => {
+    if ((e.key === 'z' || e.key === 'Z') && !(e.target instanceof HTMLInputElement)) this.undo();
+  };
 
   show(on: boolean) {
     this.root.classList.toggle('hidden', !on);
@@ -70,17 +84,19 @@ export class Intermission {
       h('h2', null, evoNow ? '进化' : me.cards ? '升级！' : me.crate ? '道具球' : `商店 · 第 ${wave + 1} 波之前`),
       h('div', { class: 'money big' }, `₽ ${me.money}`),
     ));
-    if (evoNow) this.renderEvolution(me);
-    else if (me.cards) this.renderCards(me);
-    else if (me.crate) this.renderCrate(me);
-    else this.renderShop(me);
-    if (!evoNow) this.main.appendChild(this.inventory(me));
+    const stage = h('div', { class: `inter-stage ${evoNow ? 'evo' : ''}` });
+    this.main.appendChild(stage);
+    if (evoNow) this.renderEvolution(me, stage);
+    else if (me.cards) this.renderCards(me, stage);
+    else if (me.crate) this.renderCrate(me, stage);
+    else this.renderShop(me, stage);
+    if (!evoNow) this.main.append(this.inventory(me), this.actions(me));
     this.renderSide(me);
   }
 
   // ---------------------------------------------------------------- 进化
 
-  private renderEvolution(me: MeState) {
+  private renderEvolution(me: MeState, stage0: HTMLElement) {
     const evo = me.evo!;
     const from = Animator.portrait(evo.fromDex, 3);
     const to = Animator.portrait(evo.toDex, 3);
@@ -88,7 +104,7 @@ export class Intermission {
     const stage = h('div', { class: 'evo-stage' }, from, to);
     const text = h('p', { class: 'evo-text' }, `咦？${evo.from}的样子……！`);
     const yes = h('button', { class: 'btn gold big', onclick: () => go(true) }, '进化！') as HTMLButtonElement;
-    const no = h('button', { class: 'btn big', 'data-back': '1', onclick: () => go(false) }, '不进化（B）') as HTMLButtonElement;
+    const no = h('button', { class: 'btn big', 'data-back': '1', onclick: () => go(false) }, '不进化') as HTMLButtonElement;
     const go = (ok: boolean) => {
       yes.disabled = no.disabled = true;
       this.askEvo = false;
@@ -112,7 +128,7 @@ export class Intermission {
         this.send({ t: 'evolve', yes: true });
       }, 2700);
     };
-    this.main.appendChild(h('div', { class: 'evo-box' },
+    stage0.appendChild(h('div', { class: 'evo-box' },
       stage,
       text,
       h('p', { class: 'sub small' }, '不进化可以保留当前形态（配合进化奇石、不变之石更强）。之后的商店阶段随时可以在右侧点「进化」。'),
@@ -127,14 +143,14 @@ export class Intermission {
     this.main.querySelectorAll<HTMLButtonElement>('button.card').forEach((b) => { b.disabled = true; });
   }
 
-  private renderCards(me: MeState) {
-    this.main.appendChild(h('p', { class: 'sub' }, `${me.form} 升到了 Lv${me.level}！选择一项强化${me.levelsPending > 1 ? `（还剩 ${me.levelsPending} 次）` : ''}`));
+  private renderCards(me: MeState, stage: HTMLElement) {
+    stage.appendChild(h('div', { class: 'stage-sub' },
+      h('span', { class: 'sub' }, `${me.form} 升到了 Lv${me.level}！选择一项强化${me.levelsPending > 1 ? `（还剩 ${me.levelsPending} 次）` : ''}`),
+      h('button', { class: 'btn small', 'data-key': 'x', onclick: () => this.send({ t: 'levelReroll' }), disabled: me.money < me.cardRerollCost }, `刷新选项 ₽${me.cardRerollCost}`),
+    ));
     const row = h('div', { class: 'cards' });
     me.cards!.forEach((c, i) => row.appendChild(this.cardEl(me, c, i)));
-    this.main.appendChild(row);
-    this.main.appendChild(h('div', { class: 'row center' },
-      h('button', { class: 'btn', onclick: () => this.send({ t: 'levelReroll' }), disabled: me.money < me.cardRerollCost }, `刷新选项 ₽${me.cardRerollCost}`),
-    ));
+    stage.appendChild(row);
   }
 
   private cardEl(me: MeState, c: LevelCard, i: number) {
@@ -178,24 +194,24 @@ export class Intermission {
 
   // ---------------------------------------------------------------- 道具球
 
-  private renderCrate(me: MeState) {
+  private renderCrate(me: MeState, stage: HTMLElement) {
     const it = ITEMS[me.crate!];
-    this.main.appendChild(h('p', { class: 'sub' }, `打开了精灵球，里面是……${me.cratesLeft > 1 ? `（还有 ${me.cratesLeft - 1} 个）` : ''}`));
-    this.main.appendChild(h('div', { class: 'crate' },
+    stage.appendChild(h('div', { class: 'stage-sub' }, h('span', { class: 'sub' }, `打开了精灵球，里面是……${me.cratesLeft > 1 ? `（还有 ${me.cratesLeft - 1} 个）` : ''}`)));
+    stage.appendChild(h('div', { class: 'crate' },
       h('div', { class: `card big tier${it.tier}` }, iconImg(it.icon, 5), itemInfo(it.id)),
-    ));
-    this.main.appendChild(h('div', { class: 'row center' },
-      h('button', { class: 'btn gold', onclick: () => { sfx('buy'); this.send({ t: 'crate', take: true }); } }, '收下'),
-      h('button', { class: 'btn', onclick: () => { sfx('pickup'); this.send({ t: 'crate', take: false }); } }, `卖掉 +₽${me.crateSell}`),
+      h('div', { class: 'crate-btns' },
+        h('button', { class: 'btn gold', onclick: () => { sfx('buy'); this.send({ t: 'crate', take: true }); } }, '收下'),
+        h('button', { class: 'btn', onclick: () => { sfx('pickup'); this.send({ t: 'crate', take: false }); } }, `卖掉 +₽${me.crateSell}`),
+      ),
     ));
   }
 
   // ---------------------------------------------------------------- 商店
 
-  private renderShop(me: MeState) {
+  private renderShop(me: MeState, stage: HTMLElement) {
     const grid = h('div', { class: 'cards shop' });
     me.shop.offers.forEach((o, i) => grid.appendChild(this.offerEl(me, o, i)));
-    this.main.appendChild(grid);
+    stage.appendChild(grid);
   }
 
   /** 底部操作栏：刷新 · 队友状态 · 下一波预告 · 出发 */
@@ -204,37 +220,59 @@ export class Intermission {
     this.renderTeam(team);
     const shopping = !me.cards && !me.crate && !me.evo?.prompt && !this.askEvo;
     return h('div', { class: 'shop-actions' },
-      shopping
-        ? h('button', { class: 'btn', onclick: () => { sfx('click'); this.send({ t: 'reroll' }); }, disabled: me.money < me.shop.rerollCost },
-          me.shop.rerollCost === 0 ? '免费刷新' : `刷新 ₽${me.shop.rerollCost}`)
-        : h('div'),
+      h('div', { class: 'shop-btns' },
+        shopping
+          ? h('button', { class: 'btn', 'data-key': 'x', onclick: () => { sfx('click'); this.send({ t: 'reroll' }); }, disabled: me.money < me.shop.rerollCost },
+            me.shop.rerollCost === 0 ? '免费刷新' : `刷新 ₽${me.shop.rerollCost}`)
+          : null,
+        shopping
+          ? h('button', {
+            class: 'btn ghost undo', 'data-key': 'lt', disabled: !me.undo,
+            title: me.undo ? `撤销购买「${me.undo}」，退还全部金钱（只能撤销最近一次购买）` : '买错了可以撤销最近一次购买',
+            onclick: () => this.undo(),
+          }, '撤销', h('small', null, me.undo ? me.undo : '上一次购买'))
+          : null,
+      ),
       team,
       h('div', { class: 'go-wrap' },
         this.preview(),
         shopping
-          ? h('button', { class: `btn ${me.ready ? '' : 'gold'} go`, onclick: () => { sfx('click'); this.send({ t: 'waveReady', on: !me.ready }); } },
+          ? h('button', { class: `btn ${me.ready ? '' : 'gold'} go`, 'data-key': 'y', onclick: () => { sfx('click'); this.send({ t: 'waveReady', on: !me.ready }); } },
             me.ready ? '取消准备' : '出发！下一波')
           : null,
       ),
     );
   }
 
-  /** 持有道具：放在主面板，道具多时也有足够的位置 */
+  undo() {
+    if (!this.me?.undo || !this.visible) return;
+    sfx('click');
+    this.send({ t: 'undo' });
+  }
+
+  /** 持有道具：固定两行，多了就翻页 */
   private inventory(me: MeState) {
     const total = me.items.reduce((a, [, n]) => a + n, 0);
-    const grid = h('div', { class: 'inv-grid' });
     const sorted = me.items.filter(([id]) => ITEMS[id]).sort((a, b) => ITEMS[b[0]].tier - ITEMS[a[0]].tier || b[1] - a[1]);
-    for (const [id, n] of sorted) {
+    const pg = pager(sorted, INV_PER_PAGE, this.invPage, ([id, n]) => {
       const it = ITEMS[id];
       const cell = h('div', { class: `item-cell tier${it.tier}`, 'data-pad': '1' }, iconImg(it.icon, 3), n > 1 ? h('i', null, `×${n}`) : null);
       tip(cell, () => itemInfo(id, n));
-      grid.appendChild(cell);
-    }
-    if (!sorted.length) grid.appendChild(h('div', { class: 'muted small' }, '还没有道具。在商店购买、或者打开精灵球获得。'));
+      return cell;
+    }, {
+      cls: 'inv-grid',
+      empty: () => h('div', { class: 'muted small' }, '还没有道具。在商店购买、或者打开精灵球获得。'),
+      filler: () => h('div', { class: 'item-cell empty' }),
+      onPage: (n) => { this.invPage = n; this.render(); },
+    });
+    this.invPage = pg.page;
     return h('div', { class: 'inv' },
-      h('div', { class: 'inv-head' }, h('h3', null, `持有道具（${total}）`), h('span', { class: 'muted small' }, matchMedia('(pointer: coarse)').matches ? '点按道具查看效果' : '鼠标悬停查看效果')),
-      grid,
-      this.actions(me),
+      h('div', { class: 'inv-head' },
+        h('h3', null, `持有道具（${total}）`),
+        h('span', { class: 'muted small' }, matchMedia('(pointer: coarse)').matches ? '点按道具查看效果' : '鼠标悬停查看效果'),
+        pg.nav,
+      ),
+      pg.list,
     );
   }
 
@@ -320,33 +358,40 @@ export class Intermission {
         h('div', { class: 'muted small' }, `本系加成：${TYPE_NAME[L.bonusType]}系 +${L.bonusPct}%`),
       ),
     ));
+    // 进化按钮的位置始终保留，出现/消失时下面的内容不会跳动
+    const evoSlot = h('div', { class: 'evo-slot' });
     if (me.evo && !me.evo.prompt && !me.cards && !this.askEvo) {
-      this.side.appendChild(h('button', { class: 'btn gold small evo-btn', onclick: () => { this.askEvo = true; this.render(); } }, `进化成${me.evo.to}`));
+      evoSlot.appendChild(h('button', { class: 'btn gold small evo-btn', onclick: () => { this.askEvo = true; this.render(); } }, `进化成${me.evo.to}`));
     }
+    this.side.appendChild(evoSlot);
     this.side.appendChild(h('h3', null, `技能 ${me.skills.length}/${me.slots}`));
-    const sk = h('div', { class: 'side-skills' });
+    const rows = Math.max(6, me.slots, me.skills.length);
+    const sk = h('div', { class: 'side-skills', style: `grid-template-rows:repeat(${rows},minmax(0,1fr))` });
     me.skills.forEach((s, slot) => {
       const row = h('div', { class: 'side-skill' },
         skillIcon(s.id, s.lv, true),
-        h('span', { class: 'grow' }, SKILLS[s.id].name, s.lv > 1 ? ` +${s.lv - 1}` : ''),
-        !me.cards && me.skills.length > 1 ? h('button', { class: 'btn tiny ghost', title: '遗忘并返还少量金钱', onclick: () => { if (confirm(`确定要遗忘「${SKILLS[s.id].name}」吗？`)) this.send({ t: 'forget', slot }); } }, '遗忘') : null,
+        h('span', { class: 'grow side-skill-name' }, SKILLS[s.id].name, s.lv > 1 ? ` +${s.lv - 1}` : ''),
+        !me.cards && me.skills.length > 1 ? confirmButton('遗忘', '确定？', 'btn tiny ghost', () => this.send({ t: 'forget', slot }), { title: '遗忘并返还少量金钱' }) : null,
       );
       tip(row, () => skillInfo(s.id, s.lv, me.line));
       sk.appendChild(row);
     });
-    for (let i = me.skills.length; i < me.slots; i++) sk.appendChild(h('div', { class: 'side-skill empty' }, '— 空 —'));
+    for (let i = me.skills.length; i < rows; i++) sk.appendChild(h('div', { class: `side-skill empty ${i >= me.slots ? 'locked' : ''}` }, i < me.slots ? '— 空 —' : ''));
     this.side.appendChild(sk);
 
-    this.side.appendChild(h('h3', null, '属性'));
-    const st = h('div', { class: 'stat-grid' });
+    const entries: [string, string][] = [];
     for (const [k, label, fmt] of STAT_ROWS) {
       const v = me.stats[k];
-      if (v === undefined) continue;
-      st.appendChild(h('div', { class: 'stat' }, h('span', { class: 'muted' }, label), h('b', null, fmt(v))));
+      if (v !== undefined) entries.push([label, fmt(v)]);
     }
-    const tm = Object.entries(me.typeMods).filter(([, v]) => v);
-    for (const [t, v] of tm) st.appendChild(h('div', { class: 'stat' }, h('span', { class: 'muted' }, `${TYPE_NAME[t as PType]}系`), h('b', null, `+${v}%`)));
-    this.side.appendChild(st);
+    for (const [t, v] of Object.entries(me.typeMods)) if (v) entries.push([`${TYPE_NAME[t as PType]}系`, `+${v}%`]);
+    const pg = pager(entries, STATS_PER_PAGE, this.statPage, ([label, v]) => h('div', { class: 'stat' }, h('span', { class: 'muted' }, label), h('b', null, v)), {
+      cls: 'stat-grid',
+      keys: null,
+      onPage: (n) => { this.statPage = n; this.render(); },
+    });
+    this.statPage = pg.page;
+    this.side.append(h('div', { class: 'side-stat-head' }, h('h3', null, '属性'), pg.nav), pg.list);
 
 
   }

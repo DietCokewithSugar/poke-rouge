@@ -7,7 +7,8 @@ import { PVP_MODE_IDS, type PvpMatchResult, type PvpMode } from '../shared/pvp/s
 import type { MeState, PublicState } from '../shared/sim/game';
 import { BIOMES } from '../shared/waves';
 import { initAudio, playMusic, setVolume, sfx } from './audio';
-import { GameView } from './game/view';
+import { GameView, renderDpr } from './game/view';
+import { setUiScale } from './ui/layout';
 import { Animator, dirRow, preload } from './gfx/sprites';
 import { iconUrl } from './gfx/icons';
 import { skillIconUrl } from './gfx/skillicons';
@@ -17,7 +18,7 @@ import { BORDER, arenaCanvas } from './gfx/tiles';
 import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
 import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
-import { applyRun, loadProfile, pvpIdentity, releaseFromParty, saveProfile, type PartyMon, type Profile } from './save';
+import { applyRun, loadProfile, pvpIdentity, releaseFromParty, saveProfile, type PartyMon, type Profile, type Settings } from './save';
 import { $, clear, toast } from './ui/dom';
 import { Hud } from './ui/hud';
 import { Intermission } from './ui/intermission';
@@ -28,6 +29,14 @@ import { resultsScreen } from './ui/results';
 import { PvpScreen, pvpResultsScreen } from './ui/pvp';
 
 interface PvpMatch { mode: PvpMode; uid: string; practice: boolean; seats: PvpSeatInfo[] }
+
+/** 地址栏里的 ?room= 邀请参数（保留其它参数） */
+function setRoomParam(code: string | null) {
+  const u = new URL(location.href);
+  if (code) u.searchParams.set('room', code);
+  else u.searchParams.delete('room');
+  history.replaceState(null, '', u.pathname + u.search);
+}
 
 /** 触屏设备开局时尝试全屏并锁定横屏（需要在点击事件里调用）。 */
 function mobileFullscreen() {
@@ -65,7 +74,7 @@ class App {
   pub: PublicState | null = null;
   paused = false;
   where: 'menu' | 'browse' | 'lobby' | 'game' | 'results' | 'pvp' = 'menu';
-  private menu = new MenuScene(this.canvas);
+  private menu = new MenuScene(this.canvas, () => this.profile.settings);
   private pvpUi: PvpScreen | null = null;
   /** 正在排队或进行中的对战 */
   private pvpMatch: PvpMatch | null = null;
@@ -100,7 +109,7 @@ class App {
     this.title();
     void preload(ALL_DEX);
     const params = new URLSearchParams(location.search);
-    if (params.has('debug')) Object.assign(window, { __send: (m: C2S) => this.send(m), __icons: { iconUrl, ITEMS, skillIconUrl, SKILLS } });
+    if (params.has('debug')) Object.assign(window, { __send: (m: C2S) => this.send(m), __icons: { iconUrl, ITEMS, skillIconUrl, SKILLS }, __app: this });
     const room = params.get('room');
     if (room && /^\d{5}$/.test(room)) this.joinRoom(room);
   }
@@ -108,8 +117,9 @@ class App {
   applySettings() {
     const s = this.profile.settings;
     setVolume(s.volume, s.music);
+    setUiScale(s.uiScale);
     this.canvas.style.filter = s.gbFilter ? 'grayscale(1) sepia(1) hue-rotate(42deg) saturate(2.4) brightness(.8) contrast(1.2)' : '';
-    if (this.view) this.view.settings = s;
+    if (this.view) { this.view.settings = s; this.view.resize(); }
   }
 
   // ------------------------------------------------------------ 常驻联机连接
@@ -169,7 +179,7 @@ class App {
   title() {
     this.where = 'menu';
     this.browser = null;
-    if (location.search.includes('room=')) history.replaceState(null, '', location.pathname);
+    if (location.search.includes('room=')) setRoomParam(null);
     this.screen.classList.remove('hidden');
     this.pvpUi = null;
     titleScreen(this.screen, this.profile, {
@@ -342,7 +352,7 @@ class App {
     clear(this.screen);
     this.screen.dataset.screen = 'loading';
     this.screen.classList.remove('hidden');
-    this.screen.innerHTML = `<div class="box"><h3>${text}</h3></div>`;
+    this.screen.innerHTML = `<div class="box loading-box"><h3>${text}</h3></div>`;
   }
 
   /** 结束当前会话：单人关闭本地模拟，联机只是离开房间（连接保留） */
@@ -418,7 +428,7 @@ class App {
       difficulty: (id) => this.send({ t: 'difficulty', id }),
       visibility: (on) => this.send({ t: 'visibility', public: on }),
     }, this.roomDifficulty, this.roomPublic);
-    history.replaceState(null, '', `?room=${this.code}`);
+    setRoomParam(this.code);
   }
 
   private beginGame(w: number, h: number, players: { id: number; name: string; line: LineId }[], pvpSeats?: PvpSeatInfo[]) {
@@ -443,7 +453,7 @@ class App {
     if (pvpSeats) {
       if (this.pvpMatch) this.pvpMatch.seats = pvpSeats;
       this.view.setPvp(pvpSeats);
-      this.hud = new Hud(this.ui, null, () => { if (this.pvpMatch?.practice || confirm('现在离开会被判负，确定要离开对战吗？')) this.leavePvp(); });
+      this.hud = new Hud(this.ui, null, () => this.leavePvp(), this.pvpMatch?.practice ? '再按一次离开' : '离开会判负，再按一次');
       this.hud.setPvp(pvpSeats, this.you);
     } else {
       this.hud = new Hud(this.ui, this.solo ? () => this.setPause(true) : null);
@@ -534,7 +544,7 @@ class MenuScene {
   private mons: { a: Animator; x: number; y: number; tx: number; ty: number; wait: number }[] = [];
   private last = 0;
   private running = false;
-  constructor(private canvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement, private settings: () => Settings) {
     const dex = [4, 7, 1, 25, 10, 13, 16, 19, 10, 43];
     this.mons = dex.map((d) => {
       const a = new Animator(d);
@@ -555,10 +565,12 @@ class MenuScene {
   private frame = (now: number) => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.frame);
+    const st = this.settings();
+    if (now - this.last < 1000 / (st.fps || 60) - 1.5) return;
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     const c = this.canvas;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = renderDpr(st);
     const cw = Math.floor(window.innerWidth * dpr), ch = Math.floor(window.innerHeight * dpr);
     if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
     const S = Math.max(1, Math.round(Math.min(ch / 330, cw / 560)));

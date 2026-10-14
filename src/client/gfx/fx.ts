@@ -131,6 +131,42 @@ export interface FloatText { x: number; y: number; text: string; color: string; 
 
 const CAP_PARTS = 1100, CAP_SPRITES = 320;
 
+interface TextBitmap { c: HTMLCanvasElement; ax: number; ay: number }
+const textCache = new Map<string, TextBitmap>();
+
+/** 带 1 像素深色描边的飘字位图（按当前缩放倍数渲染，保持清晰） */
+function textBitmap(text: string, color: string, size: number, S: number): TextBitmap {
+  const key = `${S}|${size}|${color}|${text}`;
+  const hit = textCache.get(key);
+  if (hit) {
+    textCache.delete(key);
+    textCache.set(key, hit);
+    return hit;
+  }
+  const font = `${size * S}px FusionPixel, monospace`;
+  const c = document.createElement('canvas');
+  const x = c.getContext('2d')!;
+  x.font = font;
+  const w = Math.ceil(x.measureText(text).width) + 4 * S;
+  const hgt = Math.ceil(size * S * 1.5) + 2 * S;
+  c.width = w;
+  c.height = hgt;
+  x.font = font;
+  x.textAlign = 'center';
+  x.textBaseline = 'alphabetic';
+  const cx = w / 2, by = Math.round(size * S * 1.15) + S;
+  x.fillStyle = '#101018';
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1]]) x.fillText(text, cx + dx * S, by + dy * S);
+  x.fillStyle = color;
+  x.fillText(text, cx, by);
+  const bm = { c, ax: cx, ay: by };
+  // 字体还没加载完时不缓存，免得一直用后备字体
+  if (document.fonts?.check?.(font) === false) return bm;
+  textCache.set(key, bm);
+  if (textCache.size > 600) textCache.delete(textCache.keys().next().value!);
+  return bm;
+}
+
 export class FxLayer {
   parts: Part[] = [];
   sprites: Spr[] = [];
@@ -567,23 +603,18 @@ export class FxLayer {
       const k = 1 - s.t / s.life;
       drawShape(ctx, s.shape, s.pal, s.x, s.y, { angle: s.angle, scale: s.scale, alpha: s.fade ? step(k) : 1, frame: Math.floor(s.t * s.fr) });
     }
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
+    // 飘字画成缓存的小图再贴上去：每个字只画一次（描边要 6 次 fillText），后期满屏伤害数字时省很多
+    const m = ctx.getTransform();
+    const S = m.a;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     for (const t of this.texts) {
       if (!showNumbers && /^-?\d+!?$/.test(t.text)) continue;
       const a = t.t / t.dur;
       ctx.globalAlpha = a > 0.7 ? (1 - a) / 0.3 : 1;
-      ctx.font = `${t.size}px FusionPixel, monospace`;
-      const x = Math.round(t.x), y = Math.round(t.y);
-      ctx.fillStyle = '#101018';
-      ctx.fillText(t.text, x + 1, y);
-      ctx.fillText(t.text, x - 1, y);
-      ctx.fillText(t.text, x, y + 1);
-      ctx.fillText(t.text, x, y - 1);
-      ctx.fillText(t.text, x + 1, y + 1);
-      ctx.fillStyle = t.color;
-      ctx.fillText(t.text, x, y);
+      const img = textBitmap(t.text, t.color, t.size, S);
+      ctx.drawImage(img.c, Math.round(m.e + Math.round(t.x) * S - img.ax), Math.round(m.f + Math.round(t.y) * S - img.ay));
     }
+    ctx.setTransform(m);
     ctx.globalAlpha = 1;
   }
 

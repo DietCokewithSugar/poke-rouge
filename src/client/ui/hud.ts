@@ -7,6 +7,7 @@ import type { PvpSeatInfo } from '../../shared/protocol';
 import { PVP_MODES } from '../../shared/pvp/sim';
 import { Animator } from '../gfx/sprites';
 import { clear, h, tip } from './dom';
+import { confirmButton } from './layout';
 import { skillIcon, skillInfo } from './describe';
 
 export class Hud {
@@ -43,8 +44,10 @@ export class Hud {
   private myTeam = 0;
   private lastCount = -1;
 
-  constructor(parent: HTMLElement, onPause: (() => void) | null, onLeave?: () => void) {
-    this.pauseBtn = h('button', { class: 'btn small hud-pause', onclick: () => (onLeave ?? onPause)?.() }, onLeave ? '离开' : '暂停');
+  constructor(parent: HTMLElement, onPause: (() => void) | null, onLeave?: () => void, leaveConfirm = '再按一次离开') {
+    this.pauseBtn = onLeave
+      ? confirmButton('离开', leaveConfirm, 'btn small hud-pause', onLeave, { 'data-key': 'start' })
+      : h('button', { class: 'btn small hud-pause', 'data-key': 'start', onclick: () => onPause?.() }, '暂停');
     if (!onPause && !onLeave) this.pauseBtn.classList.add('hidden');
     this.root = h('div', { id: 'hud' },
       h('div', { class: 'hud-me box tight' },
