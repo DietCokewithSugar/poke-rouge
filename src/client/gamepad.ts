@@ -2,17 +2,20 @@
  * 手柄支持（Xbox / PlayStation，浏览器标准映射）：
  *   左摇杆 / 十字键    移动；菜单与商店中移动选择框
  *   A / ×             确认（点击选中的按钮）
- *   B / ○             返回、取消（例如取消进化）
- *   X / □             商店：刷新
- *   Y / △             商店：出发
- *   Start / Options   暂停 / 继续（单人）
+ *   B / ○             返回、取消（例如取消进化）—— 带 data-back 的按钮
+ *   X / □             刷新（商店、升级）—— data-key="x"
+ *   Y / △             出发 / 开始 —— data-key="y"
+ *   LB / RB (L1 / R1) 翻页、切换标签 —— data-key="lb" / "rb"
+ *   LT (L2)           撤销上一次购买 —— data-key="lt"
+ *   Start / Options   暂停 / 继续 —— data-key="start"
+ * 用手柄操作时 body 带上 pad 类，按钮旁边显示对应的手柄键位（Xbox 或 PS 的图标）。
  */
 import { setPadVector } from './input';
 import { toast } from './ui/dom';
 
 export interface PadHooks { pause(): void }
 
-const BTN = { A: 0, B: 1, X: 2, Y: 3, START: 9, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
+const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, START: 9, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
 const DEAD = 0.28;
 
 let hooks: PadHooks;
@@ -24,13 +27,31 @@ let focused: HTMLElement | null = null;
 export function initGamepad(h: PadHooks) {
   hooks = h;
   window.addEventListener('gamepadconnected', (e) => {
-    const name = ((e as GamepadEvent).gamepad?.id ?? '').replace(/\(.*?\)/g, '').trim().slice(0, 40) || '手柄';
-    toast(`已连接手柄：${name}。左摇杆移动，A 确认，B 返回，X 刷新，Y 出发，Start 暂停`, 'info', 5000);
+    const pad = (e as GamepadEvent).gamepad;
+    const name = (pad?.id ?? '').replace(/\(.*?\)/g, '').trim().slice(0, 40) || '手柄';
+    setKind(pad?.id ?? '');
+    toast(`已连接手柄：${name}。按钮旁会显示对应的手柄键位`, 'info', 5000);
   });
-  window.addEventListener('gamepaddisconnected', () => { setPadVector(0, 0); toast('手柄已断开', 'error'); });
-  // 鼠标一动就隐藏手柄选择框，避免两种操作打架
-  window.addEventListener('mousemove', () => setFocus(null));
+  window.addEventListener('gamepaddisconnected', () => { setPadVector(0, 0); setPadMode(false); toast('手柄已断开', 'error'); });
+  // 鼠标、触摸或键盘一动就退出手柄模式（隐藏选择框和键位提示），避免两种操作打架
+  window.addEventListener('mousemove', (e) => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 2) { setFocus(null); setPadMode(false); } });
+  window.addEventListener('pointerdown', () => { setFocus(null); setPadMode(false); });
+  window.addEventListener('keydown', () => setPadMode(false));
   requestAnimationFrame(poll);
+}
+
+let padMode = false;
+function setPadMode(on: boolean) {
+  if (on === padMode) return;
+  padMode = on;
+  document.body.classList.toggle('pad', on);
+}
+
+/** PlayStation 手柄显示 ✕○□△，其它按 Xbox 显示 ABXY */
+function setKind(id: string) {
+  const ps = /054c|playstation|dualsense|dualshock/i.test(id);
+  document.body.classList.toggle('pad-ps', ps);
+  document.body.classList.toggle('pad-xbox', !ps);
 }
 
 function activePad(): Gamepad | null {
@@ -47,6 +68,12 @@ function poll(now: number) {
   const down = (i: number) => pressed[i] && !prev[i];
   let x = pad.axes[0] ?? 0, y = pad.axes[1] ?? 0;
   if (Math.hypot(x, y) < DEAD) { x = 0; y = 0; }
+  if (x || y || pressed.some((v, i) => v && !prev[i])) {
+    if (!padMode) setKind(pad.id);
+    setPadMode(true);
+  }
+  // 界面重绘后选择框所在的元素可能已经被替换
+  if (focused && !focused.isConnected) setFocus(null);
   if (pressed[BTN.LEFT]) x = -1;
   if (pressed[BTN.RIGHT]) x = 1;
   if (pressed[BTN.UP]) y = -1;
@@ -64,14 +91,20 @@ function poll(now: number) {
     navDir = dir;
     if (down(BTN.A)) confirm(layer);
     if (down(BTN.B)) back(layer);
-    if (down(BTN.X)) clickText(layer, '刷新');
-    if (down(BTN.Y)) (layer.querySelector('.btn.go') as HTMLButtonElement | null)?.click();
+    if (down(BTN.X)) clickKey(layer, 'x') || clickText(layer, '刷新');
+    if (down(BTN.Y)) clickKey(layer, 'y') || (layer.querySelector('.btn.go') as HTMLButtonElement | null)?.click();
+    if (down(BTN.LB)) clickKey(layer, 'lb');
+    if (down(BTN.RB)) clickKey(layer, 'rb');
+    if (down(BTN.LT)) clickKey(layer, 'lt');
     if (down(BTN.START)) {
-      if (!clickText(layer, '继续')) hooks.pause();
+      if (!clickKey(layer, 'start') && !clickText(layer, '继续')) hooks.pause();
     }
   } else {
     setFocus(null);
-    if (down(BTN.START)) hooks.pause();
+    if (down(BTN.START)) {
+      const hud = document.getElementById('hud');
+      if (!(hud && clickKey(hud, 'start'))) hooks.pause();
+    }
   }
   prev = pressed;
 }
@@ -116,7 +149,7 @@ function current(layer: HTMLElement): HTMLElement | null {
 }
 
 function preferred(list: HTMLElement[]): HTMLElement | undefined {
-  return list.find((el) => el.matches('button.card, .btn.gold, .menu-item.play')) ?? list.find((el) => el.tagName === 'BUTTON') ?? list[0];
+  return list.find((el) => el.matches('button.card, .card .buy, .btn.gold, .menu-item.play')) ?? list.find((el) => el.tagName === 'BUTTON') ?? list[0];
 }
 
 function move(layer: HTMLElement, dir: string) {
@@ -161,6 +194,14 @@ function back(layer: HTMLElement) {
   if (layer.classList.contains('modal')) { layer.classList.add('hidden'); return; }
   const ghost = [...layer.querySelectorAll<HTMLButtonElement>('button.ghost')].find((b) => /返回|算了|离开/.test(b.textContent ?? ''));
   ghost?.click();
+}
+
+/** 点击界面里绑定了这个手柄键的按钮（看得见、可用的第一个） */
+function clickKey(layer: HTMLElement, key: string): boolean {
+  const el = [...layer.querySelectorAll<HTMLButtonElement>(`[data-key="${key}"]`)].find((b) => !b.disabled && b.offsetParent !== null);
+  if (!el) return false;
+  el.click();
+  return true;
 }
 
 function clickText(layer: HTMLElement, text: string): boolean {

@@ -13,8 +13,8 @@ import { updateEnemy } from './ai';
 import { PLAYER_R, beamHit, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
 import {
-  addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, rerollCards,
-  rerollCost, resolveCrate, rollCrateItem, rollShop, shopBuy, shopLock, shopReroll, xpToNext,
+  addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, refreshOffers, rerollCards,
+  rerollCost, resolveCrate, rollCrateItem, rollShop, shopBuy, shopLock, shopReroll, undoBuy, xpToNext,
 } from './player';
 
 export const ARENA_W = 768;
@@ -39,6 +39,7 @@ export type Command =
   | { t: 'forget'; slot: number }
   | { t: 'crate'; take: boolean }
   | { t: 'evolve'; yes: boolean }
+  | { t: 'undo' }
   | { t: 'waveReady'; on: boolean };
 
 export interface MeState {
@@ -66,6 +67,8 @@ export interface MeState {
   crateSell: number;
   cratesLeft: number;
   shop: { offers: (ShopOffer | null)[]; locked: boolean[]; rerollCost: number };
+  /** 可以撤销的上一次购买 */
+  undo: string | null;
   ready: boolean;
   typeMods: Record<string, number>;
   /** 可以进化时：prompt 表示需要弹窗询问 */
@@ -324,6 +327,7 @@ export class GameSim {
       p.sashUsed = false;
       p.ready = false;
       p.cards = null;
+      p.undo = null;
       for (const s of p.skills) s.cd = 0.4 + i * 0.05;
       const a = (i / Math.max(1, n)) * Math.PI * 2 - Math.PI / 2;
       p.x = this.w / 2 + (n > 1 ? Math.cos(a) * 36 : 0);
@@ -383,7 +387,9 @@ export class GameSim {
       p.shop.rerolls = 0;
       p.shop.freeRerolls = p.d.rerolls;
       p.evoPrompt = canEvolve(p);
+      p.undo = null;
       rollShop(this, p);
+      refreshOffers(this, p);
       nextCards(this, p);
       this.dirty.add(p.id);
     }
@@ -821,6 +827,14 @@ export class GameSim {
     if (!p) return '玩家不存在';
     if (this.phase !== 'inter') return '只能在波次之间操作';
     this.dirty.add(p.id);
+    // 撤销只针对最近一次购买：做了别的操作（刷新、遗忘、升级……）就不能再撤销
+    if (c.t !== 'buy' && c.t !== 'undo' && c.t !== 'lock' && c.t !== 'waveReady') p.undo = null;
+    const err = this.runCommand(p, c);
+    if (!err) refreshOffers(this, p);
+    return err;
+  }
+
+  private runCommand(p: SimPlayer, c: Command): string | null {
     switch (c.t) {
       case 'level': return pickCard(this, p, c.i | 0, c.slot);
       case 'levelReroll': return rerollCards(this, p);
@@ -829,6 +843,7 @@ export class GameSim {
         if (!err) this.emit(['buy', p.id]);
         return err;
       }
+      case 'undo': return undoBuy(p);
       case 'reroll': return shopReroll(this, p);
       case 'lock': shopLock(p, c.i | 0); return null;
       case 'forget': return forgetSkill(this, p, c.slot | 0);
@@ -879,6 +894,7 @@ export class GameSim {
       crateSell: crate ? crateSellValue(this, crate) : 0,
       cratesLeft: p.crates.length,
       shop: { offers: p.shop.offers, locked: p.shop.locked, rerollCost: rerollCost(this, p) },
+      undo: p.undo?.label ?? null,
       ready: p.ready,
       typeMods: p.typeMods as Record<string, number>,
       evo: canEvolve(p)

@@ -4,6 +4,7 @@ import { CAT_NAME, SKILLS, TIER_COLOR, TIER_NAME, skillLevelCd, skillLevelDmg } 
 import { MOD_LABEL, fmtMod, type ModKey } from '../../shared/stats';
 import { TYPE_COLOR, TYPE_NAME, type PType } from '../../shared/types';
 import { iconImg } from '../gfx/icons';
+import { skillIconImg } from '../gfx/skillicons';
 import { h } from './dom';
 
 export function typeBadge(t: PType) {
@@ -18,10 +19,11 @@ const PATTERN_NAME: Record<string, string> = {
   proj: '弹体', melee: '近身', beam: '光束', nova: '范围', chain: '连锁', strike: '定点', orbit: '环绕', zone: '区域', heal: '回复', shield: '护盾', buff: '强化',
 };
 
+/** 技能图标：像素徽章，右下角是强化等级，右上角的小宝石表示技能等级（中级/高级/究极） */
 export function skillIcon(id: string, lv = 1, small = false) {
   const s = SKILLS[id];
-  return h('div', { class: `skill-ico${small ? ' small' : ''}`, style: `--tc:${TYPE_COLOR[s.type]}` },
-    h('span', null, s.name.slice(0, small ? 1 : 2)),
+  return h('div', { class: `skill-ico tier${s?.tier ?? 1}${small ? ' small' : ''}` },
+    skillIconImg(id, small ? 2 : 3),
     lv > 1 ? h('i', null, `+${lv - 1}`) : null,
   );
 }

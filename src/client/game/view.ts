@@ -12,6 +12,11 @@ import { moveVector } from '../input';
 import type { Settings } from '../save';
 
 const INTERP_MS = 110;
+
+/** 画布的像素密度：流畅模式按 1 倍渲染（高分屏上像素减少到 1/4），像素画由 CSS 无模糊放大 */
+export function renderDpr(s: Settings) {
+  return s.quality === 'smooth' ? 1 : Math.min(2, window.devicePixelRatio || 1);
+}
 const FX_PATTERN = new Map<string, string>();
 for (const s of Object.values(SKILLS)) if (!FX_PATTERN.has(s.fx)) FX_PATTERN.set(s.fx, s.pattern);
 const SEND_EVERY = 1000 / 30;
@@ -93,8 +98,8 @@ export class GameView {
     window.removeEventListener('resize', this.resize);
   }
 
-  private resize = () => {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+  resize = () => {
+    const dpr = renderDpr(this.settings);
     const cw = Math.floor(window.innerWidth * dpr), ch = Math.floor(window.innerHeight * dpr);
     this.canvas.width = cw;
     this.canvas.height = ch;
@@ -207,7 +212,7 @@ export class GameView {
         const id = n(1), x = n(2), y = n(3), kind = n(4);
         const v = this.enemyVis.get(id);
         const def = ENEMIES[ENEMY_IDS[kind]];
-        if (def && this.corpses.length < 120) {
+        if (def && this.corpses.length < 60) {
           const anim = new Animator(def.dex);
           anim.dir = v?.anim.dir ?? 0;
           anim.play('Faint', true, 1.6);
@@ -341,6 +346,9 @@ export class GameView {
 
   private frame = (now: number) => {
     this.raf = requestAnimationFrame(this.frame);
+    // 帧率上限：跳过多余的刷新（120 帧需要显示器本身支持）
+    const minDt = 1000 / (this.settings.fps || 60);
+    if (now - this.lastFrame < minDt - 1.5) return;
     const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
     this.time += dt;

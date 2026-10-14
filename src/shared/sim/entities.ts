@@ -28,6 +28,20 @@ export interface ShopState {
   freeRerolls: number;
 }
 
+/** 撤销上一次购买所需的快照 */
+export interface UndoBuy {
+  label: string;
+  idx: number;
+  money: number;
+  moneySpent: number;
+  items: Record<string, number>;
+  skills: OwnedSkill[];
+  offers: (ShopOffer | null)[];
+  locked: boolean[];
+  crates: string[];
+  flags: { foreignSkill: boolean; skillsFull: boolean; maxItems: number };
+}
+
 export interface SimPlayer {
   id: number;
   name: string;
@@ -73,6 +87,8 @@ export interface SimPlayer {
   /** 波次结束后要询问是否进化 */
   evoPrompt: boolean;
   shop: ShopState;
+  /** 只能撤销最近一次购买 */
+  undo: UndoBuy | null;
   ready: boolean;
   castFlag: number;
   lastPosT: number;

@@ -8,14 +8,14 @@ import { SKILLS, TIER_COLOR } from '../../shared/skills';
 import { TYPE_COLOR } from '../../shared/types';
 import { TOTAL_WAVES, WAVES } from '../../shared/waves';
 import { iconImg } from '../gfx/icons';
-import { Animator } from '../gfx/sprites';
 import { validateBuild } from '../../shared/pvp/build';
 import { sfx } from '../audio';
 import { PARTY_MAX, addToParty, releaseFromParty, type Profile, type RunReward } from '../save';
 import { h, tip, toast } from './dom';
 import { itemInfo, skillIcon, skillInfo, typeBadge } from './describe';
 import { releaseModal } from './pvp';
-import { mount } from './screens';
+import { mount, portraitSlot, tabs } from './screens';
+import { pager } from './layout';
 
 function fmtTime(sec: number) {
   const m = Math.floor(sec / 60), s = sec % 60;
@@ -86,7 +86,7 @@ function skillChart(s: RunSummary) {
     const name = def ? def.name : id === '_dot' ? '灼伤 / 中毒 / 寄生' : '反伤等其它';
     const color = def ? TYPE_COLOR[def.type] : '#a0a8b8';
     const row = h('div', { class: `r-skill ${def && lv === undefined ? 'forgot' : ''}` },
-      def ? skillIcon(id, lv ?? 1, true) : h('div', { class: 'skill-ico small', style: `--tc:${color}` }, h('span', null, id === '_dot' ? '毒' : '反')),
+      skillIcon(id, lv ?? 1, true),
       h('div', { class: 'r-skill-name' }, name, lv && lv > 1 ? ` +${lv - 1}` : '', def && lv === undefined ? h('span', { class: 'muted small' }, ' （已遗忘）') : null),
       h('div', { class: 'r-skill-bar' }, h('div', { style: `width:${(v / max) * 100}%;background:${color}` })),
       h('div', { class: 'r-skill-num' }, `${fmtNum(v)} · ${Math.round((v / total) * 100)}%`),
@@ -97,38 +97,49 @@ function skillChart(s: RunSummary) {
   // 持有但没有造成伤害的技能（护盾、回复等）
   for (const x of s.detail.skills) {
     if (rows.some(([id]) => id === x.id)) continue;
-    const row = h('div', { class: 'r-skill' }, skillIcon(x.id, x.lv, true), h('div', { class: 'r-skill-name' }, SKILLS[x.id].name, x.lv > 1 ? ` +${x.lv - 1}` : ''), h('div', { class: 'r-skill-bar' }), h('div', { class: 'r-skill-num muted' }, '辅助技能'));
+    const row = h('div', { class: 'r-skill' }, skillIcon(x.id, x.lv, true), h('div', { class: 'r-skill-name' }, SKILLS[x.id].name, x.lv > 1 ? ` +${x.lv - 1}` : ''), h('div', { class: 'r-skill-bar' }), h('div', { class: 'r-skill-num muted' }, SKILLS[x.id].cat === 'status' ? '辅助技能' : '没有造成伤害'));
     tip(row, () => skillInfo(x.id, x.lv, s.line));
     list.appendChild(row);
   }
   return list;
 }
 
-function itemGrid(s: RunSummary) {
+function itemGrid(s: RunSummary, page: number, onPage: (n: number) => void) {
   const items = s.detail.items.filter(([id]) => ITEMS[id]).sort((a, b) => ITEMS[b[0]].tier - ITEMS[a[0]].tier || b[1] - a[1]);
-  if (!items.length) return h('div', { class: 'muted small' }, '这一局没有持有道具');
-  return h('div', { class: 'r-items' }, items.map(([id, n]) => {
+  const pg = pager(items, 32, page, ([id, n]) => {
     const it = ITEMS[id];
     const cell = h('div', { class: `item-cell tier${it.tier}`, style: `--tc:${TIER_COLOR[it.tier]}` }, iconImg(it.icon, 3), n > 1 ? h('i', null, `×${n}`) : null);
     tip(cell, () => itemInfo(id, n));
     return cell;
-  }));
+  }, { cls: 'r-items', empty: () => h('div', { class: 'muted small' }, '这一局没有持有道具'), filler: () => h('div', { class: 'item-cell empty' }), onPage, keys: null });
+  return h('div', { class: 'r-paged' }, pg.list, pg.nav);
 }
 
 function topKills(s: RunSummary) {
-  const list = s.detail.topKills.filter(([id]) => ENEMIES[id]);
+  const list = s.detail.topKills.filter(([id]) => ENEMIES[id]).slice(0, 8);
   if (!list.length) return h('div', { class: 'muted small' }, '没有击败任何宝可梦');
   return h('div', { class: 'r-kills' }, list.map(([id, n]) => {
     const e = ENEMIES[id];
-    return h('div', { class: 'r-kill' }, Animator.portrait(e.dex, 1), h('div', { class: 'small' }, e.name), h('b', null, `×${n}`));
+    return h('div', { class: 'r-kill' }, portraitSlot(e.dex, 1, 'tiny'), h('div', { class: 'small' }, e.name), h('b', null, `×${n}`));
   }));
 }
 
+/** 每一波的详细数据表 */
+function waveTable(s: RunSummary, page: number, onPage: (n: number) => void) {
+  const pg = pager(s.detail.waves, 8, page, (w) => h('div', { class: 'wt-row' },
+    h('span', null, `第 ${w.w} 波${WAVES[w.w - 1]?.boss ? ' ★' : ''}`), h('span', null, w.kills), h('span', null, fmtNum(w.dmg)), h('span', null, fmtNum(w.taken)), h('span', null, `${w.time} 秒`),
+  ), { cls: 'wave-table', empty: () => h('div', { class: 'muted small' }, '没有记录'), filler: () => h('div', { class: 'wt-row filler' }), onPage, keys: null });
+  return h('div', { class: 'r-paged' },
+    h('div', { class: 'wt-row head' }, h('span', null, '波次'), h('span', null, '击败'), h('span', null, '伤害'), h('span', null, '承伤'), h('span', null, '用时')),
+    pg.list, pg.nav);
+}
+
 /** 结算后把这只宝可梦放进背包（满了要先放生一只） */
-function storeButton(p: Profile, s: RunSummary) {
+function storeButton(p: Profile, s: RunSummary, state: { stored: boolean }) {
   const form = s.detail.form;
-  const btn = h('button', { class: 'btn store' }, `放入背包（${p.party.length} / ${PARTY_MAX}）`) as HTMLButtonElement;
+  const btn = h('button', { class: 'btn store', disabled: state.stored }, state.stored ? '已放入背包 ✓' : `放入背包（${p.party.length} / ${PARTY_MAX}）`) as HTMLButtonElement;
   const done = () => {
+    state.stored = true;
     btn.disabled = true;
     btn.textContent = '已放入背包 ✓';
     sfx('buy');
@@ -152,84 +163,85 @@ function storeButton(p: Profile, s: RunSummary) {
 }
 
 export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: BoardEntry[], you: number, onContinue: () => void, label: string, profile?: Profile) {
-  const head = h('div', { class: 'r-head' },
-    h('h2', { class: victory ? 'gold' : '' }, victory ? '通关！你是真正的宝可梦大师！' : '眼前一片漆黑……'),
-    h('div', { class: 'row' },
-      s?.build && profile && typeof validateBuild(s.build) !== 'string' ? storeButton(profile, s) : null,
-      h('button', { class: 'btn gold big', onclick: onContinue }, label),
-    ),
-  );
-  if (!s) {
-    mount(root, h('div', { class: 'box results' }, head), 'results');
-    return;
-  }
-  const d = s.detail;
-  const D = DIFFICULTIES[s.difficulty];
-  const L = LINES[s.line];
-  const kills = d.kills.minion + d.kills.elite + d.kills.boss;
-  const evoPath = h('div', { class: 'r-evo' }, d.forms.map((dex, i) => [
-    i ? h('span', { class: 'evo-arrow' }, '→') : null,
-    h('div', { class: 'r-evo-form' }, Animator.portrait(dex, 1)),
-  ]));
-  const hero = h('div', { class: 'r-hero' },
-    h('div', { class: 'r-hero-portrait' }, Animator.portrait(d.dex, 3)),
-    h('div', null,
-      h('div', { class: 'big' }, `${d.form}  Lv${s.level}`),
-      h('div', null, ...L.forms.find((f) => f.dex === d.dex)!.types.map(typeBadge)),
-      h('div', { class: 'small', style: `color:${D.color}` }, `${D.name}模式${s.players > 1 ? ` · ${s.players} 人联机` : ' · 单人'}`),
-      d.forms.length > 1 ? evoPath : h('div', { class: 'muted small' }, L.forms.length > 1 ? '全程没有进化' : ''),
-    ),
-  );
-  const tiles = h('div', { class: 'r-tiles' },
-    tile('游戏时长', fmtTime(d.time)),
-    tile('完成波次', `${s.wavesCleared} / ${TOTAL_WAVES}`, victory ? '通关' : `倒在第 ${s.wavesCleared + 1} 波`, victory ? '#ffd23f' : undefined),
-    tile('击败', kills, `小怪 ${d.kills.minion} · 精英 ${d.kills.elite} · 首领 ${d.kills.boss}`),
-    tile('造成伤害', fmtNum(s.damage), `暴击 ${d.crits} 次 · 效果拔群 ${s.superEff} 次`),
-    tile('承受伤害', fmtNum(d.damageTaken), `闪避 ${d.dodges} 次`),
-    tile('回复', fmtNum(d.healed)),
-    tile('获得金钱', `₽${fmtNum(s.moneyEarned)}`, `花费 ₽${fmtNum(d.moneySpent)}`),
-    tile('道具 / 技能', `${d.items.reduce((a, [, n]) => a + n, 0)} / ${d.skills.length}`),
-  );
-
-  const rewards = reward ? h('div', { class: 'r-reward' },
-    h('div', { class: 'reward' }, iconImg('stardust', 3), `获得星之沙 +${reward.stardust}`),
-    reward.newAchievements.length ? h('div', { class: 'r-achs' },
-      h('div', { class: 'small gold' }, `达成 ${reward.newAchievements.length} 个新成就`),
-      reward.newAchievements.map((a) => {
+  const state = { tab: 0, stored: false, items: 0, waves: 0, achs: 0 };
+  const render = () => {
+    const head = h('div', { class: 'r-head' },
+      h('h2', { class: victory ? 'gold' : '' }, victory ? '通关！你是真正的宝可梦大师！' : '眼前一片漆黑……'),
+      h('div', { class: 'row' },
+        s?.build && profile && typeof validateBuild(s.build) !== 'string' ? storeButton(profile, s, state) : null,
+        h('button', { class: 'btn gold big', 'data-key': 'y', onclick: onContinue }, label),
+      ),
+    );
+    if (!s) {
+      mount(root, h('div', { class: 'box panel-sm results' }, head), 'results');
+      return;
+    }
+    const d = s.detail;
+    const D = DIFFICULTIES[s.difficulty];
+    const L = LINES[s.line];
+    const kills = d.kills.minion + d.kills.elite + d.kills.boss;
+    const evoPath = h('div', { class: 'r-evo' }, d.forms.map((dex, i) => [
+      i ? h('span', { class: 'evo-arrow' }, '→') : null,
+      portraitSlot(dex, 1, 'tiny'),
+    ]));
+    const hero = h('div', { class: 'r-hero' },
+      portraitSlot(d.dex, 3, 'r-hero-portrait'),
+      h('div', null,
+        h('div', { class: 'big' }, `${d.form}  Lv${s.level}`),
+        h('div', null, ...L.forms.find((f) => f.dex === d.dex)!.types.map(typeBadge)),
+        h('div', { class: 'small', style: `color:${D.color}` }, `${D.name}模式${s.players > 1 ? ` · ${s.players} 人联机` : ' · 单人'}`),
+        d.forms.length > 1 ? evoPath : h('div', { class: 'muted small' }, L.forms.length > 1 ? '全程没有进化' : ''),
+      ),
+    );
+    const tiles = h('div', { class: 'r-tiles' },
+      tile('游戏时长', fmtTime(d.time)),
+      tile('完成波次', `${s.wavesCleared} / ${TOTAL_WAVES}`, victory ? '通关' : `倒在第 ${s.wavesCleared + 1} 波`, victory ? '#ffd23f' : undefined),
+      tile('击败', kills, `小怪 ${d.kills.minion} · 精英 ${d.kills.elite} · 首领 ${d.kills.boss}`),
+      tile('造成伤害', fmtNum(s.damage), `暴击 ${d.crits} · 拔群 ${s.superEff}`),
+      tile('承受伤害', fmtNum(d.damageTaken), `闪避 ${d.dodges} 次`),
+      tile('回复', fmtNum(d.healed)),
+      tile('获得金钱', `₽${fmtNum(s.moneyEarned)}`, `花费 ₽${fmtNum(d.moneySpent)}`),
+      tile('道具 / 技能', `${d.items.reduce((a, [, n]) => a + n, 0)} / ${d.skills.length}`),
+    );
+    let achs: Node | null = null;
+    if (reward?.newAchievements.length) {
+      const pg = pager(reward.newAchievements, 6, state.achs, (a) => {
         const def = ACHIEVEMENTS.find((x) => x.id === a.id);
         const unlock = a.unlocks ? `解锁 ${LINES[a.unlocks].name}！` : def?.unlocksDifficulty ? `解锁${DIFFICULTIES[def.unlocksDifficulty].name}难度！` : '';
         const el = h('div', { class: `r-ach ${unlock ? 'unlock' : ''}` }, h('b', null, `★ ${a.name}`), h('span', { class: 'muted' }, ` +${a.reward}`), unlock ? h('span', { class: 'gold' }, ` · ${unlock}`) : null);
-        if (def) tip(el, () => def.desc);
+        if (def) tip(el, () => `${def.desc}${unlock ? ` · ${unlock}` : ''}`);
         return el;
-      }),
-    ) : null,
-  ) : null;
-
-  const boardEl = board.length > 1 ? section('队伍',
-    h('table', { class: 'board' },
+      }, { cls: 'r-achs', filler: () => h('div', { class: 'r-ach filler' }), onPage: (n) => { state.achs = n; render(); }, keys: null, label: `达成 ${reward.newAchievements.length} 个新成就` });
+      achs = h('div', { class: 'r-paged' }, pg.list, pg.nav);
+    }
+    const rewards = h('div', { class: 'r-reward' },
+      h('div', { class: 'reward' }, iconImg('stardust', 3), reward ? `获得星之沙 +${reward.stardust}` : '没有获得星之沙'),
+      achs ?? h('div', { class: 'muted small' }, '这一局没有达成新成就'),
+    );
+    const boardEl = board.length > 1 ? h('table', { class: 'board' },
       h('tr', null, h('th', null, '训练家'), h('th', null, '宝可梦'), h('th', null, '等级'), h('th', null, '击败'), h('th', null, '伤害'), h('th', null, '承伤'), h('th', null, '救援')),
       board.map((b) => h('tr', { class: b.id === you ? 'me' : '' },
         h('td', null, b.name),
-        h('td', { class: 'board-mon' }, Animator.portrait(b.dex, 1), LINES[b.line].forms.find((f) => f.dex === b.dex)?.name ?? LINES[b.line].name),
+        h('td', { class: 'board-mon' }, portraitSlot(b.dex, 1, 'tiny'), LINES[b.line].forms.find((f) => f.dex === b.dex)?.name ?? LINES[b.line].name),
         h('td', null, b.level), h('td', null, b.kills), h('td', null, fmtNum(b.damage)), h('td', null, fmtNum(b.taken)), h('td', null, b.revives))),
-    )) : null;
-
-  mount(root, h('div', { class: 'box results' },
-    head,
-    h('div', { class: 'r-grid' },
-      h('div', { class: 'r-col' },
-        hero,
-        tiles,
-        section('波次进度', waveStrip(s)),
-        section('每波击败数', waveChart(s)),
-        section('技能伤害', skillChart(s)),
-      ),
-      h('div', { class: 'r-col' },
-        rewards,
-        section(`持有道具（${d.items.reduce((a, [, n]) => a + n, 0)}）`, itemGrid(s)),
-        section('最常击败的宝可梦', topKills(s)),
-        boardEl,
-      ),
-    ),
-  ), 'results');
+    ) : null;
+    const names = ['概览', '技能与道具', boardEl ? '击败与队伍' : '击败与波次'];
+    const content = state.tab === 0
+      ? h('div', { class: 'r-grid' },
+        h('div', { class: 'r-col' }, hero, tiles, section('波次进度', waveStrip(s))),
+        h('div', { class: 'r-col' }, rewards, section('每波击败数', waveChart(s))))
+      : state.tab === 1
+        ? h('div', { class: 'r-grid' },
+          h('div', { class: 'r-col' }, section('技能伤害', skillChart(s))),
+          h('div', { class: 'r-col' }, section(`持有道具（${d.items.reduce((a, [, n]) => a + n, 0)}）`, itemGrid(s, state.items, (n) => { state.items = n; render(); }))))
+        : h('div', { class: 'r-grid' },
+          h('div', { class: 'r-col' }, section('最常击败的宝可梦', topKills(s))),
+          h('div', { class: 'r-col' }, boardEl ? section('队伍', boardEl) : section('每波数据', waveTable(s, state.waves, (n) => { state.waves = n; render(); }))));
+    mount(root, h('div', { class: 'box panel results' },
+      head,
+      tabs(names, state.tab, (i) => { state.tab = i; render(); }),
+      h('div', { class: 'tab-body' }, content),
+    ), 'results');
+  };
+  render();
 }

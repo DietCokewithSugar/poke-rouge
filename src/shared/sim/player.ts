@@ -5,7 +5,7 @@ import { SKILLS, SKILL_IDS, SKILL_MAX_LV } from '../skills';
 import { addMods, addTypeMods, derive, emptyMods, type Mods, type TypeMods } from '../stats';
 import { priceMult } from '../waves';
 import type { SavedBuild } from '../pvp/build';
-import type { LevelCard, ShopOffer, SimPlayer } from './entities';
+import type { LevelCard, ShopOffer, SimPlayer, UndoBuy } from './entities';
 import type { GameSim } from './game';
 
 export const SKILL_PRICE = [0, 22, 48, 88, 145];
@@ -32,6 +32,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     slowT: 0, slowAmt: 0, regenAcc: 0, lsWindow: 0, lsCount: 0, sashUsed: false,
     levelQueue: [], cards: null, cardRerolls: 0, crates: [], evoPrompt: false,
     shop: { offers: [], locked: [false, false, false, false], rerolls: 0, freeRerolls: 0 },
+    undo: null,
     ready: false, castFlag: 0, lastPosT: 0, moveBudget: 0,
     stats: {
       kills: 0, damage: 0, superEff: 0, moneyEarned: 0, revives: 0, evolved: false, skillsFull: false, foreignSkill: false, bossKills: [], maxItems: 0,
@@ -320,20 +321,45 @@ function rollOffer(sim: GameSim, p: SimPlayer): ShopOffer {
   return { kind: 'item', id, tier: ITEMS[id].tier, price: Math.round(ITEMS[id].price * pm) };
 }
 
+/** 商品现在还能不能买：限持一个的道具已经有了、技能已经满级，都不能再买 */
+function offerAllowed(p: SimPlayer, o: ShopOffer): boolean {
+  if (o.kind === 'skill') return (p.skills.find((s) => s.id === o.id)?.lv ?? 0) < SKILL_MAX_LV;
+  return itemAllowed(p, ITEMS[o.id]);
+}
+
+function rollSlot(sim: GameSim, p: SimPlayer, i: number) {
+  const s = p.shop;
+  let o = rollOffer(sim, p);
+  for (let tries = 0; tries < 6 && s.offers.some((x, j) => j !== i && x && x.id === o.id && (j < i || s.locked[j])); tries++) o = rollOffer(sim, p);
+  s.offers[i] = o;
+  s.locked[i] = false;
+}
+
 export function rollShop(sim: GameSim, p: SimPlayer, keepLocked = true) {
   const s = p.shop;
   for (let i = 0; i < 4; i++) {
-    if (keepLocked && s.locked[i] && s.offers[i]) continue;
-    let o = rollOffer(sim, p);
-    for (let tries = 0; tries < 6 && s.offers.some((x, j) => j !== i && x && x.id === o.id && (j < i || s.locked[j])); tries++) o = rollOffer(sim, p);
-    s.offers[i] = o;
-    s.locked[i] = false;
+    const cur = s.offers[i];
+    if (keepLocked && s.locked[i] && cur && offerAllowed(p, cur)) continue;
+    rollSlot(sim, p, i);
   }
   // 保证皮卡丘迟早能买到雷之石
   if (p.line === 'pikachu' && p.stage === 0 && !p.items.everstone && sim.wave >= 5 && !s.offers.some((o) => o?.id === 'thunder_stone') && sim.rng.chance(0.25)) {
     const i = s.locked.findIndex((l) => !l);
     if (i >= 0) s.offers[i] = { kind: 'item', id: 'thunder_stone', tier: 2, price: Math.round(ITEMS.thunder_stone.price * priceMult(sim.wave)) };
   }
+}
+
+/**
+ * 已经不能再买的商品换成新的（例如刚从道具球里拿到了限持一个的道具），
+ * 道具球里已经拿不了的道具也重新抽一个，不再出现重复的限持道具。
+ */
+export function refreshOffers(sim: GameSim, p: SimPlayer) {
+  const s = p.shop;
+  for (let i = 0; i < s.offers.length; i++) {
+    const o = s.offers[i];
+    if (o && !offerAllowed(p, o)) rollSlot(sim, p, i);
+  }
+  p.crates = p.crates.map((id) => (itemAllowed(p, ITEMS[id]) ? id : rollCrateItem(sim, p)));
 }
 
 export function rerollCost(sim: GameSim, p: SimPlayer): number {
@@ -357,6 +383,14 @@ export function shopBuy(sim: GameSim, p: SimPlayer, idx: number, slot?: number):
   const o = p.shop.offers[idx];
   if (!o) return '已售罄';
   if (p.money < o.price) return '金钱不足';
+  // 神奇糖果、进化石会立刻升级/进化，买了就不能撤销
+  const special = o.kind === 'item' ? ITEMS[o.id].special : undefined;
+  const undo: UndoBuy | null = special === 'rare_candy' || special === 'evo_stone' ? null : {
+    label: o.kind === 'item' ? ITEMS[o.id].name : `招式学习器 · ${SKILLS[o.id].name}`,
+    idx, money: p.money, moneySpent: p.stats.moneySpent,
+    items: { ...p.items }, skills: p.skills.map((s) => ({ ...s })), offers: p.shop.offers.slice(), locked: p.shop.locked.slice(), crates: p.crates.slice(),
+    flags: { foreignSkill: p.stats.foreignSkill, skillsFull: p.stats.skillsFull, maxItems: p.stats.maxItems },
+  };
   if (o.kind === 'skill') {
     const err = learnSkill(p, o.id, slot);
     if (err) return err;
@@ -371,6 +405,27 @@ export function shopBuy(sim: GameSim, p: SimPlayer, idx: number, slot?: number):
   p.shop.offers[idx] = null;
   p.shop.locked[idx] = false;
   recompute(p);
+  p.undo = undo;
+  return null;
+}
+
+/** 撤销上一次购买：退还金钱、收回道具/技能、商品放回原位。只能撤销一次。 */
+export function undoBuy(p: SimPlayer): string | null {
+  const u = p.undo;
+  if (!u) return '没有可以撤销的购买';
+  p.undo = null;
+  p.money = u.money;
+  p.stats.moneySpent = u.moneySpent;
+  p.items = u.items;
+  p.skills = u.skills;
+  p.crates = u.crates;
+  const locked = p.shop.locked.slice();
+  p.shop.offers = u.offers;
+  p.shop.locked = locked.map((l, i) => (i === u.idx ? u.locked[i] : l && !!u.offers[i]));
+  p.stats.foreignSkill = u.flags.foreignSkill;
+  p.stats.skillsFull = u.flags.skillsFull;
+  recompute(p);
+  p.stats.maxItems = u.flags.maxItems;
   return null;
 }
 
