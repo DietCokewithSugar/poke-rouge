@@ -86,7 +86,7 @@ function skillChart(s: RunSummary) {
     const name = def ? def.name : id === '_dot' ? '灼伤 / 中毒 / 寄生' : '反伤等其它';
     const color = def ? TYPE_COLOR[def.type] : '#a0a8b8';
     const row = h('div', { class: `r-skill ${def && lv === undefined ? 'forgot' : ''}` },
-      def ? skillIcon(id, lv ?? 1, true) : h('div', { class: 'skill-ico small', style: `--tc:${color}` }, h('span', null, id === '_dot' ? '毒' : '反')),
+      skillIcon(id, lv ?? 1, true),
       h('div', { class: 'r-skill-name' }, name, lv && lv > 1 ? ` +${lv - 1}` : '', def && lv === undefined ? h('span', { class: 'muted small' }, ' （已遗忘）') : null),
       h('div', { class: 'r-skill-bar' }, h('div', { style: `width:${(v / max) * 100}%;background:${color}` })),
       h('div', { class: 'r-skill-num' }, `${fmtNum(v)} · ${Math.round((v / total) * 100)}%`),

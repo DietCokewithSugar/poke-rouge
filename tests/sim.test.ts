@@ -134,6 +134,69 @@ test('商店：购买、锁定、刷新', () => {
   assert.equal(sim.wave, 2);
 });
 
+function shopSim(seed = 9) {
+  const sim = new GameSim([{ id: 1, name: 'a', line: 'charmander', meta: {} }], seed);
+  const p = sim.players[0];
+  sim.waveT = sim.waveDur;
+  sim.step(1 / 30);
+  p.money = 5000;
+  while (p.cards) sim.command(1, { t: 'level', i: 0, slot: 0 });
+  while (p.crates.length) sim.command(1, { t: 'crate', take: true });
+  return { sim, p };
+}
+
+test('限持一个的道具：拥有后商店与道具球都不会再出现，已在商店里的同款会被换掉', () => {
+  const { sim, p } = shopSim();
+  const uniques = Object.values(ITEMS).filter((it) => it.max === 1 && !it.only && it.special !== 'revive').map((it) => it.id);
+  // 商店里摆着气势披带，同时道具球也开出了气势披带
+  p.shop.offers[2] = { kind: 'item', id: 'focus_sash', tier: 3, price: 10 };
+  p.shop.locked[2] = true;
+  p.crates.push('focus_sash', 'focus_sash');
+  assert.equal(sim.command(1, { t: 'crate', take: true }), null);
+  assert.equal(p.items.focus_sash, 1);
+  assert.ok(p.shop.offers.every((o) => o?.id !== 'focus_sash'), '商店里的同款被换掉了');
+  assert.ok(p.crates.every((id) => id !== 'focus_sash'), '剩下的道具球不会再开出同款');
+  for (const id of uniques) p.items[id] = 1;
+  sim.recompute(p);
+  for (let i = 0; i < 300; i++) {
+    p.shop.freeRerolls = 1;
+    sim.command(1, { t: 'reroll' });
+    for (const o of p.shop.offers) assert.ok(!o || !uniques.includes(o.id), `刷新出了已拥有的 ${o?.id}`);
+  }
+});
+
+test('商店：只能撤销上一次购买', () => {
+  const { sim, p } = shopSim(21);
+  p.shop.offers = [
+    { kind: 'item', id: 'charcoal', tier: 1, price: 20 },
+    { kind: 'item', id: 'focus_sash', tier: 3, price: 80 },
+    { kind: 'skill', id: 'flamethrower', tier: 3, price: 90 },
+    { kind: 'item', id: 'leftovers', tier: 2, price: 40 },
+  ];
+  const money = p.money;
+  assert.equal(sim.command(1, { t: 'undo' }), '没有可以撤销的购买');
+  assert.equal(sim.command(1, { t: 'buy', i: 0 }), null);
+  assert.equal(sim.command(1, { t: 'buy', i: 1 }), null);
+  assert.equal(sim.privateState(p).undo, '气势披带');
+  assert.equal(sim.command(1, { t: 'undo' }), null);
+  assert.equal(p.items.focus_sash ?? 0, 0, '收回了气势披带');
+  assert.equal(p.items.charcoal, 1, '更早的购买不受影响');
+  assert.equal(p.money, money - 20);
+  assert.equal(p.shop.offers[1]?.id, 'focus_sash', '商品放回原位');
+  assert.equal(sim.command(1, { t: 'undo' }), '没有可以撤销的购买', '不能连续撤销');
+  // 学技能也能撤销
+  const skills = p.skills.map((s) => s.id).join();
+  assert.equal(sim.command(1, { t: 'buy', i: 2, slot: 0 }), null);
+  assert.ok(p.skills.some((s) => s.id === 'flamethrower'));
+  assert.equal(sim.command(1, { t: 'undo' }), null);
+  assert.equal(p.skills.map((s) => s.id).join(), skills);
+  // 买完再刷新就不能撤销了
+  assert.equal(sim.command(1, { t: 'buy', i: 3 }), null);
+  sim.command(1, { t: 'reroll' });
+  assert.equal(sim.command(1, { t: 'undo' }), '没有可以撤销的购买');
+  assert.equal(p.items.leftovers, 1);
+});
+
 test('最终波：必须击败梦幻才能通关', () => {
   const sim = new GameSim([{ id: 1, name: 'a', line: 'mewtwo', meta: {} }], 5);
   const p = sim.players[0];

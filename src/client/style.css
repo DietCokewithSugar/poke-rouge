@@ -232,30 +232,21 @@ label { display: block; font-size: 0.875rem; color: var(--muted); margin: 0.25re
 .hud-skills { position: absolute; left: 50%; bottom: 0.75rem; transform: translateX(-50%); display: flex; gap: 0.375rem; }
 .hud-skill { position: relative; width: 2.875rem; height: 2.875rem; border-radius: 0.5rem; background: rgba(10, 20, 50, .7); border: 0.125rem solid rgba(255, 255, 255, .7); box-shadow: 0 0 0 0.125rem var(--edge-out); overflow: hidden; }
 .hud-skill.empty { opacity: .4; border-style: dashed; }
-.hud-skill .skill-ico { width: 100%; height: 100%; border: 0; border-radius: 0; }
-.hud-skill .cd { position: absolute; inset: 0; background: conic-gradient(rgba(0, 0, 0, .62) var(--p, 0%), transparent 0); pointer-events: none; }
-.hud-banner {
-  position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(.8);
-  font-size: 2.5rem; color: var(--gold); text-shadow: 0.1875rem 0.1875rem 0 #6a3a00, 0.375rem 0.375rem 0 #000; opacity: 0; white-space: nowrap;
-  transition: opacity .25s, transform .25s;
+.hud-skill .skill-ico { display: inline-flex; position: relative; width: 2.5rem; height: 2.5rem; flex-shrink: 0; }
+.skill-ico .sk-img { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+.skill-ico.small { width: 1.5rem; height: 1.5rem; }
+.skill-ico i {
+  position: absolute; right: -0.1875rem; bottom: -0.1875rem; font-style: normal; font-size: 0.6875rem; line-height: 0.875rem;
+  color: var(--gold); background: rgba(10, 10, 24, .85); border-radius: 0.1875rem; padding: 0 0.125rem; text-shadow: none;
 }
-.hud-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-.hud-sub {
-  position: absolute; left: 50%; top: calc(30% + 2.5rem); transform: translateX(-50%);
-  font-size: 1.125rem; color: #fff; text-shadow: 0.125rem 0.125rem 0 #000; opacity: 0; transition: opacity .3s; white-space: nowrap;
+.skill-ico.small i { font-size: 0.5625rem; line-height: 0.6875rem; right: -0.25rem; bottom: -0.25rem; }
+.skill-ico.tier2::after, .skill-ico.tier3::after, .skill-ico.tier4::after {
+  content: ''; position: absolute; top: -0.0625rem; right: -0.0625rem; width: 0.375rem; height: 0.375rem; border: 1px solid #101018; transform: rotate(45deg);
 }
-.hud-sub.show { opacity: 1; }
-
-.skill-ico {
-  display: inline-flex; align-items: center; justify-content: center; position: relative;
-  width: 2.5rem; height: 2.5rem; border-radius: 0.375rem;
-  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--tc) 70%, #fff), var(--tc) 55%, color-mix(in srgb, var(--tc) 55%, #000));
-  border: 0.125rem solid rgba(255, 255, 255, .7);
-  font-size: 0.875rem; color: #fff; text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
-  flex-shrink: 0;
-}
-.skill-ico.small { width: 1.375rem; height: 1.375rem; font-size: 0.75rem; border-width: 1px; border-radius: 0.25rem; }
-.skill-ico i { position: absolute; right: 1px; bottom: -1px; font-style: normal; font-size: 0.6875rem; color: var(--gold); }
+.skill-ico.small::after { width: 0.25rem !important; height: 0.25rem !important; }
+.skill-ico.tier2::after { background: var(--t2); }
+.skill-ico.tier3::after { background: var(--t3); }
+.skill-ico.tier4::after { background: var(--t4); }
 
 /* ---------- 波次间 ---------- */
 #inter {

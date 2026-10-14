@@ -38,7 +38,7 @@ export const PAL: Record<string, [string, string, string, string, string]> = {
   danger: ['#4a0010', '#a01828', '#f83848', '#ff9098', '#ffe0e4'],
 };
 
-interface Grid {
+export interface Grid {
   w: number; h: number; g: (string | null)[][];
   set(x: number, y: number, c: string): void;
   get(x: number, y: number): string | null;
@@ -48,7 +48,7 @@ interface Grid {
   arc(cx: number, cy: number, r: number, a0: number, a1: number, c: string): void;
 }
 
-function grid(w: number, h: number): Grid {
+export function grid(w: number, h: number): Grid {
   const g: (string | null)[][] = Array.from({ length: h }, () => Array<string | null>(w).fill(null));
   const G: Grid = {
     w, h, g,

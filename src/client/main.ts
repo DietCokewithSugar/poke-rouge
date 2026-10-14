@@ -10,6 +10,8 @@ import { initAudio, playMusic, setVolume, sfx } from './audio';
 import { GameView } from './game/view';
 import { Animator, dirRow, preload } from './gfx/sprites';
 import { iconUrl } from './gfx/icons';
+import { skillIconUrl } from './gfx/skillicons';
+import { SKILLS } from '../shared/skills';
 import { ITEMS } from '../shared/items';
 import { BORDER, arenaCanvas } from './gfx/tiles';
 import { initGamepad } from './gamepad';
@@ -98,7 +100,7 @@ class App {
     this.title();
     void preload(ALL_DEX);
     const params = new URLSearchParams(location.search);
-    if (params.has('debug')) Object.assign(window, { __send: (m: C2S) => this.send(m), __icons: { iconUrl, ITEMS } });
+    if (params.has('debug')) Object.assign(window, { __send: (m: C2S) => this.send(m), __icons: { iconUrl, ITEMS, skillIconUrl, SKILLS } });
     const room = params.get('room');
     if (room && /^\d{5}$/.test(room)) this.joinRoom(room);
   }

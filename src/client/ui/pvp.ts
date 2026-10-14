@@ -365,7 +365,7 @@ function skillBars(p: PvpPlayerResult) {
     const def = SKILLS[id];
     const color = def ? TYPE_COLOR[def.type] : '#a0a8b8';
     const row = h('div', { class: 'r-skill' },
-      def ? skillIcon(id, held.get(id) ?? 1, true) : h('div', { class: 'skill-ico small', style: `--tc:${color}` }, h('span', null, id === '_dot' ? '毒' : '反')),
+      skillIcon(id, held.get(id) ?? 1, true),
       h('div', { class: 'r-skill-name' }, def ? def.name : id === '_dot' ? '灼伤 / 中毒 / 寄生' : '反伤等其它'),
       h('div', { class: 'r-skill-bar' }, h('div', { style: `width:${(v / max) * 100}%;background:${color}` })),
       h('div', { class: 'r-skill-num' }, `${fmt(v)} · ${Math.round((v / total) * 100)}%`),
