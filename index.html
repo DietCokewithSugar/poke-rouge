@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#1a3170" />
+    <meta name="screen-orientation" content="landscape" />
+    <meta name="x5-orientation" content="landscape" />
+    <meta name="full-screen" content="yes" />
+    <meta name="x5-fullscreen" content="true" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="description" content="宝可肉鸽：最多 4 人联机的宝可梦像素风割草肉鸽游戏。" />
     <title>宝可肉鸽 · Poké Rouge</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -16,6 +23,15 @@
     </div>
     <div id="toasts"></div>
     <div id="tooltip" class="hidden"></div>
+    <div id="rotate">
+      <div class="box rotate-box">
+        <div class="rotate-phone"><i></i></div>
+        <h2>请把手机横过来</h2>
+        <p class="sub">宝可肉鸽需要横屏游玩。旋转手机后会自动继续。</p>
+        <button class="btn gold" id="rotate-fs">全屏并横屏</button>
+        <p class="muted small">如果没有反应，请关闭手机的「方向锁定 / 竖排方向锁定」后再旋转。</p>
+      </div>
+    </div>
     <script type="module" src="/src/client/main.ts"></script>
   </body>
 </html>

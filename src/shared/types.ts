@@ -53,15 +53,18 @@ export function rawEffectiveness(atk: PType, def: readonly PType[]): number {
 }
 
 /**
- * 游戏内倍率：保留"效果拔群/效果不好"的手感，但把极端值收窄，
- * 免疫只是大幅削弱而不是完全无效，避免某些组合在割草里完全打不动。
+ * 游戏内倍率：大幅弱化原作的克制，效果拔群只比普通伤害多 10%（双重克制 20%），
+ * 效果不好少 10%，免疫与双重抵抗少 20%。属性只是锦上添花，不会逼着玩家换技能。
  */
+export const EFF_SUPER = 1.1;
+export const EFF_WEAK = 0.9;
+
 export function gameEffectiveness(atk: PType, def: readonly PType[]): number {
   const m = rawEffectiveness(atk, def);
-  if (m === 0) return 0.25;
-  if (m >= 4) return 2.5;
-  if (m >= 2) return 1.75;
-  if (m <= 0.25) return 0.4;
-  if (m <= 0.5) return 0.6;
+  if (m === 0) return 0.8;
+  if (m >= 4) return 1.2;
+  if (m >= 2) return EFF_SUPER;
+  if (m <= 0.25) return 0.8;
+  if (m <= 0.5) return EFF_WEAK;
   return 1;
 }

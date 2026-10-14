@@ -1,0 +1,10 @@
+{
+  "name": "宝可肉鸽 · Poké Rouge",
+  "short_name": "宝可肉鸽",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#050914",
+  "theme_color": "#1a3170",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

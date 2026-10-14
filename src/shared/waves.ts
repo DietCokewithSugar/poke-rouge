@@ -13,32 +13,47 @@ export interface WaveDef {
 export const TOTAL_WAVES = 20;
 
 export const WAVES: WaveDef[] = [
-  { biome: 0, rate: 0.85, pool: { caterpie: 3, weedle: 2 } },
-  { biome: 0, rate: 1.0, pool: { caterpie: 2, weedle: 2, rattata: 2 } },
-  { biome: 0, rate: 1.15, pool: { caterpie: 1, weedle: 1, rattata: 2, pidgey: 2, metapod: 1 }, treasure: { id: 'meowth', chance: 0.35 } },
-  { biome: 0, rate: 1.3, pool: { rattata: 2, pidgey: 2, spearow: 2, zubat: 2, kakuna: 1 } },
-  { biome: 0, rate: 1.35, pool: { pidgey: 2, spearow: 2, zubat: 2, oddish: 2, metapod: 1 }, elites: ['beedrill'], treasure: { id: 'meowth', chance: 0.4 } },
-  { biome: 1, rate: 1.5, pool: { zubat: 2, oddish: 2, paras: 2, ekans: 2, spearow: 1, kakuna: 1 } },
-  { biome: 1, rate: 1.6, pool: { ekans: 2, paras: 2, geodude: 2, magnemite: 2, zubat: 2 }, treasure: { id: 'meowth', chance: 0.4 } },
-  { biome: 1, rate: 1.7, pool: { geodude: 2, magnemite: 2, gastly: 2, voltorb: 2, rattata: 2 }, elites: ['beedrill'] },
-  { biome: 1, rate: 1.8, pool: { raticate: 2, pidgeotto: 2, machop: 2, gastly: 2, voltorb: 1, mankey: 2 }, treasure: { id: 'chansey', chance: 0.3 } },
-  { biome: 1, rate: 1.3, pool: { raticate: 2, pidgeotto: 2, machop: 2, geodude: 1 }, boss: 'snorlax' },
-  { biome: 2, rate: 1.9, pool: { golbat: 2, gloom: 2, mankey: 2, machop: 2, koffing: 2 }, treasure: { id: 'meowth', chance: 0.45 } },
-  { biome: 2, rate: 2.0, pool: { golbat: 2, parasect: 2, graveler: 1, magneton: 2, koffing: 2 }, elites: ['onix'] },
-  { biome: 2, rate: 2.1, pool: { haunter: 2, magneton: 2, graveler: 1, fearow: 2, arbok: 2, electrode: 1 }, treasure: { id: 'chansey', chance: 0.35 } },
-  { biome: 2, rate: 2.2, pool: { haunter: 2, arbok: 2, primeape: 2, machoke: 1, butterfree: 2 }, elites: ['beedrill', 'beedrill'] },
-  { biome: 2, rate: 2.2, pool: { haunter: 2, primeape: 2, machoke: 2, electrode: 2, golbat: 2 }, elites: ['gengar'], treasure: { id: 'meowth', chance: 0.5 } },
-  { biome: 3, rate: 2.3, pool: { machoke: 2, primeape: 2, kadabra: 2, weezing: 1, electrode: 2, golbat: 2 } },
-  { biome: 3, rate: 2.4, pool: { kadabra: 2, graveler: 1, magneton: 2, haunter: 2, weezing: 1, fearow: 2 }, elites: ['beedrill', 'beedrill'], treasure: { id: 'chansey', chance: 0.4 } },
-  { biome: 3, rate: 2.5, pool: { kadabra: 2, graveler: 2, machoke: 2, arbok: 2, butterfree: 2, electrode: 1 }, elites: ['onix'] },
-  { biome: 3, rate: 2.6, pool: { kadabra: 2, haunter: 2, machoke: 2, primeape: 2, weezing: 1, golbat: 2 }, elites: ['gengar', 'onix'], treasure: { id: 'meowth', chance: 0.5 } },
+  { biome: 0, rate: 0.95, pool: { caterpie: 3, weedle: 2 } },
+  { biome: 0, rate: 1.1, pool: { caterpie: 2, weedle: 2, rattata: 2 } },
+  { biome: 0, rate: 1.25, pool: { caterpie: 1, weedle: 1, rattata: 2, pidgey: 2, metapod: 1 }, treasure: { id: 'meowth', chance: 0.35 } },
+  { biome: 0, rate: 1.45, pool: { rattata: 2, pidgey: 2, spearow: 2, zubat: 2, kakuna: 1 } },
+  { biome: 0, rate: 1.5, pool: { pidgey: 2, spearow: 2, zubat: 2, oddish: 2, metapod: 1 }, elites: ['beedrill'], treasure: { id: 'meowth', chance: 0.4 } },
+  { biome: 1, rate: 1.65, pool: { zubat: 2, oddish: 2, paras: 2, ekans: 2, spearow: 1, kakuna: 1 } },
+  { biome: 1, rate: 1.75, pool: { ekans: 2, paras: 2, geodude: 2, magnemite: 2, zubat: 2 }, treasure: { id: 'meowth', chance: 0.4 } },
+  { biome: 1, rate: 1.85, pool: { geodude: 2, magnemite: 2, gastly: 2, voltorb: 2, rattata: 2 }, elites: ['beedrill'] },
+  { biome: 1, rate: 2.0, pool: { raticate: 2, pidgeotto: 2, machop: 2, gastly: 2, voltorb: 1, mankey: 2 }, treasure: { id: 'chansey', chance: 0.3 } },
+  { biome: 1, rate: 1.1, pool: { raticate: 2, pidgeotto: 2, machop: 2, geodude: 1 }, boss: 'snorlax' },
+  { biome: 2, rate: 2.1, pool: { golbat: 2, gloom: 2, mankey: 2, machop: 2, koffing: 2 }, treasure: { id: 'meowth', chance: 0.45 } },
+  { biome: 2, rate: 2.2, pool: { golbat: 2, parasect: 2, graveler: 1, magneton: 2, koffing: 2 }, elites: ['onix'] },
+  { biome: 2, rate: 2.3, pool: { haunter: 2, magneton: 2, graveler: 1, fearow: 2, arbok: 2, electrode: 1 }, treasure: { id: 'chansey', chance: 0.35 } },
+  { biome: 2, rate: 2.4, pool: { haunter: 2, arbok: 2, primeape: 2, machoke: 1, butterfree: 2 }, elites: ['beedrill', 'beedrill'] },
+  { biome: 2, rate: 2.4, pool: { haunter: 2, primeape: 2, machoke: 2, electrode: 2, golbat: 2 }, elites: ['gengar'], treasure: { id: 'meowth', chance: 0.5 } },
+  { biome: 3, rate: 2.55, pool: { machoke: 2, primeape: 2, kadabra: 2, weezing: 1, electrode: 2, golbat: 2 } },
+  { biome: 3, rate: 2.65, pool: { kadabra: 2, graveler: 1, magneton: 2, haunter: 2, weezing: 1, fearow: 2 }, elites: ['beedrill', 'beedrill'], treasure: { id: 'chansey', chance: 0.4 } },
+  { biome: 3, rate: 2.75, pool: { kadabra: 2, graveler: 2, machoke: 2, arbok: 2, butterfree: 2, electrode: 1 }, elites: ['onix'] },
+  { biome: 3, rate: 2.85, pool: { kadabra: 2, haunter: 2, machoke: 2, primeape: 2, weezing: 1, golbat: 2 }, elites: ['gengar', 'onix'], treasure: { id: 'meowth', chance: 0.5 } },
   { biome: 3, rate: 1.7, pool: { kadabra: 2, haunter: 2, machoke: 2, golbat: 1 }, boss: 'mew' },
 ];
 
-/** 每波时长：第 1 波 60 秒，逐步增加到第 20 波 90 秒。 */
+export const BOSS_WAVE_DURATION = 90;
+
+/** 每波时长：普通波次从第 1 波 30 秒逐步增加到第 19 波 60 秒，首领波（第 10、20 波）90 秒。 */
 export function waveDuration(wave: number): number {
-  const t = 60 + (30 * (wave - 1)) / (TOTAL_WAVES - 1);
+  if (WAVES[wave - 1]?.boss) return BOSS_WAVE_DURATION;
+  const normals = WAVES.filter((w) => !w.boss).length;
+  const k = WAVES.slice(0, wave - 1).filter((w) => !w.boss).length;
+  const t = 30 + (30 * k) / (normals - 1);
   return Math.round(t / 5) * 5;
+}
+
+/**
+ * 糖果倍率：波次变短后，每只敌人掉落更多糖果，让每波的经验与金钱和原来的节奏一致
+ *（以前的普通波次约为 60~88 秒）。
+ */
+export function candyMult(wave: number): number {
+  if (WAVES[wave - 1]?.boss) return 1;
+  const legacy = 60 + (30 * (wave - 1)) / (TOTAL_WAVES - 1);
+  return legacy / waveDuration(wave) / 1.1;
 }
 
 export function enemyHpMult(wave: number): number {

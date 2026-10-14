@@ -110,16 +110,16 @@ export const LINES: Record<LineId, Line> = {
     id: 'pikachu', name: '皮卡丘',
     forms: [
       { dex: 25, name: '皮卡丘', types: ['electric'], base: S(35, 55, 40, 50, 50, 90), slots: 5 },
-      { dex: 26, name: '雷丘', types: ['electric'], base: S(60, 90, 55, 90, 80, 110), slots: 6 },
+      { dex: 26, name: '雷丘', types: ['electric'], base: S(60, 90, 55, 90, 80, 110), slots: 5 },
     ],
     evoLevels: [],
     evoItem: 'thunder_stone',
-    bonusType: 'electric', bonusPct: 25,
+    bonusType: 'electric', bonusPct: 20,
     passives: [
-      { name: '静电', desc: '电系技能伤害 +25%；接触到你的敌人有 30% 几率麻痹。' },
-      { name: '电气球', desc: '未进化时物攻、特攻 +25%。使用商店里的雷之石进化为雷丘（技能栏 6）。' },
+      { name: '静电', desc: '电系技能伤害 +20%；接触到你的敌人有 30% 几率麻痹。' },
+      { name: '电气球', desc: '未进化时物攻、特攻 +15%。使用商店里的雷之石进化为雷丘（种族值大幅提升）。' },
     ],
-    mods: { atkPct: 25, spaPct: 25 },
+    mods: { atkPct: 15, spaPct: 15 },
     start: ['thunder_shock', 'quick_attack'],
     learnset: [
       { lv: 4, skill: 'electro_ball' }, { lv: 8, skill: 'spark' },

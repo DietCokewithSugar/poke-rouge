@@ -4,6 +4,8 @@ import { FX_KINDS, SKILLS } from '../../shared/skills';
 import type { Ev, MeState, PublicState } from '../../shared/sim/game';
 import { sfx } from '../audio';
 import { FxLayer, drawPickup, drawProj, drawZone, pxCircle, pxRing } from '../gfx/fx';
+import { vis, type Trail } from '../gfx/vfx';
+import { TYPES } from '../../shared/types';
 import { Animator, dirRow, shadowSize } from '../gfx/sprites';
 import { BORDER, arenaCanvas } from '../gfx/tiles';
 import { moveVector } from '../input';
@@ -55,6 +57,7 @@ export class GameView {
   private time = 0;
   private hurtFlash = 0;
   private superEffAt = 0;
+  private trailT = new Map<number, number>();
   private lastSnapPhase = 0;
   settings: Settings;
   hooks: ViewHooks;
@@ -141,6 +144,7 @@ export class GameView {
         if (v && v.flash < -0.14) v.flash = 0.08;
         if (f & 8) { this.fx.text(x, y - 18, String(dmg), '#d890f0', 10, 0.6); break; }
         const crit = !!(f & 1);
+        this.fx.hit(x, y - 8 * (v?.scale ?? 1), TYPES[n(6)] ?? 'normal', crit);
         const col = crit ? '#ffd23f' : f & 2 ? '#ff8c5a' : f & 4 ? '#a0a8b8' : '#ffffff';
         this.fx.text(x, y - 20, crit ? `${dmg}!` : String(dmg), col, crit ? 13 : 11, 0.7);
         if (f & 2 && this.time - this.superEffAt > 2.5) {
@@ -185,17 +189,17 @@ export class GameView {
           this.corpses.push({ anim, x, y, t: 0, scale: v?.scale ?? 1 });
         }
         this.enemyVis.delete(id);
-        this.fx.burst(x, y - 6, '#ffffff', 5, 50, 1);
+        this.fx.death(x, y);
         sfx('kill');
         break;
       }
       case 'fx': this.skillFx(ev); break;
-      case 'chain': this.fx.add('chain', ev[1] as string, 0, 0, 0, 0, 0, 0.22, ev[2] as number[]); sfx('crit'); break;
-      case 'mark': this.fx.add('mark', 'mark', n(1), n(2), 0, 0, 0, 1.0); break;
-      case 'warn': this.fx.add('warn', 'warn', n(2), n(3), n(6), n(4), n(1), n(5) / 1000, [n(7)]); break;
+      case 'chain': this.fx.lightning(ev[2] as number[], vis(ev[1] as string).pal); sfx('crit'); break;
+      case 'mark': this.fx.mark(n(1), n(2)); break;
+      case 'warn': this.fx.warn(n(1), n(2), n(3), n(4), n(5) / 1000, n(6), n(7)); break;
       case 'boom': {
         const r = n(3);
-        this.fx.add('boom', ev[4] as string, n(1), n(2), 0, r, 0, 0.35);
+        this.fx.boom(ev[4] as string, n(1), n(2), r);
         if (r >= 30) {
           sfx('boom');
           if (this.settings.shake) this.fx.shake = Math.max(this.fx.shake, r > 50 ? 5 : 3);
@@ -217,15 +221,20 @@ export class GameView {
         this.pickups.clear();
         break;
       case 'lvl':
-        if (n(1) === this.you) {
-          const pos = this.playerPos(this.you);
-          if (pos) this.fx.text(pos.x, pos.y - 34, 'Lv UP!', '#ffd23f', 12, 1);
-          sfx('level');
+        {
+          const pos = this.playerPos(n(1));
+          if (pos) this.fx.levelUp(pos.x, pos.y);
+          if (n(1) === this.you) {
+            if (pos) this.fx.text(pos.x, pos.y - 34, 'Lv UP!', '#ffd23f', 12, 1);
+            sfx('level');
+          }
         }
         break;
       case 'evo': {
         const v = this.playerVis.get(n(1));
         if (v) v.evoFlash = 1.4;
+        const pos = this.playerPos(n(1));
+        if (pos) this.fx.evolve(pos.x, pos.y);
         this.hooks.onEvolve(n(1), ev[3] as string);
         sfx('evolve');
         break;
@@ -259,15 +268,11 @@ export class GameView {
   private skillFx(ev: Ev) {
     const fx = ev[1] as string, x = ev[2] as number, y = ev[3] as number, ang = ev[4] as number;
     const a = ev[5] as number, b = ev[6] as number, owner = ev[7] as number;
-    if (fx.endsWith('_pre')) { this.fx.add('pre', fx, x, y, 0, a, 0, b / 1000); return; }
-    if (fx.endsWith('_charge')) { this.fx.add('charge', fx, x, y, ang, a, b, (ev[8] as number) / 1000, undefined, owner); return; }
-    const pat = FX_PATTERN.get(fx);
-    if (pat === 'melee') this.fx.add('melee', fx, x, y, ang, a, b, 0.2);
-    else if (pat === 'beam') { this.fx.add('beam', fx, x, y, ang, a, b, 0.28); if (b >= 20 && this.settings.shake) this.fx.shake = Math.max(this.fx.shake, 2); }
-    else if (pat === 'nova') { this.fx.add('nova', fx, x, y, 0, a, 0, 0.3); if (fx === 'earthquake' && this.settings.shake) this.fx.shake = 5; }
-    else if (pat === 'heal') { this.fx.add('heal', fx, x, y, 0, a, 0, 0.8); }
-    else if (pat === 'buff') this.fx.add('buff', fx, x, y, 0, 0, 0, 0.6);
-    else if (pat === 'shield') this.fx.add('shieldfx', fx, x, y, 0, 0, 0, 0.4);
+    if (fx.endsWith('_pre')) { this.fx.pre(fx, x, y, a, b / 1000); return; }
+    if (fx.endsWith('_charge')) { this.fx.charge(fx, x, y, ang, a, b, (ev[8] as number) / 1000); return; }
+    void owner;
+    this.fx.skill(FX_PATTERN.get(fx), fx, x, y, ang, a, b);
+    if (!this.settings.shake) this.fx.shake = 0;
   }
 
   private nearestPid(x: number, y: number) {
@@ -430,15 +435,27 @@ export class GameView {
     list.sort((p, q) => p.y - q.y);
     for (const d of list) d.draw();
 
-    // 弹体
+    // 弹体（附带拖尾粒子）
     if (ip) {
       const { a, b, f } = ip;
+      const seen = new Set<number>();
       for (const p of b.s.projs) {
         const pa = a.projs.get(p.id);
         const x = pa ? pa.x + (p.x - pa.x) * f : p.x;
         const y = pa ? pa.y + (p.y - pa.y) * f : p.y;
-        drawProj(ctx, FX_KINDS[p.fx], x, y, p.ang, p.r, t + p.id * 0.1);
+        const kind = FX_KINDS[p.fx];
+        drawProj(ctx, kind, x, y, p.ang, p.r, t + p.id * 0.1, p.enemy);
+        seen.add(p.id);
+        const v = vis(kind);
+        if (v.trail && Math.abs(x - this.cam.x - this.viewW / 2) < this.viewW / 2 + 20) {
+          const last = this.trailT.get(p.id) ?? 0;
+          if (t - last > 0.035) {
+            this.trailT.set(p.id, t);
+            this.fx.trail(v.trail as Trail, v.pal, x, y, Math.cos(p.ang), Math.sin(p.ang));
+          }
+        }
       }
+      if (this.trailT.size > 400) for (const id of this.trailT.keys()) if (!seen.has(id)) this.trailT.delete(id);
     }
     // 飞向玩家的掉落物
     for (const fl of this.flyers) {
@@ -457,7 +474,7 @@ export class GameView {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (this.hurtFlash > 0) {
       this.hurtFlash -= dt;
-      ctx.fillStyle = `rgba(255,40,60,${Math.max(0, this.hurtFlash) * 0.5})`;
+      ctx.fillStyle = `rgba(255,40,60,${Math.max(0, this.hurtFlash) * 0.3})`;
       ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
     const mine = ip?.b.players.get(this.you);
@@ -483,16 +500,18 @@ export class GameView {
     this.drawShadow(x, y, shadowSize(dex), v.scale);
     if (rank !== 'minion') {
       ctx.globalAlpha = 0.35 + 0.15 * Math.sin(t * 6);
-      pxRing(ctx, x, y - 2, 9 * v.scale, rank === 'boss' ? '#f8d030' : '#f85050');
+      pxRing(ctx, x, y, 10 * v.scale, rank === 'boss' ? '#f8d030' : '#f85050', 1, 0.45, 2);
       ctx.globalAlpha = 1;
     }
     v.anim.draw(ctx, x, y, v.scale, v.flash > 0 ? 0.8 : 0);
     const f = e.flags;
     const top = y - 26 * v.scale;
-    if (f & 2 && Math.random() < 0.3) this.fx.burst(x + (Math.random() - 0.5) * 8, y - 8, '#f88030', 1, 10, 1, -40, 0.4);
-    if (f & 4 && Math.random() < 0.25) this.fx.burst(x + (Math.random() - 0.5) * 8, y - 6, '#b060d0', 1, 8, 1, -30, 0.5);
-    if (f & 8 && Math.random() < 0.25) this.fx.burst(x + (Math.random() - 0.5) * 10, y - 10, '#f8e030', 1, 30, 1, 0, 0.2);
-    if (f & 16) { ctx.globalAlpha = 0.4; pxCircle(ctx, x, y - 8, 7 * v.scale, '#a8e8f8'); ctx.globalAlpha = 1; }
+    // 异常状态：灼伤冒火星、中毒冒泡、麻痹闪电、冰冻/畏缩罩一层冰
+    const jx = () => x + (Math.random() - 0.5) * 10 * v.scale;
+    if (f & 2 && Math.random() < 0.25) this.fx.px(jx(), y - 6, Math.random() < 0.5 ? '#ff6a1f' : '#ffb22e', { vy: -35, life: 0.45 });
+    if (f & 4 && Math.random() < 0.2) this.fx.px(jx(), y - 4, '#d995f2', { vy: -25, life: 0.5, size: 2 });
+    if (f & 8 && Math.random() < 0.12) this.fx.sp('spark', 'electric', jx(), y - 6 - Math.random() * 12 * v.scale, { life: 0.15, fr: 20 });
+    if (f & 16) { ctx.globalAlpha = 0.33; pxCircle(ctx, x, y - 8 * v.scale, 7 * v.scale, '#bff3ff'); ctx.globalAlpha = 1; }
     if (f & 64) {
       ctx.fillStyle = '#f83838';
       ctx.fillRect(Math.round(x) - 1, Math.round(top) - 6, 2, 5);
@@ -516,7 +535,7 @@ export class GameView {
     this.drawShadow(x, y, shadowSize(p.dex), 1);
     if (mine) {
       ctx.globalAlpha = 0.5;
-      pxRing(ctx, x, y - 1, 8, '#ffffff');
+      pxRing(ctx, x, y, 9, '#ffffff', 1, 0.45, 2);
       ctx.globalAlpha = 1;
     }
     const invuln = (p.flags & 2) !== 0 && !(p.flags & 1);
@@ -524,15 +543,16 @@ export class GameView {
     v.anim.draw(ctx, x, y, 1, v.flash > 0 ? 0.6 : v.evoFlash > 0 ? Math.min(1, v.evoFlash) : 0, alpha);
     if (v.evoFlash > 0) {
       ctx.globalAlpha = v.evoFlash / 1.4;
-      pxRing(ctx, x, y - 10, 10 + (1.4 - v.evoFlash) * 30, '#ffffff');
+      pxRing(ctx, x, y - 10, 10 + (1.4 - v.evoFlash) * 30, '#ffffff', 2);
       ctx.globalAlpha = 1;
     }
     if (p.flags & 4) {
       ctx.globalAlpha = 0.45 + 0.15 * Math.sin(t * 8);
-      pxRing(ctx, x, y - 9, 13, '#a0d8ff');
+      pxRing(ctx, x, y - 9, 13, '#a0d8ff', 1, 1, 3);
+      pxRing(ctx, x, y - 9, 12, '#eaf7ff', 1, 1, 7);
       ctx.globalAlpha = 1;
     }
-    if (p.flags & 16 && Math.random() < 0.3) this.fx.burst(x, y - 4, '#f8e048', 1, 20, 1, 0, 0.3);
+    if (p.flags & 16 && Math.random() < 0.3) this.fx.px(x + (Math.random() - 0.5) * 12, y - 2, '#fff36a', { vy: -40, life: 0.35 });
     // 名字与血条
     const name = this.names.get(p.id) ?? '';
     ctx.font = '10px FusionPixel, monospace';

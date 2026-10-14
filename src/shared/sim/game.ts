@@ -4,7 +4,7 @@ import type { RunSummary } from '../meta';
 import { LINES, formOf, type LineId } from '../pokemon';
 import { Rng } from '../rng';
 import { SKILLS } from '../skills';
-import { TOTAL_WAVES, WAVES, enemyDmgMult, enemyHpMult, spawnRateMult, waveDuration } from '../waves';
+import { TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, spawnRateMult, waveDuration } from '../waves';
 import { updateEnemy } from './ai';
 import { PLAYER_R, beamHit, healPlayer, hitEnemy, hurtPlayer, updateSkills } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
@@ -96,7 +96,7 @@ export class GameSim {
   /** 每位玩家的私有状态是否需要重发 */
   dirty = new Set<number>();
   private events: Ev[] = [];
-  private hits = new Map<number, { x: number; y: number; dmg: number; flags: number }>();
+  private hits = new Map<number, { x: number; y: number; dmg: number; flags: number; type: number }>();
   private idSeq = 1;
   private spawnAcc = 0;
   private elitesDone = 0;
@@ -120,15 +120,15 @@ export class GameSim {
   emitCast(p: SimPlayer, anim: number) { this.emit(['cast', p.id, anim]); }
   recompute(p: SimPlayer) { recompute(p); this.dirty.add(p.id); }
 
-  addHit(e: Enemy, dmg: number, flags: number) {
+  addHit(e: Enemy, dmg: number, flags: number, type: number) {
     const h = this.hits.get(e.id);
-    if (h) { h.dmg += dmg; h.flags |= flags; h.x = e.x; h.y = e.y; }
-    else this.hits.set(e.id, { x: e.x, y: e.y, dmg, flags });
+    if (h) { h.dmg += dmg; h.flags |= flags; h.x = e.x; h.y = e.y; if (!(flags & 8)) h.type = type; }
+    else this.hits.set(e.id, { x: e.x, y: e.y, dmg, flags, type });
   }
 
   flushEvents(): Ev[] {
     const out = this.events;
-    for (const [id, h] of this.hits) out.push(['h', id, Math.round(h.x), Math.round(h.y), h.dmg, h.flags]);
+    for (const [id, h] of this.hits) out.push(['h', id, Math.round(h.x), Math.round(h.y), h.dmg, h.flags, h.type]);
     this.hits.clear();
     this.events = [];
     return out;
@@ -200,18 +200,19 @@ export class GameSim {
       this.emit(['msg', `${e.def.name}被打倒了！`]);
       if (this.boss === e) this.boss = null;
     }
+    const cm = candyMult(this.wave);
     if (silent && e.def.ai === 'bomber') {
-      this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)));
+      this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)) * cm);
       return;
     }
-    this.dropCandy(e.x, e.y, e.def.candy);
+    this.dropCandy(e.x, e.y, e.def.candy * cm);
     const luck = 1 + Math.max(0, this.players.reduce((a, p) => a + p.d.luck, 0) / Math.max(1, this.players.length)) / 100;
     if (e.def.rank !== 'minion' || this.rng.chance(0.004 * luck)) this.dropPickup('ball', e.x + this.rng.range(-8, 8), e.y + this.rng.range(-8, 8), 1);
     if (e.def.id === 'chansey' || this.rng.chance(0.012 * luck)) this.dropPickup('berry', e.x + this.rng.range(-6, 6), e.y + this.rng.range(-6, 6), 1);
   }
 
   private dropCandy(x: number, y: number, value: number) {
-    const pieces = Math.min(value, value > 20 ? 10 : 5);
+    const pieces = Math.max(1, Math.min(Math.floor(value), value > 20 ? 10 : 5));
     const each = value / pieces;
     for (let i = 0; i < pieces; i++) {
       const a = this.rng.range(0, Math.PI * 2), r = pieces > 1 ? this.rng.range(3, 6 + pieces * 2) : 0;

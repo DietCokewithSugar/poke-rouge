@@ -71,6 +71,11 @@ export class Intermission {
 
   // ---------------------------------------------------------------- 升级
 
+  /** 点完一张卡就锁住所有卡，防止连点发出多余的指令。 */
+  private lockCards() {
+    this.main.querySelectorAll<HTMLButtonElement>('button.card').forEach((b) => { b.disabled = true; });
+  }
+
   private renderCards(me: MeState) {
     this.main.appendChild(h('p', { class: 'sub' }, `${me.form} 升到了 Lv${me.level}！选择一项强化${me.levelsPending > 1 ? `（还剩 ${me.levelsPending} 次）` : ''}`));
     const row = h('div', { class: 'cards' });
@@ -83,7 +88,7 @@ export class Intermission {
 
   private cardEl(me: MeState, c: LevelCard, i: number) {
     if (c.kind === 'stat') {
-      return h('button', { class: `card tier${c.tier}`, onclick: () => { sfx('click'); this.send({ t: 'level', i }); } },
+      return h('button', { class: `card tier${c.tier}`, onclick: () => { sfx('click'); this.lockCards(); this.send({ t: 'level', i }); } },
         iconImg(STAT_ICON[c.stat] ?? 'bottle', 4),
         h('div', { class: 'card-title' }, c.name),
         tierBadge(c.tier),
@@ -92,7 +97,7 @@ export class Intermission {
     }
     const s = SKILLS[c.skill];
     const owned = me.skills.find((x) => x.id === c.skill);
-    const el = h('button', { class: `card skill tier${c.tier}`, onclick: () => this.chooseSkill(me, c.skill, (slot) => this.send({ t: 'level', i, slot })) },
+    const el = h('button', { class: `card skill tier${c.tier}`, onclick: () => this.chooseSkill(me, c.skill, (slot) => { this.lockCards(); this.send({ t: 'level', i, slot }); }) },
       skillIcon(c.skill, owned ? owned.lv + 1 : 1),
       h('div', { class: 'card-title' }, c.upgrade ? `强化 ${s.name}` : `领悟 ${s.name}`),
       h('div', null, typeBadge(s.type), ' ', tierBadge(s.tier)),
