@@ -114,7 +114,7 @@ export function derive(base: BaseStats, m: Mods): Derived {
     dodge: clamp(m.dodge / 100, 0, 0.6),
     regenPerSec: Math.max(0, m.regen) / 10,
     lifesteal: clamp(m.lifesteal / 100, 0, 1),
-    pickupRadius: 34 * clamp(1 + m.pickup / 100, 0.5, 5),
+    pickupRadius: 42 * clamp(1 + m.pickup / 100, 0.5, 5),
     luck: m.luck,
     harvest: Math.max(0, m.harvest),
     xpMult: Math.max(0, 1 + m.xp / 100),
