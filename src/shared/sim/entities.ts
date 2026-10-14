@@ -31,6 +31,10 @@ export interface ShopState {
 export interface SimPlayer {
   id: number;
   name: string;
+  /** 对战中的队伍（冒险模式全员为 0） */
+  team: number;
+  /** 由服务器控制走位的 AI 训练家 */
+  bot: boolean;
   line: LineId;
   stage: number;
   level: number;
@@ -85,6 +89,9 @@ export interface SimPlayer {
     forms: number[];
     waves: WaveLog[];
     mark: { kills: number; damage: number; taken: number };
+    /** 对战：击倒对手次数、被击倒次数 */
+    kos: number;
+    deaths: number;
   };
 }
 
@@ -118,6 +125,8 @@ export interface Enemy {
   dead?: boolean;
   /** 可被同一环绕弹体再次命中的时间 */
   orbitHit?: Map<number, number>;
+  /** 对战：这个目标代表的玩家（伤害会转给该玩家） */
+  pvp?: SimPlayer;
 }
 
 export interface Proj {

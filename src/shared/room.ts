@@ -24,7 +24,7 @@ export function cleanName(name: unknown): string {
   return s || '训练家';
 }
 
-function cleanMeta(meta: unknown): Record<string, number> {
+export function cleanMeta(meta: unknown): Record<string, number> {
   const out: Record<string, number> = {};
   if (meta && typeof meta === 'object') {
     for (const [k, v] of Object.entries(meta as Record<string, unknown>)) {
@@ -176,6 +176,9 @@ export class Room {
         return;
       case 'create':
       case 'join':
+      case 'pvpQueue':
+      case 'pvpCancel':
+      case 'pvpBoard':
         return;
       default:
         if (!this.sim) return;

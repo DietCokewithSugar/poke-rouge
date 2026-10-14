@@ -4,6 +4,7 @@ import { LINES, awakenings, formOf, maxStageByLevel, type LineId } from '../poke
 import { SKILLS, SKILL_IDS, SKILL_MAX_LV } from '../skills';
 import { addMods, addTypeMods, derive, emptyMods, type Mods, type TypeMods } from '../stats';
 import { priceMult } from '../waves';
+import type { SavedBuild } from '../pvp/build';
 import type { LevelCard, ShopOffer, SimPlayer } from './entities';
 import type { GameSim } from './game';
 
@@ -17,7 +18,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
   const mb = metaBonus(meta);
   const L = LINES[line];
   const p: SimPlayer = {
-    id, name, line, stage: 0, level: 1, xp: 0, money: 30 + mb.startMoney,
+    id, name, team: 0, bot: false, line, stage: 0, level: 1, xp: 0, money: 30 + mb.startMoney,
     x: sim.w / 2, y: sim.h / 2, dir: 0, moving: false,
     hp: 1, alive: true, down: false, downT: 0, revive: 0,
     skills: L.start.map((id, i) => ({ id, lv: 1, cd: 0.5 + i * 0.2 })),
@@ -35,10 +36,25 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     stats: {
       kills: 0, damage: 0, superEff: 0, moneyEarned: 0, revives: 0, evolved: false, skillsFull: false, foreignSkill: false, bossKills: [], maxItems: 0,
       killsBy: {}, rankKills: { minion: 0, elite: 0, boss: 0 }, skillDmg: {}, taken: 0, healed: 0, crits: 0, dodges: 0, moneySpent: 0,
-      forms: [formOf(line, 0).dex], waves: [], mark: { kills: 0, damage: 0, taken: 0 },
+      forms: [formOf(line, 0).dex], waves: [], mark: { kills: 0, damage: 0, taken: 0 }, kos: 0, deaths: 0,
     },
   };
   recompute(p);
+  p.hp = p.d.maxHp;
+  return p;
+}
+
+/** 按背包里保存的构筑创建玩家（对战用）。大木研究所的强化照常生效。 */
+export function createPlayerFromBuild(sim: GameSim, id: number, name: string, b: SavedBuild, meta: Record<string, number>): SimPlayer {
+  const p = createPlayer(sim, id, name, b.line, meta);
+  p.stage = b.stage;
+  p.level = b.level;
+  p.items = Object.fromEntries(b.items.filter(([it, n]) => ITEMS[it] && n > 0));
+  for (const [k, v] of Object.entries(b.levelMods)) p.levelMods[k as keyof Mods] += v ?? 0;
+  p.skills = b.skills.filter((s) => SKILLS[s.id]).map((s, i) => ({ id: s.id, lv: Math.max(1, Math.min(SKILL_MAX_LV, s.lv)), cd: 0.6 + i * 0.25 }));
+  p.stats.forms = [formOf(b.line, b.stage).dex];
+  recompute(p);
+  if (p.skills.length > p.slots) p.skills.length = p.slots;
   p.hp = p.d.maxHp;
   return p;
 }

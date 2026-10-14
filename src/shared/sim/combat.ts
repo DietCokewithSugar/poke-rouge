@@ -45,6 +45,7 @@ export interface HitOpts {
 
 /** 对敌人造成伤害，返回实际伤害。 */
 export function hitEnemy(sim: GameSim, e: Enemy, p: SimPlayer | null, raw: number, type: PType, o: HitOpts = {}): number {
+  if (e.pvp) return sim.pvpHit(e, p, raw, type, o);
   if (e.hp <= 0) return 0;
   let dmg = raw;
   let flags = 0;
@@ -111,13 +112,23 @@ export function healPlayer(sim: GameSim, p: SimPlayer, amount: number, lifesteal
   if (gained >= 1 && !lifesteal) sim.emit(['heal', p.id, Math.round(gained)]);
 }
 
+export interface HurtOpts {
+  /** 对战：受击后没有无敌时间，伤害数字带上暴击/克制标记与攻击者 */
+  pvp?: boolean;
+  flags?: number;
+  by?: number;
+  /** 持续伤害不会被闪避 */
+  dot?: boolean;
+}
+
 /** 玩家受到伤害。cat：phys 接触伤害（物防减免），spec 弹幕/爆炸（特防减免）。 */
-export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' | 'spec', src?: Enemy): number {
+export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' | 'spec', src?: Enemy, o: HurtOpts = {}): number {
   if (!p.alive || p.down || p.invuln > 0 || raw <= 0) return 0;
-  if (sim.rng.chance(p.d.dodge)) {
-    p.invuln = 0.2;
+  const tail = o.pvp ? [o.flags ?? 0, o.by ?? -1] : [];
+  if (!o.dot && sim.rng.chance(p.d.dodge)) {
+    if (!o.pvp) p.invuln = 0.2;
     p.stats.dodges++;
-    sim.emit(['ph', p.id, 0, 1]);
+    sim.emit(['ph', p.id, 0, 1, ...tail]);
     return 0;
   }
   let dmg = Math.max(1, Math.round(raw * (cat === 'phys' ? p.d.physTaken : p.d.specTaken)));
@@ -126,15 +137,15 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
     p.shield -= absorbed;
     dmg -= absorbed;
     if (dmg <= 0) {
-      p.invuln = 0.3;
-      sim.emit(['ph', p.id, absorbed, 2]);
+      if (!o.pvp) p.invuln = 0.3;
+      sim.emit(['ph', p.id, absorbed, 2, ...tail]);
       return 0;
     }
   }
   p.hp -= dmg;
   p.stats.taken += dmg;
-  p.invuln = 0.45;
-  sim.emit(['ph', p.id, dmg, 0]);
+  if (!o.pvp) p.invuln = 0.45;
+  sim.emit(['ph', p.id, dmg, 0, ...tail]);
   if (src && src.hp > 0) {
     if (p.d.thorns > 0) hitEnemy(sim, src, p, p.d.thorns * (1 + sim.wave * 0.1), 'normal', { noEff: true });
     if (p.line === 'pikachu' && sim.rng.chance(0.3)) applyStatus(src, { kind: 'para', chance: 1, dur: 2 }, 0, p.id);
@@ -166,21 +177,21 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
 
 // ---------------------------------------------------------------- 技能释放
 
-function nearest(sim: GameSim, x: number, y: number, range: number): Enemy | null {
+function nearest(sim: GameSim, p: SimPlayer, range: number): Enemy | null {
   let best: Enemy | null = null;
   let bd = range * range;
-  for (const e of sim.enemies) {
+  for (const e of sim.targetsFor(p.id)) {
     if (e.hidden || e.hp <= 0) continue;
-    const dx = e.x - x, dy = e.y - y;
+    const dx = e.x - p.x, dy = e.y - p.y;
     const d = dx * dx + dy * dy - e.r * e.r;
     if (d < bd) { bd = d; best = e; }
   }
   return best;
 }
 
-function enemiesInRange(sim: GameSim, x: number, y: number, range: number): Enemy[] {
+function enemiesInRange(sim: GameSim, p: SimPlayer, x: number, y: number, range: number): Enemy[] {
   const out: Enemy[] = [];
-  for (const e of sim.enemies) {
+  for (const e of sim.targetsFor(p.id)) {
     if (e.hidden || e.hp <= 0) continue;
     const d = Math.hypot(e.x - x, e.y - y);
     if (d <= range + e.r) out.push(e);
@@ -205,7 +216,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
   switch (s.pattern) {
     case 'heal': return castHeal(sim, p, s);
     case 'shield': {
-      if (!nearest(sim, p.x, p.y, range)) return false;
+      if (!nearest(sim, p, range)) return false;
       const mult = (p.line === 'squirtle' ? 1.5 : 1) * (p.items.light_clay ? 1.6 : 1);
       p.shield = Math.max(p.shield, p.d.maxHp * (s.shield ?? 0.15) * mult);
       p.shieldT = s.duration ?? 4;
@@ -214,7 +225,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
       return true;
     }
     case 'buff': {
-      if (!nearest(sim, p.x, p.y, range) || !s.buff) return false;
+      if (!nearest(sim, p, range) || !s.buff) return false;
       p.buffT = s.buff.dur;
       p.buff = { haste: s.buff.haste ?? 0, spe: s.buff.spe ?? 0 };
       sim.recompute(p);
@@ -224,7 +235,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
     }
   }
 
-  const t = nearest(sim, p.x, p.y, range);
+  const t = nearest(sim, p, range);
   if (!t) return false;
   const base = baseDamage(p, s, lv);
   const ang = Math.atan2(t.y - p.y, t.x - p.x);
@@ -250,7 +261,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
       const rad = (s.radius ?? 34) * rm;
       const arc = s.arc ?? Math.PI / 2;
       let total = 0;
-      for (const e of enemiesInRange(sim, p.x, p.y, rad)) {
+      for (const e of enemiesInRange(sim, p, p.x, p.y, rad)) {
         const d = Math.hypot(e.x - p.x, e.y - p.y);
         const slack = d > 0 ? Math.atan2(e.r, d) : Math.PI;
         if (arc < TAU - 0.01 && angDiff(Math.atan2(e.y - p.y, e.x - p.x), ang) > arc / 2 + slack) continue;
@@ -277,7 +288,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
     case 'nova': {
       const rad = (s.radius ?? 60) * rm;
       let total = 0;
-      for (const e of enemiesInRange(sim, p.x, p.y, rad)) {
+      for (const e of enemiesInRange(sim, p, p.x, p.y, rad)) {
         total += hitEnemy(sim, e, p, base, s.type, { ...opts, kx: e.x - p.x, ky: e.y - p.y });
       }
       recoil(p, s, total);
@@ -298,7 +309,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
         dmg *= 0.88;
         let next: Enemy | null = null;
         let bd = 95 * 95;
-        for (const e of sim.enemies) {
+        for (const e of sim.targetsFor(p.id)) {
           if (e.hp <= 0 || e.hidden || hit.has(e.id)) continue;
           const d = (e.x - from.x) ** 2 + (e.y - from.y) ** 2;
           if (d < bd) { bd = d; next = e; }
@@ -313,7 +324,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
       const n = s.strikes ?? 1;
       const targets: Enemy[] = [t];
       if (n > 1) {
-        const pool = enemiesInRange(sim, p.x, p.y, range).filter((e) => e !== t);
+        const pool = enemiesInRange(sim, p, p.x, p.y, range).filter((e) => e !== t);
         sim.rng.shuffle(pool);
         for (const e of pool) { if (targets.length >= n) break; targets.push(e); }
       }
@@ -362,7 +373,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
 function castHeal(sim: GameSim, p: SimPlayer, s: SkillDef): boolean {
   const mult = (p.line === 'bulbasaur' ? 1.3 : 1) * (p.items.big_root ? 1.3 : 1);
   const targets = s.team
-    ? sim.players.filter((q) => q.alive && !q.down && Math.hypot(q.x - p.x, q.y - p.y) <= (s.radius ?? 120))
+    ? sim.players.filter((q) => q.alive && !q.down && sim.isAlly(p, q) && Math.hypot(q.x - p.x, q.y - p.y) <= (s.radius ?? 120))
     : [p];
   if (!targets.some((q) => q.hp < q.d.maxHp * 0.75)) return false;
   for (const q of targets) healPlayer(sim, q, q.d.maxHp * (s.heal ?? 0.2) * mult);
@@ -379,7 +390,7 @@ function recoil(p: SimPlayer, s: SkillDef, total: number) {
 
 export function beamHit(sim: GameSim, p: SimPlayer | null, s: SkillDef, x: number, y: number, ang: number, len: number, width: number, dmg: number) {
   const cx = Math.cos(ang), cy = Math.sin(ang);
-  for (const e of sim.enemies.slice()) {
+  for (const e of sim.targetsFor(p ? p.id : -1).slice()) {
     if (e.hp <= 0 || e.hidden) continue;
     const dx = e.x - x, dy = e.y - y;
     const along = dx * cx + dy * cy;

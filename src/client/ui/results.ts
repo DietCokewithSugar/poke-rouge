@@ -9,9 +9,12 @@ import { TYPE_COLOR } from '../../shared/types';
 import { TOTAL_WAVES, WAVES } from '../../shared/waves';
 import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
-import type { RunReward } from '../save';
-import { h, tip } from './dom';
+import { validateBuild } from '../../shared/pvp/build';
+import { sfx } from '../audio';
+import { PARTY_MAX, addToParty, releaseFromParty, type Profile, type RunReward } from '../save';
+import { h, tip, toast } from './dom';
 import { itemInfo, skillIcon, skillInfo, typeBadge } from './describe';
+import { releaseModal } from './pvp';
 import { mount } from './screens';
 
 function fmtTime(sec: number) {
@@ -121,10 +124,40 @@ function topKills(s: RunSummary) {
   }));
 }
 
-export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: BoardEntry[], you: number, onContinue: () => void, label: string) {
+/** 结算后把这只宝可梦放进背包（满了要先放生一只） */
+function storeButton(p: Profile, s: RunSummary) {
+  const form = s.detail.form;
+  const btn = h('button', { class: 'btn store' }, `放入背包（${p.party.length} / ${PARTY_MAX}）`) as HTMLButtonElement;
+  const done = () => {
+    btn.disabled = true;
+    btn.textContent = '已放入背包 ✓';
+    sfx('buy');
+    toast(`${form} Lv${s.level} 已放入背包，可以在「宝可梦对战」里使用`, 'gold', 3200);
+  };
+  btn.addEventListener('click', () => {
+    if (btn.disabled) return;
+    if (addToParty(p, s)) { done(); return; }
+    sfx('click');
+    releaseModal(p.party, s.build ?? null, (uid) => {
+      releaseFromParty(p, uid);
+      if (addToParty(p, s)) done();
+    }, () => btn.focus());
+  });
+  tip(btn, () => h('div', { class: 'info' },
+    h('b', null, '放入背包'),
+    h('div', { class: 'small' }, '保留这一局的等级、形态、技能（含等级）、道具和升级强化。'),
+    h('div', { class: 'small' }, `可以用来和其他玩家对战（排位赛），最多保存 ${PARTY_MAX} 只。`),
+  ));
+  return btn;
+}
+
+export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: BoardEntry[], you: number, onContinue: () => void, label: string, profile?: Profile) {
   const head = h('div', { class: 'r-head' },
     h('h2', { class: victory ? 'gold' : '' }, victory ? '通关！你是真正的宝可梦大师！' : '眼前一片漆黑……'),
-    h('button', { class: 'btn gold big', onclick: onContinue }, label),
+    h('div', { class: 'row' },
+      s?.build && profile && typeof validateBuild(s.build) !== 'string' ? storeButton(profile, s) : null,
+      h('button', { class: 'btn gold big', onclick: onContinue }, label),
+    ),
   );
   if (!s) {
     mount(root, h('div', { class: 'box results' }, head), 'results');

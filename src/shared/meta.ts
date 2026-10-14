@@ -1,6 +1,7 @@
 import { DIFFICULTIES, type DifficultyId } from './difficulty';
 import type { LineId } from './pokemon';
 import type { Mods } from './stats';
+import type { SavedBuild } from './pvp/build';
 
 /** 局外成长（大木研究所）：用星之沙永久提升所有精灵的基础属性。 */
 export interface MetaUpgrade {
@@ -76,6 +77,8 @@ export interface RunSummary {
   damage: number;
   /** 结算界面的详细统计 */
   detail: RunDetail;
+  /** 本局结束时的构筑，可以放进背包用来对战 */
+  build?: SavedBuild;
 }
 
 export interface RunDetail {

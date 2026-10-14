@@ -1,10 +1,23 @@
 import { ACHIEVEMENTS, META_UPGRADES, metaCost, stardustFor, type LifetimeStats, type RunSummary } from '../shared/meta';
 import { DIFFICULTIES, type DifficultyId } from '../shared/difficulty';
 import { LINES, LINE_IDS, type LineId } from '../shared/pokemon';
+import { validateBuild, type SavedBuild } from '../shared/pvp/build';
+import type { PvpMode } from '../shared/pvp/sim';
 
 const KEY = 'poke-rouge-save-v1';
 
 export interface Settings { volume: number; music: number; damageNumbers: boolean; gbFilter: boolean; shake: boolean }
+
+export const PARTY_MAX = 6;
+
+/** 背包里的宝可梦：保存一局冒险结束时的构筑 */
+export interface PartyMon {
+  uid: string;
+  build: SavedBuild;
+  savedAt: number;
+  from: { difficulty: DifficultyId; wavesCleared: number; victory: boolean; players: number };
+  pvp: { wins: number; losses: number; draws: number };
+}
 
 export interface Profile {
   name: string;
@@ -16,6 +29,11 @@ export interface Profile {
   lastDifficulty: DifficultyId;
   settings: Settings;
   seenEnemies: string[];
+  party: PartyMon[];
+  /** 对战身份：服务器用它记录积分 */
+  pvpId: { pid: string; secret: string } | null;
+  pvpMode: PvpMode;
+  pvpPick: string;
 }
 
 function fresh(): Profile {
@@ -29,7 +47,45 @@ function fresh(): Profile {
     lastDifficulty: 'easy',
     settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true },
     seenEnemies: [],
+    party: [],
+    pvpId: null,
+    pvpMode: '1v1',
+    pvpPick: '',
   };
+}
+
+function randomId(len: number) {
+  const a = new Uint8Array(len);
+  crypto.getRandomValues(a);
+  return [...a].map((b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
+}
+
+export function pvpIdentity(p: Profile) {
+  if (!p.pvpId) {
+    p.pvpId = { pid: randomId(20), secret: randomId(32) };
+    saveProfile(p);
+  }
+  return p.pvpId;
+}
+
+/** 放进背包；满了返回 false（需要先放生） */
+export function addToParty(p: Profile, s: RunSummary): PartyMon | null {
+  if (!s.build || p.party.length >= PARTY_MAX || typeof validateBuild(s.build) === 'string') return null;
+  const mon: PartyMon = {
+    uid: randomId(10), build: s.build, savedAt: Date.now(),
+    from: { difficulty: s.difficulty, wavesCleared: s.wavesCleared, victory: s.victory, players: s.players },
+    pvp: { wins: 0, losses: 0, draws: 0 },
+  };
+  p.party.push(mon);
+  p.pvpPick = mon.uid;
+  saveProfile(p);
+  return mon;
+}
+
+export function releaseFromParty(p: Profile, uid: string) {
+  p.party = p.party.filter((m) => m.uid !== uid);
+  if (p.pvpPick === uid) p.pvpPick = p.party[0]?.uid ?? '';
+  saveProfile(p);
 }
 
 export function loadProfile(): Profile {
@@ -38,7 +94,8 @@ export function loadProfile(): Profile {
     if (!raw) return fresh();
     const p = JSON.parse(raw) as Partial<Profile>;
     const f = fresh();
-    return { ...f, ...p, stats: { ...f.stats, ...p.stats }, settings: { ...f.settings, ...p.settings } };
+    const party = Array.isArray(p.party) ? p.party.filter((m) => m && typeof validateBuild(m.build) !== 'string').slice(0, PARTY_MAX) : [];
+    return { ...f, ...p, party, stats: { ...f.stats, ...p.stats }, settings: { ...f.settings, ...p.settings } };
   } catch {
     return fresh();
   }

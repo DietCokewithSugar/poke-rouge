@@ -9,11 +9,19 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { C2S, RoomInfo, S2C, ServerStats } from '../shared/protocol';
 import { Room } from '../shared/room';
+import type { PvpRoom } from '../shared/pvp/room';
+import type { PvpMode } from '../shared/pvp/sim';
 import { TICK_RATE } from '../shared/sim/game';
+import { PvpService } from './pvp';
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 const MAX_ROOMS = Number(process.env.MAX_ROOMS || 300);
+/** 对战数据（积分、排行榜、AI 构筑池）保存位置 */
+const PVP_DATA = process.env.PVP_DATA || path.resolve(process.cwd(), 'data/pvp.json');
+/** 匹配多久没找到真人对手就由 AI 训练家补位（秒） */
+const BOT_AFTER = process.env.PVP_BOT_AFTER ? Number(process.env.PVP_BOT_AFTER) : null;
+const pvp = new PvpService(PVP_DATA, { '1v1': BOT_AFTER ?? 12, '4v4': BOT_AFTER ?? 18 });
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = process.env.STATIC_DIR
   || [path.resolve(here, '../dist'), path.resolve(here, '../../dist')].find((d) => fs.existsSync(path.join(d, 'index.html')))
@@ -30,9 +38,11 @@ Room.allowDebug = process.env.POKE_DEBUG === '1';
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || '/', 'http://x');
-  if (url.pathname === '/healthz' || url.pathname === '/api/stats' || url.pathname === '/api/rooms') {
+  if (url.pathname === '/healthz' || url.pathname === '/api/stats' || url.pathname === '/api/rooms' || url.pathname === '/api/pvp/leaderboard') {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-    const body = url.pathname === '/api/rooms' ? { stats: stats(), rooms: publicRooms() } : { ok: true, ...stats() };
+    const body = url.pathname === '/api/rooms' ? { stats: stats(), rooms: publicRooms() }
+      : url.pathname === '/api/pvp/leaderboard' ? (({ rows, players, mode }) => ({ mode, players, rows }))(pvp.board((url.searchParams.get('mode') ?? '1v1') as PvpMode))
+      : { ok: true, ...stats() };
     res.end(JSON.stringify(body));
     return;
   }
@@ -69,13 +79,19 @@ function newCode(): string {
   throw new Error('no room code available');
 }
 
-interface Client { ws: WebSocket; room: Room | null; id: number; alive: boolean; budget: number; browsing: boolean; lastStats: string }
+interface Client {
+  ws: WebSocket; room: Room | null; id: number; alive: boolean; budget: number; browsing: boolean; lastStats: string;
+  conn: { send(data: string | ArrayBuffer): void };
+  pvp: PvpRoom | null; pvpId: number;
+  send(msg: S2C): void;
+}
 
 /** 在线人数 = 打开着游戏页面的连接数（单人游戏、浏览大厅、房间里的都算） */
 function stats(): ServerStats {
   let playing = 0;
   for (const r of rooms.values()) if (r.inGame) playing += r.members.size;
-  return { online: clients.size, playing, rooms: rooms.size };
+  const pv = pvp.stats();
+  return { online: clients.size, playing: playing + pv.playing, rooms: rooms.size, pvpQueue: pv.queue, pvpPlaying: pv.playing };
 }
 
 function publicRooms(): RoomInfo[] {
@@ -91,7 +107,6 @@ function sendJson(c: Client, msg: S2C) {
 }
 
 wss.on('connection', (ws: WebSocket) => {
-  const c: Client = { ws, room: null, id: 0, alive: true, budget: 200, browsing: false, lastStats: '' };
   const conn = {
     send(data: string | ArrayBuffer) {
       if (ws.readyState !== ws.OPEN) return;
@@ -100,7 +115,16 @@ wss.on('connection', (ws: WebSocket) => {
       ws.send(data);
     },
   };
+  const c: Client = {
+    ws, room: null, id: 0, alive: true, budget: 200, browsing: false, lastStats: '', conn, pvp: null, pvpId: 0,
+    send: (msg) => conn.send(JSON.stringify(msg)),
+  };
   const fail = (msg: string) => conn.send(JSON.stringify({ t: 'error', msg } satisfies S2C));
+  const leavePvp = () => {
+    pvp.cancel(c);
+    if (c.pvp && !c.pvp.ended) c.pvp.leave(c.pvpId);
+    c.pvp = null;
+  };
   ws.on('pong', () => { c.alive = true; });
   ws.on('message', (raw, isBinary) => {
     if (isBinary) return;
@@ -114,13 +138,25 @@ wss.on('connection', (ws: WebSocket) => {
       if (c.browsing) sendJson(c, { t: 'rooms', stats: stats(), rooms: publicRooms() });
       return;
     }
+    if (msg.t === 'pvpBoard') { sendJson(c, pvp.board(msg.mode, msg.pid, msg.secret)); return; }
+    if (msg.t === 'pvpCancel') { if (pvp.cancel(c)) sendJson(c, { t: 'pvpCancelled' }); return; }
+    if (msg.t === 'pvpQueue') {
+      if (c.room) return fail('请先离开当前房间');
+      const err = pvp.enqueue(c, msg);
+      if (err) fail(err);
+      else c.browsing = false;
+      return;
+    }
     if (msg.t === 'leave') {
       c.room?.leave(c.id);
       c.room = null;
+      leavePvp();
       sendJson(c, { t: 'left' });
       return;
     }
+    if (c.pvp && !c.pvp.ended) { c.pvp.handle(c.pvpId, msg); return; }
     if (!c.room) {
+      if ((msg.t === 'create' || msg.t === 'join') && pvp.queued(c)) pvp.cancel(c);
       if (msg.t === 'create') {
         if (rooms.size >= MAX_ROOMS) return fail('服务器房间已满，请稍后再试');
         const room = new Room(newCode());
@@ -145,6 +181,7 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('close', () => {
     c.room?.leave(c.id);
     c.room = null;
+    leavePvp();
   });
   clients.add(c);
   ws.on('close', () => clients.delete(c));
@@ -163,7 +200,7 @@ setInterval(() => {
   for (const c of clients) {
     if (c.ws.readyState !== c.ws.OPEN) continue;
     if (c.browsing && changed) c.ws.send(roomsJson);
-    else if (!c.room?.inGame && c.lastStats !== statsJson) { c.lastStats = statsJson; c.ws.send(statsJson); }
+    else if (!c.room?.inGame && !(c.pvp && !c.pvp.ended) && c.lastStats !== statsJson) { c.lastStats = statsJson; c.ws.send(statsJson); }
   }
 }, 2000);
 
@@ -198,9 +235,22 @@ setInterval(() => {
         room.sendLobby();
       }
     }
+    for (const room of pvp.rooms) {
+      try { room.update(); } catch (err) {
+        console.error(`${room.code} 出错`, err);
+        room.ended = true;
+        for (const s of room.seats) s.conn?.send(JSON.stringify({ t: 'error', msg: '对战出错了，本场不计分', fatal: true } satisfies S2C));
+      }
+    }
   }
   if (acc > STEP * 4) acc = 0;
 }, STEP / 2);
+
+// 对战匹配
+setInterval(() => pvp.tick(), 500);
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => { pvp.saveNow(); process.exit(0); });
+}
 
 function log(s: string) {
   console.log(`[${new Date().toISOString()}] ${s}（房间数 ${rooms.size}）`);

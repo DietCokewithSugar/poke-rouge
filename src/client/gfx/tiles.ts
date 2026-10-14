@@ -12,12 +12,14 @@ interface Biome {
   pathEdge: string;
   flowers: string[];
   tall: string[];
-  border: 'tree' | 'rock' | 'grave';
+  border: 'tree' | 'rock' | 'grave' | 'stand';
   treeLeaf: string[];
   treeTrunk: string;
   rock: string[];
   outside: string;
   grid?: string;
+  /** 对战场：画场地线，不画小路和草丛 */
+  court?: string;
 }
 
 const BIOMES: Biome[] = [
@@ -48,6 +50,12 @@ const BIOMES: Biome[] = [
     flowers: ['#f8f0a0', '#f8c8f8', '#ffffff'], tall: ['#605080', '#706098', '#8070a8'],
     border: 'grave', treeLeaf: ['#383050', '#504868', '#686080', '#8880a0'], treeTrunk: '#282038',
     rock: ['#787090', '#9890b0', '#b8b0d0'], outside: '#201830', grid: '#887aa0',
+  },
+  { // 对战场（宝可梦联盟）
+    ground: ['#c8b088', '#c0a880', '#d0b890'], speck: '#a89068', blade: '#a89068',
+    path: [], pathEdge: '', flowers: [], tall: [],
+    border: 'stand', treeLeaf: ['#384058', '#506080', '#7088a8', '#a0b8d0'], treeTrunk: '',
+    rock: [], outside: '#202838', court: '#f8f0e0',
   },
 ];
 
@@ -80,7 +88,7 @@ export function arenaCanvas(biome: number, w: number, h: number): HTMLCanvasElem
         px(gx, gy, B.grid, 1, T);
       }
       for (let i = 0; i < 3; i++) px(gx + rng.int(0, 15), gy + rng.int(0, 15), B.speck);
-      if (!B.grid && rng.chance(0.35)) {
+      if (!B.grid && !B.court && rng.chance(0.35)) {
         // 第二世代风格的小草
         const bx = gx + rng.int(2, 10), by = gy + rng.int(3, 11);
         px(bx, by + 2, B.blade); px(bx + 1, by + 1, B.blade); px(bx + 2, by + 2, B.blade);
@@ -89,8 +97,9 @@ export function arenaCanvas(biome: number, w: number, h: number): HTMLCanvasElem
     }
   }
 
+  if (B.court) court(px, ox, oy, w, h, B.court);
   // 小路：两条交错的弯曲道路
-  const paths = 2;
+  const paths = B.court ? 0 : 2;
   for (let k = 0; k < paths; k++) {
     const horizontal = k === 0;
     let pos = horizontal ? rng.range(h * 0.3, h * 0.7) : rng.range(w * 0.3, w * 0.7);
@@ -113,18 +122,18 @@ export function arenaCanvas(biome: number, w: number, h: number): HTMLCanvasElem
   }
 
   // 草丛块与花
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < (B.tall.length ? 22 : 0); i++) {
     const cx = ox + rng.int(1, w / T - 3) * T, cy = oy + rng.int(1, h / T - 3) * T;
     const tw = rng.int(1, 3), th = rng.int(1, 2);
     for (let a = 0; a < tw; a++) for (let b = 0; b < th; b++) tallGrass(px, cx + a * T, cy + b * T, B.tall);
   }
-  for (let i = 0; i < 70; i++) {
+  for (let i = 0; i < (B.flowers.length ? 70 : 0); i++) {
     const fx = ox + rng.int(4, w - 8), fy = oy + rng.int(4, h - 8);
     const col = rng.pick(B.flowers);
     px(fx + 1, fy, col); px(fx, fy + 1, col); px(fx + 2, fy + 1, col); px(fx + 1, fy + 2, col);
     px(fx + 1, fy + 1, '#f8d030');
   }
-  for (let i = 0; i < 9; i++) boulder(px, ox + rng.int(10, w - 26), oy + rng.int(10, h - 26), B.rock);
+  for (let i = 0; i < (B.rock.length ? 9 : 0); i++) boulder(px, ox + rng.int(10, w - 26), oy + rng.int(10, h - 26), B.rock);
 
   // 边框：树/岩壁/墓碑
   for (let yy = -T * 2; yy < H; yy += T * 2) {
@@ -133,6 +142,7 @@ export function arenaCanvas(biome: number, w: number, h: number): HTMLCanvasElem
       if (inside) continue;
       if (B.border === 'tree') tree(px, xx + (Math.floor(yy / 32) % 2 ? 8 : 0), yy, B.treeLeaf, B.treeTrunk);
       else if (B.border === 'rock') rockWall(px, xx, yy, B.treeLeaf, rng);
+      else if (B.border === 'stand') stand(px, xx, yy, B.treeLeaf, rng);
       else grave(px, xx + 6, yy + 4, B.treeLeaf);
     }
   }
@@ -200,6 +210,46 @@ function rockWall(px: Px, x: number, y: number, c: string[], rng: Rng) {
     px(bx, by, c[2], s, s - 2);
     px(bx + 1, by, c[3], s - 3, 1);
     px(bx, by + s - 2, c[0], s, 1);
+  }
+}
+
+/** 场地线：外框、中线、中圈和精灵球标志；两侧是蓝/红方的出场区 */
+function court(px: Px, ox: number, oy: number, w: number, h: number, line: string) {
+  const m = 14;
+  px(ox + m, oy + m, line, w - m * 2, 2);
+  px(ox + m, oy + h - m - 2, line, w - m * 2, 2);
+  px(ox + m, oy + m, line, 2, h - m * 2);
+  px(ox + w - m - 2, oy + m, line, 2, h - m * 2);
+  px(ox + w / 2 - 1, oy + m, line, 2, h - m * 2);
+  const cx = ox + w / 2, cy = oy + h / 2;
+  for (let a = 0; a < 360; a += 2) {
+    const r = (a * Math.PI) / 180;
+    px(Math.round(cx + Math.cos(r) * 46), Math.round(cy + Math.sin(r) * 46), line, 2, 2);
+  }
+  for (let y = -14; y <= 14; y++) {
+    for (let x = -14; x <= 14; x++) {
+      const d = Math.hypot(x, y);
+      if (d > 14) continue;
+      const col = d > 12.5 || Math.abs(y) <= 1 || d < 4.5 ? (d < 3 ? '#f8f8f8' : '#383838') : y < 0 ? '#e04848' : '#f8f8f8';
+      px(cx + x, cy + y, col);
+    }
+  }
+  for (const [side, col] of [[0, 'rgba(56,120,248,.24)'], [1, 'rgba(248,80,80,.16)']] as const) {
+    const bx = side === 0 ? ox + m + 2 : ox + w - m - 2 - 64;
+    px(bx, oy + m + 2, col, 64, h - m * 2 - 4);
+  }
+}
+
+/** 观众席 */
+function stand(px: Px, x: number, y: number, c: string[], rng: Rng) {
+  px(x, y, c[0], 32, 32);
+  for (let row = 0; row < 4; row++) {
+    px(x, y + row * 8 + 6, c[1], 32, 2);
+    for (let i = 0; i < 4; i++) {
+      const fx = x + i * 8 + rng.int(1, 3), fy = y + row * 8 + 1;
+      px(fx, fy, rng.pick(['#f8c890', '#e0a070', '#a87048']), 3, 3);
+      px(fx - 1, fy + 3, rng.pick(['#e04848', '#4878e0', '#f8d030', '#48b048', '#f8f8f8', c[3]]), 5, 2);
+    }
   }
 }
 

@@ -30,6 +30,7 @@ import { STAT_LABEL_6, skillIcon, skillInfo, typeBadge } from './describe';
 export interface TitleActions {
   solo(): void;
   browse(): void;
+  pvp(): void;
   join(code: string): void;
   lab(): void;
   achievements(): void;
@@ -52,6 +53,8 @@ export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stat
       h('button', { class: 'menu-item play', onclick: () => { keepName(); sfx('click'); a.solo(); } }, '单人冒险', h('small', null, '选择一只宝可梦，挑战 20 波野生宝可梦')),
       h('button', { class: 'menu-item', onclick: () => { keepName(); sfx('click'); a.browse(); } }, '联机大厅',
         h('small', { id: 'title-online' }, onlineText(stats))),
+      h('button', { class: 'menu-item pvp-entry', onclick: () => { keepName(); sfx('click'); a.pvp(); } }, '宝可梦对战',
+        h('small', { id: 'title-pvp' }, pvpText(p, stats))),
       h('div', { class: 'join-row' },
         code,
         h('button', { class: 'btn', onclick: () => { keepName(); if (code.value.length !== 5) { toast('请输入 5 位房间号', 'error'); return; } sfx('click'); a.join(code.value); } }, '加入房间'),
@@ -171,6 +174,11 @@ function copy(text: string, ok: string) {
   const done = () => toast(ok);
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, () => prompt('复制下面的内容：', text));
   else prompt('复制下面的内容：', text);
+}
+
+export function pvpText(p: Profile, stats: ServerStats | null) {
+  const fight = stats?.pvpPlaying || stats?.pvpQueue ? ` · ${stats.pvpPlaying ?? 0} 人对战中` : ' · 1v1 / 4v4 排位赛';
+  return `背包 ${p.party.length} / 6${fight}`;
 }
 
 export function onlineText(stats: ServerStats | null) {
