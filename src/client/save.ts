@@ -1,4 +1,5 @@
 import { ACHIEVEMENTS, META_UPGRADES, metaCost, stardustFor, type LifetimeStats, type RunSummary } from '../shared/meta';
+import { DIFFICULTIES, type DifficultyId } from '../shared/difficulty';
 import { LINES, LINE_IDS, type LineId } from '../shared/pokemon';
 
 const KEY = 'poke-rouge-save-v1';
@@ -12,6 +13,7 @@ export interface Profile {
   achievements: Record<string, number>;
   stats: LifetimeStats;
   lastLine: LineId;
+  lastDifficulty: DifficultyId;
   settings: Settings;
   seenEnemies: string[];
 }
@@ -24,6 +26,7 @@ function fresh(): Profile {
     achievements: {},
     stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0 },
     lastLine: 'charmander',
+    lastDifficulty: 'easy',
     settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true },
     seenEnemies: [],
   };
@@ -47,6 +50,11 @@ export function saveProfile(p: Profile) {
 
 export function isUnlocked(p: Profile, line: LineId): boolean {
   const u = LINES[line].unlock;
+  return !u || !!p.achievements[u];
+}
+
+export function isDifficultyUnlocked(p: Profile, id: DifficultyId): boolean {
+  const u = DIFFICULTIES[id].unlock;
   return !u || !!p.achievements[u];
 }
 

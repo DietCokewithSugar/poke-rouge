@@ -26,6 +26,10 @@ export class Intermission {
   private me: MeState | null = null;
   private pub: PublicState | null = null;
   private you = 0;
+  /** 进化动画播放中：暂停重绘 */
+  private animating = false;
+  /** 玩家在侧栏点了「进化」：重新打开进化询问 */
+  private askEvo = false;
 
   constructor(parent: HTMLElement, private send: (c: Command) => void) {
     this.root.append(this.main, this.side, this.modal);
@@ -55,18 +59,64 @@ export class Intermission {
   }
 
   private render() {
+    if (this.animating) return;
     const me = this.me!;
     hideTip();
     clear(this.main);
     const wave = this.pub?.wave ?? 1;
+    const evoNow = !!me.evo && (me.evo.prompt || this.askEvo);
+    if (!me.evo) this.askEvo = false;
     this.main.appendChild(h('div', { class: 'inter-head' },
-      h('h2', null, me.cards ? '升级！' : me.crate ? '道具球' : `商店 · 第 ${wave + 1} 波之前`),
+      h('h2', null, evoNow ? '进化' : me.cards ? '升级！' : me.crate ? '道具球' : `商店 · 第 ${wave + 1} 波之前`),
       h('div', { class: 'money big' }, `₽ ${me.money}`),
     ));
-    if (me.cards) this.renderCards(me);
+    if (evoNow) this.renderEvolution(me);
+    else if (me.cards) this.renderCards(me);
     else if (me.crate) this.renderCrate(me);
     else this.renderShop(me);
     this.renderSide(me);
+  }
+
+  // ---------------------------------------------------------------- 进化
+
+  private renderEvolution(me: MeState) {
+    const evo = me.evo!;
+    const from = Animator.portrait(evo.fromDex, 3);
+    const to = Animator.portrait(evo.toDex, 3);
+    to.classList.add('evo-to');
+    const stage = h('div', { class: 'evo-stage' }, from, to);
+    const text = h('p', { class: 'evo-text' }, `咦？${evo.from}的样子……！`);
+    const yes = h('button', { class: 'btn gold big', onclick: () => go(true) }, '进化！') as HTMLButtonElement;
+    const no = h('button', { class: 'btn big', 'data-back': '1', onclick: () => go(false) }, '不进化（B）') as HTMLButtonElement;
+    const go = (ok: boolean) => {
+      yes.disabled = no.disabled = true;
+      this.askEvo = false;
+      if (!ok) {
+        stage.classList.add('stopped');
+        text.textContent = `${evo.from}停止了进化。`;
+        sfx('click');
+        window.setTimeout(() => this.send({ t: 'evolve', yes: false }), 650);
+        return;
+      }
+      this.animating = true;
+      stage.classList.add('evolving');
+      sfx('evolve');
+      window.setTimeout(() => {
+        stage.classList.remove('evolving');
+        stage.classList.add('done');
+        text.textContent = `恭喜！${evo.from}进化成了${evo.to}！`;
+      }, 1700);
+      window.setTimeout(() => {
+        this.animating = false;
+        this.send({ t: 'evolve', yes: true });
+      }, 2700);
+    };
+    this.main.appendChild(h('div', { class: 'evo-box' },
+      stage,
+      text,
+      h('p', { class: 'sub small' }, '不进化可以保留当前形态（配合进化奇石、不变之石更强）。之后的商店阶段随时可以在右侧点「进化」。'),
+      h('div', { class: 'row center' }, yes, no),
+    ));
   }
 
   // ---------------------------------------------------------------- 升级
@@ -238,6 +288,9 @@ export class Intermission {
         h('div', { class: 'muted small' }, `本系加成：${TYPE_NAME[L.bonusType]}系 +${L.bonusPct}%`),
       ),
     ));
+    if (me.evo && !me.evo.prompt && !me.cards && !this.askEvo) {
+      this.side.appendChild(h('button', { class: 'btn gold small evo-btn', onclick: () => { this.askEvo = true; this.render(); } }, `进化成${me.evo.to}`));
+    }
     this.side.appendChild(h('h3', null, `技能 ${me.skills.length}/${me.slots}`));
     const sk = h('div', { class: 'side-skills' });
     me.skills.forEach((s, slot) => {

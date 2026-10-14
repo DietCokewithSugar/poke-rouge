@@ -1,5 +1,6 @@
 import { LINES, LINE_IDS, type LineId } from './pokemon';
-import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type LobbyPlayer, type S2C } from './protocol';
+import { DIFFICULTY_IDS, type DifficultyId } from './difficulty';
+import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
 import { GameSim, TICK_RATE } from './sim/game';
 
 export interface Conn {
@@ -40,6 +41,9 @@ export class Room {
   members = new Map<number, Member>();
   sim: GameSim | null = null;
   paused = false;
+  difficulty: DifficultyId = 'easy';
+  /** 公开房间会出现在匹配大厅的列表里 */
+  isPublic = true;
   private tick = 0;
   private lastPhase = '';
   private joinSeq = 0;
@@ -93,7 +97,20 @@ export class Room {
   }
 
   sendLobby() {
-    this.broadcast({ t: 'lobby', code: this.code, players: this.lobbyPlayers(), inGame: this.inGame });
+    this.broadcast({ t: 'lobby', code: this.code, players: this.lobbyPlayers(), inGame: this.inGame, difficulty: this.difficulty, public: this.isPublic });
+  }
+
+  info(): RoomInfo {
+    const host = this.members.get(this.hostId);
+    return {
+      code: this.code,
+      host: host?.name ?? '',
+      players: [...this.members.values()].map((m) => ({ name: m.name, line: m.line })),
+      max: MAX_PLAYERS,
+      inGame: this.inGame,
+      wave: this.sim?.wave ?? 0,
+      difficulty: this.difficulty,
+    };
   }
 
   handle(id: number, msg: C2S) {
@@ -120,6 +137,19 @@ export class Room {
       }
       case 'leave':
         this.leave(id);
+        return;
+      case 'difficulty':
+        if (this.sim || id !== this.hostId || !DIFFICULTY_IDS.includes(msg.id)) return;
+        this.difficulty = msg.id;
+        this.sendLobby();
+        return;
+      case 'visibility':
+        if (id !== this.hostId) return;
+        this.isPublic = !!msg.public;
+        this.sendLobby();
+        return;
+      case 'browse':
+      case 'stats':
         return;
       case 'pause':
         if (this.solo && this.sim) {
@@ -157,7 +187,7 @@ export class Room {
 
   private startGame() {
     const inits = [...this.members.entries()].map(([id, m]) => ({ id, name: m.name, line: m.line!, meta: m.meta }));
-    this.sim = new GameSim(inits, (Math.random() * 2 ** 31) | 0);
+    this.sim = new GameSim(inits, (Math.random() * 2 ** 31) | 0, this.difficulty);
     this.tick = 0;
     this.paused = false;
     this.lastPhase = '';

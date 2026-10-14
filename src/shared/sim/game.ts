@@ -1,3 +1,4 @@
+import { difficultyOf, type Difficulty, type DifficultyId } from '../difficulty';
 import { ENEMIES, ENEMY_INDEX } from '../enemies';
 import { ITEMS } from '../items';
 import type { RunSummary } from '../meta';
@@ -9,7 +10,7 @@ import { updateEnemy } from './ai';
 import { PLAYER_R, beamHit, healPlayer, hitEnemy, hurtPlayer, updateSkills } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
 import {
-  addXp, cardRerollCost, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, rerollCards,
+  addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, rerollCards,
   rerollCost, resolveCrate, rollCrateItem, rollShop, shopBuy, shopLock, shopReroll, xpToNext,
 } from './player';
 
@@ -17,6 +18,9 @@ export const ARENA_W = 768;
 export const ARENA_H = 576;
 export const TICK_RATE = 30;
 export const INTERMISSION_TIMEOUT = 150;
+/** 救援：站在倒下的队友身边这么近、这么久就能把它救起来 */
+export const REVIVE_RADIUS = 36;
+export const REVIVE_TIME = 2.5;
 
 export type SimPhase = 'wave' | 'inter' | 'over' | 'won';
 export type Ev = (string | number | number[])[];
@@ -31,6 +35,7 @@ export type Command =
   | { t: 'lock'; i: number }
   | { t: 'forget'; slot: number }
   | { t: 'crate'; take: boolean }
+  | { t: 'evolve'; yes: boolean }
   | { t: 'waveReady'; on: boolean };
 
 export interface MeState {
@@ -60,10 +65,15 @@ export interface MeState {
   shop: { offers: (ShopOffer | null)[]; locked: boolean[]; rerollCost: number };
   ready: boolean;
   typeMods: Record<string, number>;
+  /** 可以进化时：prompt 表示需要弹窗询问 */
+  evo: { prompt: boolean; from: string; fromDex: number; to: string; toDex: number } | null;
 }
 
 export interface PublicState {
   phase: SimPhase;
+  difficulty: DifficultyId;
+  horde: boolean;
+  enemiesPct: number;
   wave: number;
   total: number;
   time: number;
@@ -105,9 +115,14 @@ export class GameSim {
   private bossDown = false;
   private enraged = false;
   private readonly startPlayers: number;
+  readonly diff: Difficulty;
+  /** 群聚波：本波刷怪翻倍 */
+  horde = false;
+  private extraElites: string[] = [];
 
-  constructor(inits: PlayerInit[], seed: number) {
+  constructor(inits: PlayerInit[], seed: number, difficulty: DifficultyId = 'easy') {
     this.rng = new Rng(seed);
+    this.diff = difficultyOf(difficulty);
     for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta));
     this.startPlayers = inits.length;
     this.startWave();
@@ -169,11 +184,12 @@ export class GameSim {
   spawnEnemy(id: string, x: number, y: number): Enemy {
     const def = ENEMIES[id];
     const n = this.players.length;
-    const hpMult = enemyHpMult(this.wave) * (def.rank === 'boss' ? 1 + 0.75 * (n - 1) : def.rank === 'elite' ? 1 + 0.5 * (n - 1) : 1 + 0.25 * (n - 1));
+    const D = this.diff;
+    const hpMult = enemyHpMult(this.wave) * (def.rank === 'boss' ? (1 + 0.75 * (n - 1)) * D.bossHp : def.rank === 'elite' ? (1 + 0.5 * (n - 1)) * D.hp : (1 + 0.25 * (n - 1)) * D.hp);
     const hp = Math.round(def.hp * hpMult);
     const e: Enemy = {
       id: this.newId(), def, kind: ENEMY_INDEX[id], x, y, vx: 0, vy: 0, hp, maxHp: hp,
-      dmg: def.dmg * enemyDmgMult(this.wave), speed: def.speed * (1 + Math.min(0.25, this.wave * 0.012)), r: def.r,
+      dmg: def.dmg * enemyDmgMult(this.wave) * D.dmg, speed: def.speed * (1 + Math.min(0.25, this.wave * 0.012)) * D.speed, r: def.r,
       st: { burn: 0, burnDps: 0, burnSrc: -1, poison: 0, poisonDps: 0, poisonSrc: -1, leech: 0, leechDps: 0, leechSrc: -1, leechHeal: 0, para: 0, slow: 0, slowAmt: 0, freeze: 0, stun: 0, dotAcc: 0 },
       ai: { state: 0, t: 0, cd: this.rng.range(0.6, 1.8), cd2: this.rng.range(1.5, 3), tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
       dir: Math.PI / 2, hidden: false, lastHit: -1, age: 0,
@@ -200,7 +216,8 @@ export class GameSim {
       this.emit(['msg', `${e.def.name}被打倒了！`]);
       if (this.boss === e) this.boss = null;
     }
-    const cm = candyMult(this.wave);
+    // 难度增加的敌人不额外给糖果（每波收入不变，只增加危险）；香水带来的敌人照常给
+    const cm = candyMult(this.wave) / this.diff.count;
     if (silent && e.def.ai === 'bomber') {
       this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)) * cm);
       return;
@@ -265,6 +282,14 @@ export class GameSim {
       const luck = this.players.reduce((a, p) => a + p.d.luck, 0) / this.players.length;
       if (this.rng.chance(W.treasure.chance * (1 + Math.max(0, luck) / 100))) this.treasureAt = this.rng.range(0.25, 0.7) * this.waveDur;
     }
+    this.horde = false;
+    this.extraElites = [];
+    const D = this.diff;
+    if (!W.boss && this.wave >= 3 && this.rng.chance(D.horde)) this.horde = true;
+    if (!W.boss && !W.elites && this.wave >= 6 && this.rng.chance(D.extraElite)) {
+      this.extraElites.push(this.wave < 12 ? 'beedrill' : this.rng.pick(['onix', 'gengar', 'beedrill']));
+    }
+    if (W.boss && this.wave === TOTAL_WAVES && D.id === 'hard') this.extraElites.push('gengar', 'gengar');
     const n = this.players.length;
     this.players.forEach((p, i) => {
       p.down = false;
@@ -286,6 +311,7 @@ export class GameSim {
       this.dirty.add(p.id);
     });
     this.emit(['wave', this.wave, this.waveDur, W.biome]);
+    if (this.horde) this.emit(['msg', '群聚出现了！野生宝可梦成群结队地来了！']);
   }
 
   private endWave() {
@@ -324,6 +350,7 @@ export class GameSim {
       p.cardRerolls = 0;
       p.shop.rerolls = 0;
       p.shop.freeRerolls = p.d.rerolls;
+      p.evoPrompt = canEvolve(p);
       rollShop(this, p);
       nextCards(this, p);
       this.dirty.add(p.id);
@@ -409,10 +436,11 @@ export class GameSim {
       const { x, y } = this.spawnPoint(160);
       this.queueSpawn(W.boss, x, y, 1.5);
     }
-    if (W.elites && this.elitesDone < W.elites.length) {
-      const at = this.waveDur * (0.2 + 0.3 * this.elitesDone);
+    const elites = [...(W.elites ?? []), ...this.extraElites];
+    if (elites.length && this.elitesDone < elites.length) {
+      const at = this.waveDur * (0.2 + (0.6 * this.elitesDone) / Math.max(1, elites.length));
       if (this.waveT >= at) {
-        const id = W.elites[this.elitesDone++];
+        const id = elites[this.elitesDone++];
         this.emit(['msg', `${ENEMIES[id].name}出现了！`]);
         const { x, y } = this.spawnPoint(140);
         this.queueSpawn(id, x, y, 1.2);
@@ -427,9 +455,10 @@ export class GameSim {
     if (this.waveT > this.waveDur - 1.5) return;
     const progress = this.waveT / this.waveDur;
     let rate = W.rate * spawnRateMult(this.wave) * (0.7 + 0.6 * progress) * (1 + 0.6 * (n - 1));
+    rate *= this.diff.count * (1 + this.enemiesPct() / 100) * (this.horde ? 1.9 : 1);
     if (this.boss) rate *= 0.6;
     this.spawnAcc += rate * dt;
-    const maxAlive = 100 + 30 * (n - 1);
+    const maxAlive = Math.round((100 + 30 * (n - 1)) * Math.min(1.4, Math.max(1, this.diff.count * (1 + this.enemiesPct() / 200))));
     while (this.spawnAcc >= 1) {
       if (this.enemies.length + this.pending.length >= maxAlive) { this.spawnAcc = 0; break; }
       const id = this.rng.weighted(W.pool);
@@ -442,6 +471,13 @@ export class GameSim {
       }
       this.spawnAcc -= g;
     }
+  }
+
+  /** 全队道具对敌人数量的影响（香水 +、喷雾 -），联机时叠加 */
+  enemiesPct(): number {
+    let sum = 0;
+    for (const p of this.players) sum += p.d.enemies;
+    return Math.max(-60, Math.min(150, sum));
   }
 
   private spawnPoint(minDist: number) {
@@ -461,17 +497,17 @@ export class GameSim {
       p.downT += dt;
       let helpers = 0;
       for (const q of this.players) {
-        if (q !== p && q.alive && !q.down && Math.hypot(q.x - p.x, q.y - p.y) < 30) helpers++;
+        if (q !== p && q.alive && !q.down && Math.hypot(q.x - p.x, q.y - p.y) < REVIVE_RADIUS) helpers++;
       }
       if (helpers) {
-        p.revive += (dt / 3) * helpers;
+        p.revive += (dt / REVIVE_TIME) * (1 + 0.5 * (helpers - 1));
         if (p.revive >= 1) {
           p.down = false;
           p.hp = Math.max(1, Math.round(p.d.maxHp * 0.35));
           p.invuln = 2;
           p.revive = 0;
           this.emit(['rev', p.id]);
-          for (const q of this.players) if (q !== p && q.alive && !q.down && Math.hypot(q.x - p.x, q.y - p.y) < 30) q.stats.revives++;
+          for (const q of this.players) if (q !== p && q.alive && !q.down && Math.hypot(q.x - p.x, q.y - p.y) < REVIVE_RADIUS) q.stats.revives++;
         }
       } else p.revive = Math.max(0, p.revive - dt * 0.15);
       return;
@@ -516,7 +552,7 @@ export class GameSim {
             st.leech -= 0.5;
             parts.push([st.leechDps * 0.5, st.leechSrc]);
             const src = this.players.find((p) => p.id === st.leechSrc);
-            if (src) healPlayer(this, src, st.leechDps * 0.5 * st.leechHeal * (src.line === 'bulbasaur' ? 1.3 : 1), true);
+            if (src) healPlayer(this, src, st.leechDps * 0.5 * st.leechHeal * (src.line === 'bulbasaur' ? 1.3 : 1) * (src.items.big_root ? 1.3 : 1), true);
           }
           for (const [d, src] of parts) {
             if (e.dead) break;
@@ -624,7 +660,7 @@ export class GameSim {
           if ((p.x - pr.x) ** 2 + (p.y - 6 - pr.y) ** 2 > rr * rr) continue;
           if (p.invuln <= 0) {
             hurtPlayer(this, p, pr.dmg, 'spec');
-            if (pr.slow) { p.slowT = 1.6; p.slowAmt = pr.slow; this.dirty.add(p.id); }
+            if (pr.slow && !p.items.safety_goggles) { p.slowT = 1.6; p.slowAmt = pr.slow; this.dirty.add(p.id); }
           }
           alive = false;
           break;
@@ -663,7 +699,7 @@ export class GameSim {
           }
         } else {
           for (const p of this.players) {
-            if (!p.down && p.alive && (p.x - z.x) ** 2 + (p.y - z.y) ** 2 <= (z.r + PLAYER_R) ** 2) {
+            if (!p.down && p.alive && !p.items.safety_goggles && (p.x - z.x) ** 2 + (p.y - z.y) ** 2 <= (z.r + PLAYER_R) ** 2) {
               const inv = p.invuln;
               p.invuln = 0;
               hurtPlayer(this, p, z.dmg, 'spec');
@@ -765,8 +801,9 @@ export class GameSim {
       case 'lock': shopLock(p, c.i | 0); return null;
       case 'forget': return forgetSkill(this, p, c.slot | 0);
       case 'crate': resolveCrate(this, p, !!c.take); return null;
+      case 'evolve': return chooseEvolution(this, p, !!c.yes);
       case 'waveReady':
-        if (c.on && (p.cards || p.crates.length)) return '请先完成升级选择';
+        if (c.on && (p.cards || p.crates.length || p.evoPrompt)) return '请先完成升级选择';
         p.ready = !!c.on;
         return null;
     }
@@ -801,6 +838,7 @@ export class GameSim {
         dmg: Math.round((p.d.dmgMult - 1) * 100), dmgMinion: Math.round((p.d.minionMult - 1) * 100), dmgBoss: Math.round((p.d.bossMult - 1) * 100),
         thorns: Math.round(p.d.thorns), pickup: Math.round(p.d.pickupRadius), physTaken: Math.round(p.d.physTaken * 100), specTaken: Math.round(p.d.specTaken * 100),
         moveSpeed: Math.round(this.moveSpeed(p)),
+        enemies: Math.round(p.d.enemies),
       },
       cards: p.cards,
       cardRerollCost: cardRerollCost(this, p),
@@ -811,12 +849,18 @@ export class GameSim {
       shop: { offers: p.shop.offers, locked: p.shop.locked, rerollCost: rerollCost(this, p) },
       ready: p.ready,
       typeMods: p.typeMods as Record<string, number>,
+      evo: canEvolve(p)
+        ? { prompt: p.evoPrompt, from: form.name, fromDex: form.dex, to: formOf(p.line, p.stage + 1).name, toDex: formOf(p.line, p.stage + 1).dex }
+        : null,
     };
   }
 
   publicState(): PublicState {
     return {
       phase: this.phase,
+      difficulty: this.diff.id,
+      horde: this.horde,
+      enemiesPct: Math.round(this.enemiesPct()),
       wave: this.wave,
       total: TOTAL_WAVES,
       time: Math.round(this.waveT * 10) / 10,
@@ -836,6 +880,8 @@ export class GameSim {
     const L = LINES[p.line];
     return {
       line: p.line,
+      difficulty: this.diff.id,
+      neverEvolved: L.forms.length > 1 && p.stage === 0,
       wavesCleared,
       victory: this.phase === 'won',
       kills: p.stats.kills,

@@ -1,22 +1,40 @@
 import { FX_INDEX } from './skills';
+import type { DifficultyId } from './difficulty';
 import type { LineId } from './pokemon';
 import type { RunSummary } from './meta';
 import type { Command, Ev, GameSim, MeState, PublicState } from './sim/game';
 import { formOf } from './pokemon';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const MAX_PLAYERS = 4;
 
 export interface LobbyPlayer { id: number; name: string; line: LineId | null; ready: boolean; host: boolean }
 
+/** 匹配大厅里展示的房间信息 */
+export interface RoomInfo {
+  code: string;
+  host: string;
+  players: { name: string; line: LineId | null }[];
+  max: number;
+  inGame: boolean;
+  wave: number;
+  difficulty: DifficultyId;
+}
+
+export interface ServerStats { online: number; playing: number; rooms: number }
+
 export type C2S =
-  | { t: 'create'; name: string; meta: Record<string, number>; v: number }
+  | { t: 'create'; name: string; meta: Record<string, number>; v: number; public?: boolean }
   | { t: 'join'; code: string; name: string; meta: Record<string, number>; v: number }
   | { t: 'pick'; line: LineId }
   | { t: 'ready'; on: boolean }
   | { t: 'start' }
   | { t: 'leave' }
   | { t: 'pause'; on: boolean }
+  | { t: 'difficulty'; id: DifficultyId }
+  | { t: 'visibility'; public: boolean }
+  | { t: 'browse'; on: boolean }
+  | { t: 'stats' }
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number }
   | { t: 'ping'; at: number }
   | Command;
@@ -24,7 +42,10 @@ export type C2S =
 export type S2C =
   | { t: 'joined'; code: string; you: number; solo: boolean }
   | { t: 'error'; msg: string; fatal?: boolean }
-  | { t: 'lobby'; code: string; players: LobbyPlayer[]; inGame: boolean }
+  | { t: 'lobby'; code: string; players: LobbyPlayer[]; inGame: boolean; difficulty: DifficultyId; public: boolean }
+  | { t: 'rooms'; stats: ServerStats; rooms: RoomInfo[] }
+  | { t: 'stats'; stats: ServerStats }
+  | { t: 'left' }
   | { t: 'start'; w: number; h: number; players: { id: number; name: string; line: LineId }[] }
   | { t: 'ev'; e: Ev[] }
   | { t: 'st'; s: PublicState }

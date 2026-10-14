@@ -54,7 +54,7 @@ test('房间号联机：创建、加入、开局、同步', async () => {
   assert.match(ja.code, /^\d{5}$/);
   b.send({ t: 'join', code: '00000', name: 'x', meta: {}, v: PROTOCOL_VERSION });
   const bad = await b.wait('error');
-  assert.ok(bad.fatal);
+  assert.match(bad.msg, /找不到/);
   b.send({ t: 'join', code: ja.code, name: '小霞', meta: {}, v: PROTOCOL_VERSION });
   const jb = await b.wait('joined');
   assert.notEqual(jb.you, ja.you);

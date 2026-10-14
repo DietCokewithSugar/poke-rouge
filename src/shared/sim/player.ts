@@ -1,6 +1,6 @@
 import { ITEMS, ITEM_IDS, type ItemDef } from '../items';
 import { metaBonus } from '../meta';
-import { LINES, awakenings, formOf, type LineId } from '../pokemon';
+import { LINES, awakenings, formOf, maxStageByLevel, type LineId } from '../pokemon';
 import { SKILLS, SKILL_IDS, SKILL_MAX_LV } from '../skills';
 import { addMods, addTypeMods, derive, emptyMods, type Mods, type TypeMods } from '../stats';
 import { priceMult } from '../waves';
@@ -29,7 +29,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     slots: formOf(line, 0).slots,
     invuln: 1.5, shield: 0, shieldT: 0, buffT: 0, buff: { haste: 0, spe: 0 },
     slowT: 0, slowAmt: 0, regenAcc: 0, lsWindow: 0, lsCount: 0, sashUsed: false,
-    levelQueue: [], cards: null, cardRerolls: 0, crates: [],
+    levelQueue: [], cards: null, cardRerolls: 0, crates: [], evoPrompt: false,
     shop: { offers: [], locked: [false, false, false, false], rerolls: 0, freeRerolls: 0 },
     ready: false, castFlag: 0, lastPosT: 0, moveBudget: 0,
     stats: { kills: 0, damage: 0, superEff: 0, moneyEarned: 0, revives: 0, evolved: false, skillsFull: false, foreignSkill: false, bossKills: [], maxItems: 0 },
@@ -56,6 +56,8 @@ export function recompute(p: SimPlayer) {
     if (it.mods) addMods(m, it.mods, n);
     addTypeMods(tm, it.typeMods, n);
     if (it.special === 'eviolite' && p.stage < L.forms.length - 1) { m.defPct += 40; m.spdPct += 40; }
+    if (it.special === 'everstone' && p.stage < L.forms.length - 1) { m.dmg += 10; m.xp += 15; }
+    if (it.special === 'light_ball' && p.line === 'pikachu' && p.stage === 0) { m.atkPct += 20; m.spaPct += 20; }
   }
   const aw = awakenings(p.line, p.level);
   if (aw > 0) {
@@ -88,20 +90,40 @@ export function addXp(sim: GameSim, p: SimPlayer, amount: number): number {
 }
 
 export function levelUp(sim: GameSim, p: SimPlayer) {
+  const couldEvolve = canEvolve(p);
   p.level++;
   p.levelQueue.push(p.level);
-  const L = LINES[p.line];
   sim.emit(['lvl', p.id, p.level]);
   const awBefore = awakenings(p.line, p.level - 1);
-  if (L.evoLevels.includes(p.level) && p.line !== 'mewtwo' && p.stage < L.forms.length - 1) {
-    evolve(sim, p);
-  } else {
-    recompute(p);
-    if (awakenings(p.line, p.level) > awBefore) {
-      sim.emit(['evo', p.id, formOf(p.line, p.stage).dex, '基因觉醒']);
-    }
+  recompute(p);
+  if (awakenings(p.line, p.level) > awBefore) {
+    sim.emit(['evo', p.id, formOf(p.line, p.stage).dex, '基因觉醒']);
+  }
+  // 和原作一样，进化在战斗结束后发生，并且可以按 B 取消
+  if (!couldEvolve && canEvolve(p)) {
+    sim.emit(['evoReady', p.id, formOf(p.line, p.stage).name]);
+    if (sim.phase === 'inter') p.evoPrompt = true;
   }
   if (p.alive && !p.down) p.hp = Math.min(p.d.maxHp, p.hp + 2);
+}
+
+/** 等级已经够了、还没有进化、也没有携带不变之石。 */
+export function canEvolve(p: SimPlayer): boolean {
+  if (p.items.everstone) return false;
+  return p.stage < maxStageByLevel(p.line, p.level);
+}
+
+/** 玩家在波次之间选择是否进化。 */
+export function chooseEvolution(sim: GameSim, p: SimPlayer, yes: boolean): string | null {
+  if (!canEvolve(p)) { p.evoPrompt = false; return '现在还不能进化'; }
+  if (yes) {
+    evolve(sim, p);
+    p.evoPrompt = canEvolve(p);
+  } else {
+    p.evoPrompt = false;
+    sim.emit(['evoCancel', p.id]);
+  }
+  return null;
 }
 
 export function evolve(sim: GameSim, p: SimPlayer) {
@@ -234,8 +256,10 @@ export function learnSkill(p: SimPlayer, id: string, slot?: number): string | nu
 function itemAllowed(p: SimPlayer, it: ItemDef): boolean {
   if (it.only && it.only !== p.line) return false;
   if (it.max && (p.items[it.id] ?? 0) >= it.max) return false;
-  if (it.special === 'evo_stone' && p.stage > 0) return false;
-  if (it.special === 'eviolite' && p.stage >= LINES[p.line].forms.length - 1) return false;
+  const finalForm = p.stage >= LINES[p.line].forms.length - 1;
+  if (it.special === 'evo_stone' && (p.stage > 0 || p.items.everstone)) return false;
+  if ((it.special === 'eviolite' || it.special === 'everstone') && finalForm) return false;
+  if (it.special === 'light_ball' && p.stage > 0) return false;
   return true;
 }
 
@@ -284,7 +308,7 @@ export function rollShop(sim: GameSim, p: SimPlayer, keepLocked = true) {
     s.locked[i] = false;
   }
   // 保证皮卡丘迟早能买到雷之石
-  if (p.line === 'pikachu' && p.stage === 0 && sim.wave >= 5 && !s.offers.some((o) => o?.id === 'thunder_stone') && sim.rng.chance(0.25)) {
+  if (p.line === 'pikachu' && p.stage === 0 && !p.items.everstone && sim.wave >= 5 && !s.offers.some((o) => o?.id === 'thunder_stone') && sim.rng.chance(0.25)) {
     const i = s.locked.findIndex((l) => !l);
     if (i >= 0) s.offers[i] = { kind: 'item', id: 'thunder_stone', tier: 2, price: Math.round(ITEMS.thunder_stone.price * priceMult(sim.wave)) };
   }
