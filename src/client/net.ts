@@ -148,7 +148,7 @@ export class LocalPvpTransport implements Transport {
   constructor(mode: PvpMode, me: { name: string; build: SavedBuild; meta: Record<string, number> }, allies: SavedBuild[]) {
     const rng = new Rng((Math.random() * 2 ** 31) | 0);
     const size = PVP_MODES[mode].size;
-    const names = rng.shuffle(NPC_NAMES.slice());
+    const names = rng.shuffle(NPC_NAMES.filter((n) => n !== me.name));
     const lv = me.build.level;
     const seats: PvpSeat[] = [{ id: 1, name: me.name, team: 0, build: me.build, meta: me.meta, conn: { send: this.deliver }, bot: false, rating: 1000 }];
     let id = 2;

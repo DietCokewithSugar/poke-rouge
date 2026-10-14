@@ -203,18 +203,22 @@ export class PvpService {
   }
 
   /** 选一个 AI 对手：优先用其他玩家放进队列过的构筑（强度接近），没有就现场生成 */
-  private botSeat(id: number, near: Entry, exclude: Set<string>, rating: number): PvpSeat {
+  private botSeat(id: number, near: Entry, exclude: Set<string>, rating: number, names: Set<string>): PvpSeat {
     const cands = this.ghosts.filter((g) => !exclude.has(g.pid))
       .map((g) => ({ g, d: Math.abs(g.power - near.power) / Math.max(50, near.power) + Math.abs(g.rating - near.rating) / 2000 }))
       .sort((a, b) => a.d - b.d);
-    const top = cands.filter((c) => c.d < 0.35).slice(0, 6);
+    const top = cands.filter((c) => c.d < 0.35 && !names.has(c.g.name)).slice(0, 6);
     if (top.length) {
       const g = this.rng.pick(top).g;
       exclude.add(g.pid);
+      names.add(g.name);
       return { id, name: g.name, team: 0, build: g.build, meta: g.meta, conn: null, bot: true, rating };
     }
     const build = generateBuild(this.rng, near.build.level + this.rng.int(-1, 1));
-    return { id, name: this.rng.pick(NPC_NAMES), team: 0, build, meta: near.meta, conn: null, bot: true, rating };
+    const free = NPC_NAMES.filter((n) => !names.has(n));
+    const name = free.length ? this.rng.pick(free) : `训练家${id}`;
+    names.add(name);
+    return { id, name, team: 0, build, meta: near.meta, conn: null, bot: true, rating };
   }
 
   private startMatch(mode: PvpMode, group: Entry[]) {
@@ -223,7 +227,8 @@ export class PvpService {
     const avg = group.reduce((a, e) => a + e.rating, 0) / group.length;
     let id = 1;
     const seats: PvpSeat[] = group.map((e) => ({ id: id++, name: e.name, team: 0, build: e.build, meta: e.meta, conn: e.c.conn, bot: false, rating: e.rating, pid: e.pid }));
-    while (seats.length < need) seats.push(this.botSeat(id++, this.rng.pick(group), exclude, avg));
+    const names = new Set(group.map((e) => e.name));
+    while (seats.length < need) seats.push(this.botSeat(id++, this.rng.pick(group), exclude, avg, names));
     // 按构筑强度蛇形分队，让两队实力接近
     const order = seats.slice().sort((a, b) => buildPower(b.build) - buildPower(a.build));
     const snake = [0, 1, 1, 0, 0, 1, 1, 0];

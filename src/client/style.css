@@ -557,7 +557,9 @@ button.card:hover { transform: translateY(-0.1875rem); background: rgba(255, 255
 .sb-head { font-size: 1rem; }
 .sb-team.ally { border-left: 0.25rem solid #5aa0ff; padding-left: 0.5rem; }
 .sb-team.enemy { border-left: 0.25rem solid #ff6a6a; padding-left: 0.5rem; }
+.sb-team { overflow-x: auto; }
 .sb-team .board { margin-top: 0.25rem; font-size: 0.8125rem; }
+.sb-team .board th, .sb-team .board td { white-space: nowrap; }
 .sb-team .board th, .sb-team .board td { padding: 0.1875rem 0.375rem; }
 .sb-team tr.dead td { opacity: .65; }
 .dmg-cell { position: relative; min-width: 4.5rem; }
