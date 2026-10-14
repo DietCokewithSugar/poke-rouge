@@ -1,6 +1,7 @@
 import type { C2S, S2C } from '../shared/protocol';
 import { Room } from '../shared/room';
 import { TICK_RATE } from '../shared/sim/game';
+import { SKILLS } from '../shared/skills';
 
 export type Incoming = S2C | ArrayBuffer;
 
@@ -74,7 +75,20 @@ export class LocalTransport implements Transport {
   onClose: (reason: string) => void = () => {};
 
   constructor() {
-    if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __room: Room }).__room = this.room;
+    const params = new URLSearchParams(location.search);
+    if (params.has('debug')) {
+      (window as unknown as { __room: Room }).__room = this.room;
+      // 调试：?debug=1&skills=ember,surf,... 开局直接装备这些技能，方便查看特效
+      const skills = (params.get('skills') ?? '').split(',').filter((id) => SKILLS[id]);
+      if (skills.length) {
+        const t = window.setInterval(() => {
+          const p = this.room.sim?.players[0];
+          if (!p) return;
+          p.skills = skills.map((id, i) => ({ id, lv: 1, cd: 0.4 + i * 0.15 }));
+          window.clearInterval(t);
+        }, 100);
+      }
+    }
     const step = 1000 / TICK_RATE;
     this.timer = window.setInterval(() => {
       const now = performance.now();
