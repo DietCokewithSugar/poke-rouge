@@ -58,7 +58,7 @@ export function hitEnemy(sim: GameSim, e: Enemy, p: SimPlayer | null, raw: numbe
   }
   if (p) {
     dmg *= e.def.rank === 'minion' ? p.d.minionMult : p.d.bossMult;
-    if (!o.dot && sim.rng.chance(p.d.crit + (o.crit ?? 0) / 100)) { dmg *= 1.5; flags |= 1; }
+    if (!o.dot && sim.rng.chance(p.d.crit + (o.crit ?? 0) / 100)) { dmg *= 1.5; flags |= 1; p.stats.crits++; }
   }
   if (o.dot) flags |= 8;
   dmg = Math.max(1, Math.round(dmg));
@@ -66,6 +66,8 @@ export function hitEnemy(sim: GameSim, e: Enemy, p: SimPlayer | null, raw: numbe
   if (p) {
     e.lastHit = p.id;
     p.stats.damage += dmg;
+    const key = o.dot ? '_dot' : o.skill?.id ?? '_other';
+    p.stats.skillDmg[key] = (p.stats.skillDmg[key] ?? 0) + dmg;
     if (!o.dot && p.d.lifesteal > 0 && sim.rng.chance(p.d.lifesteal)) healPlayer(sim, p, 1, true);
     if (!o.dot && p.d.stun > 0 && sim.rng.chance(p.d.stun)) applyStatus(e, { kind: 'stun', chance: 1, dur: 0.5 }, dmg, p.id);
   }
@@ -105,6 +107,7 @@ export function healPlayer(sim: GameSim, p: SimPlayer, amount: number, lifesteal
   const before = p.hp;
   p.hp = Math.min(p.d.maxHp, p.hp + amount);
   const gained = p.hp - before;
+  p.stats.healed += gained;
   if (gained >= 1 && !lifesteal) sim.emit(['heal', p.id, Math.round(gained)]);
 }
 
@@ -113,6 +116,7 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
   if (!p.alive || p.down || p.invuln > 0 || raw <= 0) return 0;
   if (sim.rng.chance(p.d.dodge)) {
     p.invuln = 0.2;
+    p.stats.dodges++;
     sim.emit(['ph', p.id, 0, 1]);
     return 0;
   }
@@ -128,6 +132,7 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
     }
   }
   p.hp -= dmg;
+  p.stats.taken += dmg;
   p.invuln = 0.45;
   sim.emit(['ph', p.id, dmg, 0]);
   if (src && src.hp > 0) {

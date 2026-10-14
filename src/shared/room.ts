@@ -1,4 +1,4 @@
-import { LINES, LINE_IDS, type LineId } from './pokemon';
+import { LINES, LINE_IDS, formOf, type LineId } from './pokemon';
 import { DIFFICULTY_IDS, type DifficultyId } from './difficulty';
 import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
 import { GameSim, TICK_RATE } from './sim/game';
@@ -247,7 +247,7 @@ export class Room {
 
   private endGame() {
     const sim = this.sim!;
-    const board = sim.players.map((p) => ({ id: p.id, name: p.name, line: p.line, level: p.level, kills: p.stats.kills, damage: Math.round(p.stats.damage) }));
+    const board = sim.players.map((p) => ({ id: p.id, name: p.name, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level, kills: p.stats.kills, damage: Math.round(p.stats.damage), taken: Math.round(p.stats.taken), revives: p.stats.revives }));
     for (const [id, m] of this.members) {
       const p = sim.players.find((q) => q.id === id);
       this.send(m.conn, { t: 'end', victory: sim.phase === 'won', summary: p ? sim.summary(p) : null, board });

@@ -74,6 +74,7 @@ export class Intermission {
     else if (me.cards) this.renderCards(me);
     else if (me.crate) this.renderCrate(me);
     else this.renderShop(me);
+    if (!evoNow) this.main.appendChild(this.inventory(me));
     this.renderSide(me);
   }
 
@@ -195,16 +196,46 @@ export class Intermission {
     const grid = h('div', { class: 'cards shop' });
     me.shop.offers.forEach((o, i) => grid.appendChild(this.offerEl(me, o, i)));
     this.main.appendChild(grid);
-    this.main.appendChild(this.preview());
+  }
+
+  /** 底部操作栏：刷新 · 队友状态 · 下一波预告 · 出发 */
+  private actions(me: MeState) {
     const team = h('div', { class: 'team-ready' });
     this.renderTeam(team);
-    this.main.appendChild(h('div', { class: 'row between shop-actions' },
-      h('button', { class: 'btn', onclick: () => { sfx('click'); this.send({ t: 'reroll' }); }, disabled: me.money < me.shop.rerollCost },
-        me.shop.rerollCost === 0 ? '免费刷新' : `刷新 ₽${me.shop.rerollCost}`),
+    const shopping = !me.cards && !me.crate && !me.evo?.prompt && !this.askEvo;
+    return h('div', { class: 'shop-actions' },
+      shopping
+        ? h('button', { class: 'btn', onclick: () => { sfx('click'); this.send({ t: 'reroll' }); }, disabled: me.money < me.shop.rerollCost },
+          me.shop.rerollCost === 0 ? '免费刷新' : `刷新 ₽${me.shop.rerollCost}`)
+        : h('div'),
       team,
-      h('button', { class: `btn ${me.ready ? '' : 'gold'} go`, onclick: () => { sfx('click'); this.send({ t: 'waveReady', on: !me.ready }); } },
-        me.ready ? '取消准备' : '出发！下一波'),
-    ));
+      h('div', { class: 'go-wrap' },
+        this.preview(),
+        shopping
+          ? h('button', { class: `btn ${me.ready ? '' : 'gold'} go`, onclick: () => { sfx('click'); this.send({ t: 'waveReady', on: !me.ready }); } },
+            me.ready ? '取消准备' : '出发！下一波')
+          : null,
+      ),
+    );
+  }
+
+  /** 持有道具：放在主面板，道具多时也有足够的位置 */
+  private inventory(me: MeState) {
+    const total = me.items.reduce((a, [, n]) => a + n, 0);
+    const grid = h('div', { class: 'inv-grid' });
+    const sorted = me.items.filter(([id]) => ITEMS[id]).sort((a, b) => ITEMS[b[0]].tier - ITEMS[a[0]].tier || b[1] - a[1]);
+    for (const [id, n] of sorted) {
+      const it = ITEMS[id];
+      const cell = h('div', { class: `item-cell tier${it.tier}`, 'data-pad': '1' }, iconImg(it.icon, 3), n > 1 ? h('i', null, `×${n}`) : null);
+      tip(cell, () => itemInfo(id, n));
+      grid.appendChild(cell);
+    }
+    if (!sorted.length) grid.appendChild(h('div', { class: 'muted small' }, '还没有道具。在商店购买、或者打开精灵球获得。'));
+    return h('div', { class: 'inv' },
+      h('div', { class: 'inv-head' }, h('h3', null, `持有道具（${total}）`), h('span', { class: 'muted small' }, matchMedia('(pointer: coarse)').matches ? '点按道具查看效果' : '鼠标悬停查看效果')),
+      grid,
+      this.actions(me),
+    );
   }
 
   /** 下一波预告：出现的宝可梦与精英/首领，方便提前准备属性克制。 */
@@ -214,11 +245,12 @@ export class Intermission {
     if (!W || next > TOTAL_WAVES) return h('div');
     const mon = (id: string, tag?: string) => {
       const e = ENEMIES[id];
-      const el = h('div', { class: `preview-mon ${tag ? 'special' : ''}` }, Animator.portrait(e.dex, 1), h('div', { class: 'small' }, e.name), h('div', null, ...e.types.map(typeBadge)), tag ? h('div', { class: 'small gold' }, tag) : null);
+      const el = h('div', { class: `preview-mon ${tag ? 'special' : ''}` }, Animator.portrait(e.dex, 1), tag ? h('i', null, tag) : null);
+      tip(el, () => h('div', { class: 'info' }, h('b', null, e.name, tag ? `（${tag}）` : ''), h('div', null, ...e.types.map(typeBadge))));
       return el;
     };
     return h('div', { class: 'preview' },
-      h('h3', null, `下一波：第 ${next} 波 · ${BIOMES[W.biome].name} · ${waveDuration(next)} 秒`),
+      h('div', { class: 'preview-label' }, `下一波 · 第 ${next} 波 · ${waveDuration(next)} 秒`, h('span', { class: 'muted' }, ` · ${BIOMES[W.biome].name}`)),
       h('div', { class: 'preview-row' },
         W.boss ? mon(W.boss, '首领') : null,
         ...[...new Set(W.elites ?? [])].map((id) => mon(id, '精英')),
@@ -316,17 +348,6 @@ export class Intermission {
     for (const [t, v] of tm) st.appendChild(h('div', { class: 'stat' }, h('span', { class: 'muted' }, `${TYPE_NAME[t as PType]}系`), h('b', null, `+${v}%`)));
     this.side.appendChild(st);
 
-    if (me.items.length) {
-      this.side.appendChild(h('h3', null, '道具'));
-      const items = h('div', { class: 'side-items' });
-      for (const [id, n] of me.items) {
-        const it = ITEMS[id];
-        if (!it) continue;
-        const cell = h('div', { class: `item-cell tier${it.tier}` }, iconImg(it.icon, 3), n > 1 ? h('i', null, `×${n}`) : null);
-        tip(cell, () => itemInfo(id, n));
-        items.appendChild(cell);
-      }
-      this.side.appendChild(items);
-    }
+
   }
 }

@@ -23,6 +23,8 @@ export interface RoomInfo {
 
 export interface ServerStats { online: number; playing: number; rooms: number }
 
+export interface BoardEntry { id: number; name: string; line: LineId; dex: number; level: number; kills: number; damage: number; taken: number; revives: number }
+
 export type C2S =
   | { t: 'create'; name: string; meta: Record<string, number>; v: number; public?: boolean }
   | { t: 'join'; code: string; name: string; meta: Record<string, number>; v: number }
@@ -52,7 +54,7 @@ export type S2C =
   | { t: 'st'; s: PublicState }
   | { t: 'me'; s: MeState }
   | { t: 'paused'; on: boolean }
-  | { t: 'end'; victory: boolean; summary: RunSummary | null; board: { id: number; name: string; line: LineId; level: number; kills: number; damage: number }[] }
+  | { t: 'end'; victory: boolean; summary: RunSummary | null; board: BoardEntry[] }
   | { t: 'pong'; at: number }
   | { t: 'cmdErr'; msg: string };
 

@@ -79,8 +79,8 @@ export const STAT_ROWS: [string, string, (v: number) => string][] = [
   ['harvest', '收获', (v) => String(v)],
   ['xp', '经验获取', (v) => `${v >= 0 ? '+' : ''}${v}%`],
   ['money', '金钱获取', (v) => `${v >= 0 ? '+' : ''}${v}%`],
-  ['physTaken', '承受物理伤害', (v) => `${v}%`],
-  ['specTaken', '承受特殊伤害', (v) => `${v}%`],
+  ['physTaken', '物理承伤', (v) => `${v}%`],
+  ['specTaken', '特殊承伤', (v) => `${v}%`],
   ['moveSpeed', '移动速度', (v) => String(v)],
   ['enemies', '敌人数量', (v) => `${v >= 0 ? '+' : ''}${v}%`],
 ];

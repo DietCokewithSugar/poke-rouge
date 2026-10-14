@@ -32,7 +32,11 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     levelQueue: [], cards: null, cardRerolls: 0, crates: [], evoPrompt: false,
     shop: { offers: [], locked: [false, false, false, false], rerolls: 0, freeRerolls: 0 },
     ready: false, castFlag: 0, lastPosT: 0, moveBudget: 0,
-    stats: { kills: 0, damage: 0, superEff: 0, moneyEarned: 0, revives: 0, evolved: false, skillsFull: false, foreignSkill: false, bossKills: [], maxItems: 0 },
+    stats: {
+      kills: 0, damage: 0, superEff: 0, moneyEarned: 0, revives: 0, evolved: false, skillsFull: false, foreignSkill: false, bossKills: [], maxItems: 0,
+      killsBy: {}, rankKills: { minion: 0, elite: 0, boss: 0 }, skillDmg: {}, taken: 0, healed: 0, crits: 0, dodges: 0, moneySpent: 0,
+      forms: [formOf(line, 0).dex], waves: [], mark: { kills: 0, damage: 0, taken: 0 },
+    },
   };
   recompute(p);
   p.hp = p.d.maxHp;
@@ -133,6 +137,7 @@ export function evolve(sim: GameSim, p: SimPlayer) {
   p.stage++;
   p.stats.evolved = true;
   const f = formOf(p.line, p.stage);
+  p.stats.forms.push(f.dex);
   recompute(p);
   if (p.alive && !p.down) p.hp = p.d.maxHp;
   sim.emit(['evo', p.id, f.dex, `${before}进化成了${f.name}！`]);
@@ -225,6 +230,7 @@ export function rerollCards(sim: GameSim, p: SimPlayer): string | null {
   const cost = cardRerollCost(sim, p);
   if (p.money < cost) return '金钱不足';
   p.money -= cost;
+  p.stats.moneySpent += cost;
   p.cardRerolls++;
   p.cards = makeCards(sim, p, p.levelQueue[0]);
   return null;
@@ -324,6 +330,7 @@ export function shopReroll(sim: GameSim, p: SimPlayer): string | null {
   const cost = rerollCost(sim, p);
   if (p.money < cost) return '金钱不足';
   p.money -= cost;
+  p.stats.moneySpent += cost;
   if (p.shop.freeRerolls > 0) p.shop.freeRerolls--;
   else p.shop.rerolls++;
   rollShop(sim, p);
@@ -344,6 +351,7 @@ export function shopBuy(sim: GameSim, p: SimPlayer, idx: number, slot?: number):
     giveItem(sim, p, o.id);
   }
   p.money -= o.price;
+  p.stats.moneySpent += o.price;
   p.shop.offers[idx] = null;
   p.shop.locked[idx] = false;
   recompute(p);
