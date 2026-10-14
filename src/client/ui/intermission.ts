@@ -1,0 +1,274 @@
+import { ITEMS } from '../../shared/items';
+import { LINES } from '../../shared/pokemon';
+import { SKILLS } from '../../shared/skills';
+import type { Command, MeState, PublicState } from '../../shared/sim/game';
+import type { LevelCard, ShopOffer } from '../../shared/sim/entities';
+import { MOD_LABEL } from '../../shared/stats';
+import { TYPE_NAME, type PType } from '../../shared/types';
+import { ENEMIES } from '../../shared/enemies';
+import { BIOMES, TOTAL_WAVES, WAVES, waveDuration } from '../../shared/waves';
+import { sfx } from '../audio';
+import { iconImg } from '../gfx/icons';
+import { Animator } from '../gfx/sprites';
+import { clear, h, hideTip, tip } from './dom';
+import { STAT_ROWS, itemInfo, itemLines, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
+
+const STAT_ICON: Record<string, string> = {
+  maxHp: 'vitamin_hp', atk: 'vitamin_r', spa: 'vitamin_b', def: 'vitamin_g', spd: 'vitamin_y', spe: 'vitamin_spe',
+  crit: 'lens', haste: 'claw', dodge: 'powder', regen: 'berry', lifesteal: 'bell', range: 'widelens', luck: 'clover', harvest: 'coin',
+};
+
+export class Intermission {
+  root = h('div', { id: 'inter', class: 'hidden' });
+  private main = h('div', { class: 'box inter-main' });
+  private side = h('div', { class: 'box inter-side' });
+  private modal = h('div', { class: 'modal hidden' });
+  private me: MeState | null = null;
+  private pub: PublicState | null = null;
+  private you = 0;
+
+  constructor(parent: HTMLElement, private send: (c: Command) => void) {
+    this.root.append(this.main, this.side, this.modal);
+    parent.appendChild(this.root);
+  }
+
+  destroy() { this.root.remove(); }
+
+  show(on: boolean) {
+    this.root.classList.toggle('hidden', !on);
+    if (!on) { this.modal.classList.add('hidden'); hideTip(); }
+  }
+
+  get visible() { return !this.root.classList.contains('hidden'); }
+
+  update(me: MeState, pub: PublicState | null, you: number) {
+    this.me = me;
+    this.pub = pub;
+    this.you = you;
+    this.render();
+  }
+
+  updatePub(pub: PublicState) {
+    this.pub = pub;
+    const box = this.main.querySelector('.team-ready');
+    if (box) this.renderTeam(box as HTMLElement);
+  }
+
+  private render() {
+    const me = this.me!;
+    hideTip();
+    clear(this.main);
+    const wave = this.pub?.wave ?? 1;
+    this.main.appendChild(h('div', { class: 'inter-head' },
+      h('h2', null, me.cards ? '升级！' : me.crate ? '道具球' : `商店 · 第 ${wave + 1} 波之前`),
+      h('div', { class: 'money big' }, `₽ ${me.money}`),
+    ));
+    if (me.cards) this.renderCards(me);
+    else if (me.crate) this.renderCrate(me);
+    else this.renderShop(me);
+    this.renderSide(me);
+  }
+
+  // ---------------------------------------------------------------- 升级
+
+  private renderCards(me: MeState) {
+    this.main.appendChild(h('p', { class: 'sub' }, `${me.form} 升到了 Lv${me.level}！选择一项强化${me.levelsPending > 1 ? `（还剩 ${me.levelsPending} 次）` : ''}`));
+    const row = h('div', { class: 'cards' });
+    me.cards!.forEach((c, i) => row.appendChild(this.cardEl(me, c, i)));
+    this.main.appendChild(row);
+    this.main.appendChild(h('div', { class: 'row center' },
+      h('button', { class: 'btn', onclick: () => this.send({ t: 'levelReroll' }), disabled: me.money < me.cardRerollCost }, `刷新选项 ₽${me.cardRerollCost}`),
+    ));
+  }
+
+  private cardEl(me: MeState, c: LevelCard, i: number) {
+    if (c.kind === 'stat') {
+      return h('button', { class: `card tier${c.tier}`, onclick: () => { sfx('click'); this.send({ t: 'level', i }); } },
+        iconImg(STAT_ICON[c.stat] ?? 'bottle', 4),
+        h('div', { class: 'card-title' }, c.name),
+        tierBadge(c.tier),
+        h('div', { class: 'card-body pos' }, `${MOD_LABEL[c.stat]} +${c.amount}${['crit', 'haste', 'dodge', 'lifesteal', 'range'].includes(c.stat) ? '%' : ''}`),
+      );
+    }
+    const s = SKILLS[c.skill];
+    const owned = me.skills.find((x) => x.id === c.skill);
+    const el = h('button', { class: `card skill tier${c.tier}`, onclick: () => this.chooseSkill(me, c.skill, (slot) => this.send({ t: 'level', i, slot })) },
+      skillIcon(c.skill, owned ? owned.lv + 1 : 1),
+      h('div', { class: 'card-title' }, c.upgrade ? `强化 ${s.name}` : `领悟 ${s.name}`),
+      h('div', null, typeBadge(s.type), ' ', tierBadge(s.tier)),
+      h('div', { class: 'card-body' }, s.desc),
+      h('div', { class: 'card-foot' }, '新技能'),
+    );
+    tip(el, () => skillInfo(c.skill, owned ? owned.lv + 1 : 1, me.line));
+    return el;
+  }
+
+  /** 学技能：技能栏满了就先选要遗忘的技能。 */
+  private chooseSkill(me: MeState, id: string, done: (slot?: number) => void) {
+    const owned = me.skills.some((s) => s.id === id);
+    if (owned || me.skills.length < me.slots) { sfx('click'); done(); return; }
+    clear(this.modal);
+    this.modal.classList.remove('hidden');
+    this.modal.appendChild(h('div', { class: 'box modal-box' },
+      h('h3', null, `想要学习「${SKILLS[id].name}」`),
+      h('p', { class: 'sub' }, '但技能栏已经满了。要忘记哪个技能？'),
+      h('div', { class: 'forget-list' },
+        me.skills.map((s, slot) => h('button', { class: 'btn forget', onclick: () => { this.modal.classList.add('hidden'); sfx('click'); done(slot); } },
+          skillIcon(s.id, s.lv, true), SKILLS[s.id].name, s.lv > 1 ? ` +${s.lv - 1}` : '')),
+      ),
+      h('button', { class: 'btn ghost', onclick: () => this.modal.classList.add('hidden') }, '算了，不学了'),
+    ));
+  }
+
+  // ---------------------------------------------------------------- 道具球
+
+  private renderCrate(me: MeState) {
+    const it = ITEMS[me.crate!];
+    this.main.appendChild(h('p', { class: 'sub' }, `打开了精灵球，里面是……${me.cratesLeft > 1 ? `（还有 ${me.cratesLeft - 1} 个）` : ''}`));
+    this.main.appendChild(h('div', { class: 'crate' },
+      h('div', { class: `card big tier${it.tier}` }, iconImg(it.icon, 5), itemInfo(it.id)),
+    ));
+    this.main.appendChild(h('div', { class: 'row center' },
+      h('button', { class: 'btn gold', onclick: () => { sfx('buy'); this.send({ t: 'crate', take: true }); } }, '收下'),
+      h('button', { class: 'btn', onclick: () => { sfx('pickup'); this.send({ t: 'crate', take: false }); } }, `卖掉 +₽${me.crateSell}`),
+    ));
+  }
+
+  // ---------------------------------------------------------------- 商店
+
+  private renderShop(me: MeState) {
+    const grid = h('div', { class: 'cards shop' });
+    me.shop.offers.forEach((o, i) => grid.appendChild(this.offerEl(me, o, i)));
+    this.main.appendChild(grid);
+    this.main.appendChild(this.preview());
+    const team = h('div', { class: 'team-ready' });
+    this.renderTeam(team);
+    this.main.appendChild(h('div', { class: 'row between shop-actions' },
+      h('button', { class: 'btn', onclick: () => { sfx('click'); this.send({ t: 'reroll' }); }, disabled: me.money < me.shop.rerollCost },
+        me.shop.rerollCost === 0 ? '免费刷新' : `刷新 ₽${me.shop.rerollCost}`),
+      team,
+      h('button', { class: `btn ${me.ready ? '' : 'gold'} go`, onclick: () => { sfx('click'); this.send({ t: 'waveReady', on: !me.ready }); } },
+        me.ready ? '取消准备' : '出发！下一波'),
+    ));
+  }
+
+  /** 下一波预告：出现的宝可梦与精英/首领，方便提前准备属性克制。 */
+  private preview() {
+    const next = (this.pub?.wave ?? 0) + 1;
+    const W = WAVES[next - 1];
+    if (!W || next > TOTAL_WAVES) return h('div');
+    const mon = (id: string, tag?: string) => {
+      const e = ENEMIES[id];
+      const el = h('div', { class: `preview-mon ${tag ? 'special' : ''}` }, Animator.portrait(e.dex, 1), h('div', { class: 'small' }, e.name), h('div', null, ...e.types.map(typeBadge)), tag ? h('div', { class: 'small gold' }, tag) : null);
+      return el;
+    };
+    return h('div', { class: 'preview' },
+      h('h3', null, `下一波：第 ${next} 波 · ${BIOMES[W.biome].name} · ${waveDuration(next)} 秒`),
+      h('div', { class: 'preview-row' },
+        W.boss ? mon(W.boss, '首领') : null,
+        ...[...new Set(W.elites ?? [])].map((id) => mon(id, '精英')),
+        ...Object.keys(W.pool).map((id) => mon(id)),
+      ),
+    );
+  }
+
+  private renderTeam(box: HTMLElement) {
+    clear(box);
+    const pub = this.pub;
+    if (!pub || pub.players.length <= 1) return;
+    for (const p of pub.players) {
+      box.appendChild(h('span', { class: `pill ${p.ready ? 'ok' : ''}` }, `${p.name}${p.id === this.you ? '（你）' : ''} ${p.ready ? '✔' : '…'}`));
+    }
+    if (pub.interLeft >= 0) box.appendChild(h('span', { class: 'muted small' }, ` ${pub.interLeft} 秒后自动开始`));
+  }
+
+  private offerEl(me: MeState, o: ShopOffer | null, i: number) {
+    if (!o) return h('div', { class: 'card sold' }, h('div', { class: 'card-title muted' }, '已售出'));
+    const locked = me.shop.locked[i];
+    const afford = me.money >= o.price;
+    const lockBtn = h('button', { class: `lock ${locked ? 'on' : ''}`, title: '锁定：刷新时保留', onclick: (e: Event) => { e.stopPropagation(); this.send({ t: 'lock', i }); } }, locked ? '已锁' : '锁定');
+    let el: HTMLElement;
+    if (o.kind === 'item') {
+      const it = ITEMS[o.id];
+      el = h('div', { class: `card tier${o.tier} ${afford ? '' : 'poor'}` },
+        lockBtn,
+        iconImg(it.icon, 4),
+        h('div', { class: 'card-title' }, it.name),
+        tierBadge(o.tier),
+        h('div', { class: 'card-body' }, itemLines(o.id).map((l) => h('div', { class: l.startsWith('-') || /-\d/.test(l) ? 'neg' : 'pos' }, l))),
+        h('button', { class: 'btn small buy', disabled: !afford, onclick: () => this.buy(me, i, o) }, `₽ ${o.price}`),
+      );
+      tip(el, () => itemInfo(o.id, (me.items.find(([id]) => id === o.id)?.[1] ?? 0) + 1));
+    } else {
+      const s = SKILLS[o.id];
+      const owned = me.skills.find((x) => x.id === o.id);
+      el = h('div', { class: `card skill tier${o.tier} ${afford ? '' : 'poor'}` },
+        lockBtn,
+        skillIcon(o.id, owned ? owned.lv + 1 : 1),
+        h('div', { class: 'card-title' }, `招式学习器 · ${s.name}`),
+        h('div', null, typeBadge(s.type), ' ', tierBadge(s.tier)),
+        h('div', { class: 'card-body' }, owned ? `已拥有：强化到 +${owned.lv}` : s.desc),
+        h('button', { class: 'btn small buy', disabled: !afford, onclick: () => this.buy(me, i, o) }, `₽ ${o.price}`),
+      );
+      tip(el, () => skillInfo(o.id, owned ? owned.lv + 1 : 1, me.line));
+    }
+    return el;
+  }
+
+  private buy(me: MeState, i: number, o: ShopOffer) {
+    if (o.kind === 'skill') this.chooseSkill(me, o.id, (slot) => { sfx('buy'); this.send({ t: 'buy', i, slot }); });
+    else { sfx('buy'); this.send({ t: 'buy', i }); }
+  }
+
+  // ---------------------------------------------------------------- 侧栏
+
+  private renderSide(me: MeState) {
+    clear(this.side);
+    const L = LINES[me.line];
+    this.side.appendChild(h('div', { class: 'side-head' },
+      Animator.portrait(me.dex, 2),
+      h('div', null,
+        h('div', { class: 'big' }, `${me.form}  Lv${me.level}`),
+        h('div', null, ...L.forms[Math.min(me.stage, L.forms.length - 1)].types.map((t) => typeBadge(t))),
+        h('div', { class: 'muted small' }, `本系加成：${TYPE_NAME[L.bonusType]}系 +${L.bonusPct}%`),
+      ),
+    ));
+    this.side.appendChild(h('h3', null, `技能 ${me.skills.length}/${me.slots}`));
+    const sk = h('div', { class: 'side-skills' });
+    me.skills.forEach((s, slot) => {
+      const row = h('div', { class: 'side-skill' },
+        skillIcon(s.id, s.lv, true),
+        h('span', { class: 'grow' }, SKILLS[s.id].name, s.lv > 1 ? ` +${s.lv - 1}` : ''),
+        !me.cards && me.skills.length > 1 ? h('button', { class: 'btn tiny ghost', title: '遗忘并返还少量金钱', onclick: () => { if (confirm(`确定要遗忘「${SKILLS[s.id].name}」吗？`)) this.send({ t: 'forget', slot }); } }, '遗忘') : null,
+      );
+      tip(row, () => skillInfo(s.id, s.lv, me.line));
+      sk.appendChild(row);
+    });
+    for (let i = me.skills.length; i < me.slots; i++) sk.appendChild(h('div', { class: 'side-skill empty' }, '— 空 —'));
+    this.side.appendChild(sk);
+
+    this.side.appendChild(h('h3', null, '属性'));
+    const st = h('div', { class: 'stat-grid' });
+    for (const [k, label, fmt] of STAT_ROWS) {
+      const v = me.stats[k];
+      if (v === undefined) continue;
+      st.appendChild(h('div', { class: 'stat' }, h('span', { class: 'muted' }, label), h('b', null, fmt(v))));
+    }
+    const tm = Object.entries(me.typeMods).filter(([, v]) => v);
+    for (const [t, v] of tm) st.appendChild(h('div', { class: 'stat' }, h('span', { class: 'muted' }, `${TYPE_NAME[t as PType]}系`), h('b', null, `+${v}%`)));
+    this.side.appendChild(st);
+
+    if (me.items.length) {
+      this.side.appendChild(h('h3', null, '道具'));
+      const items = h('div', { class: 'side-items' });
+      for (const [id, n] of me.items) {
+        const it = ITEMS[id];
+        if (!it) continue;
+        const cell = h('div', { class: `item-cell tier${it.tier}` }, iconImg(it.icon, 3), n > 1 ? h('i', null, `×${n}`) : null);
+        tip(cell, () => itemInfo(id, n));
+        items.appendChild(cell);
+      }
+      this.side.appendChild(items);
+    }
+  }
+}
