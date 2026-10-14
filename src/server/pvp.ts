@@ -10,7 +10,7 @@ import type { PvpBoardRow, PvpHistory, PvpRatingChange, PvpRecord, S2C } from '.
 import { PROTOCOL_VERSION } from '../shared/protocol';
 import { Rng } from '../shared/rng';
 import { cleanMeta, cleanName, type Conn } from '../shared/room';
-import { buildDex, buildPower, generateBuild, validateBuild, type SavedBuild } from '../shared/pvp/build';
+import { NPC_NAMES, buildDex, buildPower, generateBuild, validateBuild, type SavedBuild } from '../shared/pvp/build';
 import { START_RATING, eloDelta, kFactor } from '../shared/pvp/rating';
 import { PvpRoom, type PvpSeat } from '../shared/pvp/room';
 import { PVP_MODES, PVP_MODE_IDS, type PvpMatchResult, type PvpMode } from '../shared/pvp/sim';
@@ -27,7 +27,6 @@ interface StoredPlayer { pid: string; hash: string; name: string; created: numbe
 interface Ghost { pid: string; name: string; build: SavedBuild; meta: Record<string, number>; rating: number; power: number; at: number }
 interface Entry { c: PvpClient; pid: string; name: string; build: SavedBuild; meta: Record<string, number>; rating: number; power: number; mode: PvpMode; at: number }
 
-const NPC_NAMES = ['小智', '小霞', '小刚', '小茂', '娜姿', '夏伯', '阿桔', '阿柳', '科拿', '希巴', '菊子', '阿渡', '小遥', '小胜', '小光', '小建', '莉佳', '马志士', '坂木', '大吾'];
 const MAX_GHOSTS = 400;
 
 const hash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');

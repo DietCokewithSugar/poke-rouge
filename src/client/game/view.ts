@@ -1,5 +1,5 @@
 import { ENEMIES, ENEMY_IDS } from '../../shared/enemies';
-import { decodeSnapshot, type SnapEnemy, type SnapPlayer, type SnapProj, type SnapZone, type Snapshot } from '../../shared/protocol';
+import { decodeSnapshot, type PvpSeatInfo, type SnapEnemy, type SnapPlayer, type SnapProj, type SnapZone, type Snapshot } from '../../shared/protocol';
 import { FX_KINDS, SKILLS } from '../../shared/skills';
 import { REVIVE_RADIUS, type Ev, type MeState, type PublicState } from '../../shared/sim/game';
 import { sfx } from '../audio';
@@ -59,10 +59,19 @@ export class GameView {
   private superEffAt = 0;
   private trailT = new Map<number, number>();
   private lastSnapPhase = 0;
+  private ringR = 0;
   settings: Settings;
   hooks: ViewHooks;
   send: (x: number, y: number, moving: boolean, dir: number) => void = () => {};
   canMove = () => true;
+  /** 对战：每位玩家的队伍 */
+  private pvp: { teams: Map<number, number>; myTeam: number } | null = null;
+
+  setPvp(seats: PvpSeatInfo[]) {
+    this.pvp = { teams: new Map(seats.map((s) => [s.id, s.team])), myTeam: seats.find((s) => s.id === this.you)?.team ?? 0 };
+  }
+
+  private isFoe(id: number) { return !!this.pvp && this.pvp.teams.get(id) !== this.pvp.myTeam; }
 
   constructor(canvas: HTMLCanvasElement, w: number, h: number, you: number, settings: Settings, hooks: ViewHooks) {
     this.canvas = canvas;
@@ -156,12 +165,28 @@ export class GameView {
       }
       case 'ph': {
         const pid = n(1), dmg = n(2), f = n(3);
+        const hf = (ev[4] as number | undefined) ?? 0, by = (ev[5] as number | undefined) ?? -1;
         const pos = this.playerPos(pid);
         if (!pos) break;
         if (f & 1) this.fx.text(pos.x, pos.y - 26, '闪避', '#9fe8ff', 10);
         else if (f & 2) this.fx.text(pos.x, pos.y - 26, '护盾', '#9fd0ff', 10);
-        else {
-          this.fx.text(pos.x, pos.y - 26, `-${dmg}`, '#ff5f6d', 12);
+        else if (this.isFoe(pid)) {
+          // 对战中打到对手：和打野生宝可梦一样显示伤害数字
+          const v = this.playerVis.get(pid);
+          if (v && v.flash <= 0) v.flash = 0.1;
+          if (hf & 16) { this.fx.text(pos.x, pos.y - 26, `-${dmg}`, '#d070ff', 10, 0.6); break; }
+          if (hf & 8) { this.fx.text(pos.x, pos.y - 22, String(dmg), '#d890f0', 10, 0.6); break; }
+          const crit = !!(hf & 1);
+          this.fx.hit(pos.x, pos.y - 8, 'normal', crit);
+          const col = crit ? '#ffd23f' : hf & 2 ? '#ff8c5a' : hf & 4 ? '#a0a8b8' : '#ffffff';
+          this.fx.text(pos.x, pos.y - 24, crit ? `${dmg}!` : String(dmg), col, crit ? 13 : 11, 0.7);
+          if (hf & 2 && by === this.you && this.time - this.superEffAt > 2.5) {
+            this.superEffAt = this.time;
+            this.fx.text(pos.x, pos.y - 38, '效果拔群！', '#ff8c5a', 10, 0.9);
+          }
+          if (by === this.you) sfx(crit ? 'crit' : 'hit');
+        } else {
+          this.fx.text(pos.x, pos.y - 26, `-${dmg}`, hf & 16 ? '#d070ff' : '#ff5f6d', 12);
           const v = this.playerVis.get(pid);
           if (v) { v.flash = 0.25; v.anim.play('Hurt'); }
           if (pid === this.you) {
@@ -240,6 +265,17 @@ export class GameView {
         break;
       }
       case 'down': sfx('down'); break;
+      case 'ko': {
+        const k = n(1), v = n(2);
+        const name = (id: number) => this.names.get(id) ?? '训练家';
+        this.hooks.onMessage(k >= 0 ? `${name(k)} 击倒了 ${name(v)}！` : `${name(v)} 被缩小的场地吞没了`);
+        if (k === this.you) {
+          const pos = this.playerPos(this.you);
+          if (pos) this.fx.text(pos.x, pos.y - 38, '击倒！', '#ffd23f', 14, 1.2);
+          sfx('kill');
+        }
+        break;
+      }
       case 'evoReady':
         if (n(1) === this.you) {
           const pos = this.playerPos(this.you);
@@ -381,6 +417,16 @@ export class GameView {
     // 掉落物
     for (const pk of this.pickups.values()) drawPickup(ctx, pk.kind, pk.x, pk.y, pk.value, t);
     this.fx.drawGround(ctx);
+    // 对战缩圈：圈外的地面染成紫色
+    const ring = this.pub?.pvp?.ring;
+    if (ring) {
+      this.ringR = this.ringR ? this.ringR + (ring.r - this.ringR) * Math.min(1, dt * 4) : ring.r;
+      ctx.beginPath();
+      ctx.rect(-BORDER, -BORDER, this.w + BORDER * 2, this.h + BORDER * 2);
+      ctx.arc(ring.x, ring.y, this.ringR, 0, Math.PI * 2, true);
+      ctx.fillStyle = 'rgba(110,30,150,0.3)';
+      ctx.fill('evenodd');
+    }
 
     // 实体（按 y 排序）
     type Drawable = { y: number; draw: () => void };
@@ -442,6 +488,11 @@ export class GameView {
     this.corpses = this.corpses.filter((c) => c.t < 0.7);
     list.sort((p, q) => p.y - q.y);
     for (const d of list) d.draw();
+    if (ring && this.ringR < Math.hypot(this.w, this.h) / 2) {
+      ctx.globalAlpha = ring.shrinking && Math.floor(t * 3) % 2 ? 1 : 0.75;
+      pxRing(ctx, ring.x, ring.y, this.ringR, '#e070ff', 2, 1, 4);
+      ctx.globalAlpha = 1;
+    }
 
     // 弹体（附带拖尾粒子）
     if (ip) {
@@ -478,33 +529,39 @@ export class GameView {
 
     this.fx.drawAir(ctx, this.settings.damageNumbers);
 
-    // 屏幕层：指向画面外倒下的队友
+    // 屏幕层：指向画面外倒下的队友（对战中也指向对手）
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (ip && this.names.size > 1) {
       for (const p of ip.b.s.players) {
-        if (p.id === this.you || !(p.flags & 1)) continue;
+        if (p.id === this.you) continue;
+        const foe = this.isFoe(p.id);
+        const down = (p.flags & 1) !== 0;
+        if (foe ? down : !down) continue;
         const sx = (p.x - cx) * S, sy = (p.y - 10 - cy) * S;
         const W = this.canvas.width, H = this.canvas.height, m = 28 * S;
         if (sx >= 0 && sy >= 0 && sx <= W && sy <= H) continue;
         const ex = Math.max(m, Math.min(W - m, sx)), ey = Math.max(m, Math.min(H - m, sy));
         const a = Math.atan2(sy - ey, sx - ex);
+        const k = foe ? 0.7 : 1;
+        const col = foe ? '#ff6a6a' : '#78f878';
         ctx.save();
         ctx.translate(ex, ey);
-        ctx.fillStyle = Math.floor(t * 4) % 2 ? '#78f878' : '#ffffff';
+        ctx.fillStyle = foe || Math.floor(t * 4) % 2 ? col : '#ffffff';
         ctx.rotate(a);
         ctx.beginPath();
-        ctx.moveTo(10 * S, 0);
-        ctx.lineTo(-4 * S, -6 * S);
-        ctx.lineTo(-4 * S, 6 * S);
+        ctx.moveTo(10 * S * k, 0);
+        ctx.lineTo(-4 * S * k, -6 * S * k);
+        ctx.lineTo(-4 * S * k, 6 * S * k);
         ctx.closePath();
         ctx.fill();
         ctx.restore();
-        ctx.font = `${10 * S}px FusionPixel, monospace`;
+        const label = foe ? this.names.get(p.id) ?? '' : `救援 ${this.names.get(p.id) ?? ''}`;
+        ctx.font = `${Math.round(10 * S * (foe ? 0.85 : 1))}px FusionPixel, monospace`;
         ctx.textAlign = 'center';
         ctx.fillStyle = '#101018';
-        ctx.fillText(`救援 ${this.names.get(p.id) ?? ''}`, ex + S, ey + 18 * S + S);
-        ctx.fillStyle = '#78f878';
-        ctx.fillText(`救援 ${this.names.get(p.id) ?? ''}`, ex, ey + 18 * S);
+        ctx.fillText(label, ex + S, ey + 18 * S * k + S);
+        ctx.fillStyle = col;
+        ctx.fillText(label, ex, ey + 18 * S * k);
       }
     }
     // 屏幕层：受伤红闪
@@ -568,16 +625,22 @@ export class GameView {
   private drawPlayer(p: SnapPlayer, x: number, y: number, v: PlayerVis, t: number) {
     const ctx = this.ctx;
     const mine = p.id === this.you;
+    const foe = this.isFoe(p.id);
     if (p.flags & 1 && this.names.size > 1) {
-      // 救援圈：队友站进圈里就能把它救起来
+      // 救援圈：队友站进圈里就能把它救起来；对手的救援圈是红色的，靠近就能打断
+      const col = foe ? '#ff6a6a' : '#78f878';
       ctx.globalAlpha = Math.floor(t * 4) % 2 ? 0.9 : 0.6;
-      pxRing(ctx, x, y, REVIVE_RADIUS, '#78f878', 2, 0.55, 4);
+      pxRing(ctx, x, y, REVIVE_RADIUS, col, 2, 0.55, 4);
       ctx.globalAlpha = 0.3;
-      if (p.revive > 0) pxCircle(ctx, x, y, Math.max(2, REVIVE_RADIUS * p.revive), '#78f878');
+      if (p.revive > 0) pxCircle(ctx, x, y, Math.max(2, REVIVE_RADIUS * p.revive), col);
       ctx.globalAlpha = 1;
     }
     this.drawShadow(x, y, shadowSize(p.dex), 1);
-    if (mine) {
+    if (this.pvp) {
+      ctx.globalAlpha = mine ? 0.85 : 0.6;
+      pxRing(ctx, x, y, 9, mine ? '#ffffff' : foe ? '#ff6a6a' : '#5aa0ff', 1, 0.45, 2);
+      ctx.globalAlpha = 1;
+    } else if (mine) {
       ctx.globalAlpha = 0.5;
       pxRing(ctx, x, y, 9, '#ffffff', 1, 0.45, 2);
       ctx.globalAlpha = 1;
@@ -605,23 +668,23 @@ export class GameView {
     if (!mine || this.names.size > 1) {
       ctx.fillStyle = '#101018';
       ctx.fillText(name, Math.round(x) + 1, ny + 1);
-      ctx.fillStyle = mine ? '#ffd23f' : '#ffffff';
+      ctx.fillStyle = mine ? '#ffd23f' : this.pvp ? (foe ? '#ff9090' : '#9fd0ff') : '#ffffff';
       ctx.fillText(name, Math.round(x), ny);
     }
-    const w = 18, bx = Math.round(x - w / 2), by = Math.round(y + 3);
+    const w = this.pvp ? 22 : 18, bx = Math.round(x - w / 2), by = Math.round(y + 3);
     ctx.fillStyle = '#181020';
     ctx.fillRect(bx - 1, by - 1, w + 2, 4);
     const frac = p.maxHp ? p.hp / p.maxHp : 0;
-    ctx.fillStyle = frac > 0.5 ? '#58d858' : frac > 0.2 ? '#f8c838' : '#f84848';
+    ctx.fillStyle = foe ? '#f85050' : frac > 0.5 ? '#58d858' : frac > 0.2 ? '#f8c838' : '#f84848';
     ctx.fillRect(bx, by, Math.round(w * frac), 2);
     if (p.flags & 1) {
-      const label = this.names.size <= 1 ? '濒死' : mine ? '等待救援…' : p.revive > 0 ? `救援中 ${Math.round(p.revive * 100)}%` : '站上来救援！';
+      const label = this.names.size <= 1 ? '濒死' : foe ? (p.revive > 0 ? '对手救援中！靠近打断' : '倒下') : mine ? '等待救援…' : p.revive > 0 ? `救援中 ${Math.round(p.revive * 100)}%` : '站上来救援！';
       ctx.fillStyle = '#101018';
       ctx.fillText(label, Math.round(x) + 1, ny - 9);
-      ctx.fillStyle = mine || this.names.size <= 1 ? '#ff8c8c' : '#78f878';
+      ctx.fillStyle = mine || foe || this.names.size <= 1 ? '#ff8c8c' : '#78f878';
       ctx.fillText(label, Math.round(x), ny - 10);
       if (p.revive > 0) {
-        ctx.strokeStyle = '#78f878';
+        ctx.strokeStyle = foe ? '#ff6a6a' : '#78f878';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(x, y - 8, 14, -Math.PI / 2, -Math.PI / 2 + p.revive * Math.PI * 2);

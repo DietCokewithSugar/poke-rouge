@@ -1,4 +1,8 @@
 import type { C2S, S2C } from '../shared/protocol';
+import { NPC_NAMES, generateBuild, type SavedBuild } from '../shared/pvp/build';
+import { PvpRoom, type PvpSeat } from '../shared/pvp/room';
+import { PVP_MODES, type PvpMode } from '../shared/pvp/sim';
+import { Rng } from '../shared/rng';
 import { Room } from '../shared/room';
 import { TICK_RATE } from '../shared/sim/game';
 import { SKILLS } from '../shared/skills';
@@ -124,5 +128,58 @@ export class LocalTransport implements Transport {
   close() {
     window.clearInterval(this.timer);
     this.room.leave(this.id);
+  }
+}
+
+/** 离线练习赛：在浏览器里和 AI 训练家对战，不计分。团战时队友优先用背包里的其他宝可梦。 */
+export class LocalPvpTransport implements Transport {
+  readonly online = false;
+  private room: PvpRoom;
+  private timer: number;
+  private acc = 0;
+  private last = performance.now();
+  onMessage: (m: Incoming) => void = () => {};
+  onClose: (reason: string) => void = () => {};
+  private deliver = (data: string | ArrayBuffer) => {
+    const m = typeof data === 'string' ? (JSON.parse(data) as S2C) : data;
+    queueMicrotask(() => this.onMessage(m));
+  };
+
+  constructor(mode: PvpMode, me: { name: string; build: SavedBuild; meta: Record<string, number> }, allies: SavedBuild[]) {
+    const rng = new Rng((Math.random() * 2 ** 31) | 0);
+    const size = PVP_MODES[mode].size;
+    const names = rng.shuffle(NPC_NAMES.slice());
+    const lv = me.build.level;
+    const seats: PvpSeat[] = [{ id: 1, name: me.name, team: 0, build: me.build, meta: me.meta, conn: { send: this.deliver }, bot: false, rating: 1000 }];
+    let id = 2;
+    // 队友用背包里等级相近的宝可梦；每个对手按对应队友的等级生成，两队实力接近
+    const near = allies.filter((b) => Math.abs(b.level - lv) <= 6).sort((a, b) => Math.abs(a.level - lv) - Math.abs(b.level - lv));
+    const team: SavedBuild[] = [me.build];
+    for (let i = 1; i < size; i++) team.push(near[i - 1] ?? generateBuild(rng, lv + rng.int(-1, 1)));
+    for (const b of team.slice(1)) seats.push({ id: id++, name: names.pop()!, team: 0, build: b, meta: me.meta, conn: null, bot: true, rating: 1000 });
+    for (const b of team) seats.push({ id: id++, name: names.pop()!, team: 1, build: generateBuild(rng, b.level + rng.int(-1, 1)), meta: me.meta, conn: null, bot: true, rating: 1000 });
+    this.room = new PvpRoom('练习赛', mode, seats);
+    if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __pvpRoom: PvpRoom }).__pvpRoom = this.room;
+    this.room.begin();
+    const step = 1000 / TICK_RATE;
+    this.timer = window.setInterval(() => {
+      const now = performance.now();
+      this.acc += Math.min(250, now - this.last);
+      this.last = now;
+      let n = 0;
+      while (this.acc >= step && n < 4) {
+        this.acc -= step;
+        n++;
+        this.room.update();
+      }
+      if (this.room.ended) window.clearInterval(this.timer);
+    }, step / 2);
+  }
+
+  send(msg: C2S) { this.room.handle(1, msg); }
+
+  close() {
+    window.clearInterval(this.timer);
+    this.room.leave(1);
   }
 }

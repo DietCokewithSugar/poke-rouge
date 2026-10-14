@@ -25,6 +25,9 @@ export const STAT_CARD_PER: Partial<Record<keyof Mods, number>> = {
 
 export const MAX_BUILD_LEVEL = 60;
 
+/** AI 训练家的名字 */
+export const NPC_NAMES = ['小智', '小霞', '小刚', '小茂', '娜姿', '夏伯', '阿桔', '阿柳', '科拿', '希巴', '菊子', '阿渡', '小遥', '小胜', '小光', '小建', '莉佳', '马志士', '坂木', '大吾'];
+
 const isInt = (v: unknown, a: number, b: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= a && v <= b;
 
 /** 校验并清洗客户端提交的构筑；不合理时返回错误信息。 */

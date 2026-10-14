@@ -2,7 +2,8 @@ import './style.css';
 import { ENEMIES } from '../shared/enemies';
 import { LINES, type LineId } from '../shared/pokemon';
 import type { DifficultyId } from '../shared/difficulty';
-import { PROTOCOL_VERSION, type BoardEntry, type C2S, type LobbyPlayer, type ServerStats } from '../shared/protocol';
+import { PROTOCOL_VERSION, type BoardEntry, type C2S, type LobbyPlayer, type PvpRatingChange, type PvpSeatInfo, type ServerStats } from '../shared/protocol';
+import { PVP_MODE_IDS, type PvpMatchResult, type PvpMode } from '../shared/pvp/sim';
 import type { MeState, PublicState } from '../shared/sim/game';
 import { BIOMES } from '../shared/waves';
 import { initAudio, playMusic, setVolume, sfx } from './audio';
@@ -13,15 +14,18 @@ import { ITEMS } from '../shared/items';
 import { BORDER, arenaCanvas } from './gfx/tiles';
 import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
-import { LocalTransport, WsTransport, type Incoming, type Transport } from './net';
-import { applyRun, loadProfile, type Profile } from './save';
+import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
+import { applyRun, loadProfile, pvpIdentity, releaseFromParty, saveProfile, type PartyMon, type Profile } from './save';
 import { $, clear, toast } from './ui/dom';
 import { Hud } from './ui/hud';
 import { Intermission } from './ui/intermission';
 import {
-  BrowseScreen, achievementsScreen, creditsScreen, labScreen, lobbyScreen, onlineText, pauseScreen, selectScreen, settingsScreen, titleScreen,
+  BrowseScreen, achievementsScreen, creditsScreen, labScreen, lobbyScreen, onlineText, pauseScreen, pvpText, selectScreen, settingsScreen, titleScreen,
 } from './ui/screens';
 import { resultsScreen } from './ui/results';
+import { PvpScreen, pvpResultsScreen } from './ui/pvp';
+
+interface PvpMatch { mode: PvpMode; uid: string; practice: boolean; seats: PvpSeatInfo[] }
 
 /** 触屏设备开局时尝试全屏并锁定横屏（需要在点击事件里调用）。 */
 function mobileFullscreen() {
@@ -58,8 +62,11 @@ class App {
   me: MeState | null = null;
   pub: PublicState | null = null;
   paused = false;
-  where: 'menu' | 'browse' | 'lobby' | 'game' | 'results' = 'menu';
+  where: 'menu' | 'browse' | 'lobby' | 'game' | 'results' | 'pvp' = 'menu';
   private menu = new MenuScene(this.canvas);
+  private pvpUi: PvpScreen | null = null;
+  /** 正在排队或进行中的对战 */
+  private pvpMatch: PvpMatch | null = null;
 
   start() {
     initInput(this.canvas);
@@ -115,15 +122,24 @@ class App {
       ws.send({ t: 'stats' });
       if (this.where === 'browse') ws.send({ t: 'browse', on: true });
       this.browser?.setStats(this.stats, true);
+      if (this.pvpUi) { this.pvpUi.setConnected(true); for (const mode of PVP_MODE_IDS) this.requestBoard(mode); }
     };
     ws.onMessage = (m) => {
       if (!(m instanceof ArrayBuffer) && (m.t === 'rooms' || m.t === 'stats')) {
         this.stats = m.stats;
         const el = document.getElementById('title-online');
         if (el) el.textContent = onlineText(this.stats);
+        const pv = document.getElementById('title-pvp');
+        if (pv) pv.textContent = pvpText(this.profile, this.stats);
         this.browser?.setStats(this.stats, true);
         if (m.t === 'rooms') this.browser?.setRooms(m.rooms);
         return;
+      }
+      if (!(m instanceof ArrayBuffer)) {
+        if (m.t === 'pvpBoard') { this.pvpUi?.setBoard(m); return; }
+        if (m.t === 'pvpQueued') { this.pvpUi?.setQueued(m); return; }
+        if (m.t === 'pvpCancelled') { this.pvpUi?.setQueued(null); return; }
+        if (m.t === 'start' && m.pvp && this.t !== ws) { ws.send({ t: 'leave' }); return; }
       }
       if (this.t === ws) this.onMessage(m);
     };
@@ -131,6 +147,8 @@ class App {
       if (this.ws === ws) this.ws = null;
       this.stats = null;
       this.browser?.setStats(null, false);
+      this.pvpUi?.setConnected(false);
+      if (this.pvpMatch && !this.pvpMatch.practice && this.where !== 'game') this.pvpMatch = null;
       if (this.t === ws) {
         toast(reason, 'error', 4000);
         this.t = null;
@@ -151,9 +169,11 @@ class App {
     this.browser = null;
     if (location.search.includes('room=')) history.replaceState(null, '', location.pathname);
     this.screen.classList.remove('hidden');
+    this.pvpUi = null;
     titleScreen(this.screen, this.profile, {
       solo: () => this.select(),
       browse: () => this.browse(),
+      pvp: () => this.pvpCenter(),
       join: (code) => this.joinRoom(code),
       lab: () => labScreen(this.screen, this.profile, () => this.title()),
       achievements: () => achievementsScreen(this.screen, this.profile, () => this.title()),
@@ -179,6 +199,104 @@ class App {
     }, ws.connected);
     if (this.stats) this.browser.setStats(this.stats, ws.connected);
     if (ws.connected) ws.send({ t: 'browse', on: true });
+  }
+
+  // ------------------------------------------------------------ 对战
+
+  /** 对战中心：背包、匹配、段位与排行榜 */
+  pvpCenter() {
+    this.where = 'pvp';
+    this.browser = null;
+    this.screen.classList.remove('hidden');
+    const ws = this.ensureWs();
+    this.pvpUi = new PvpScreen(this.screen, this.profile, {
+      queue: (mode, mon) => this.pvpQueue(mode, mon),
+      cancel: () => {
+        this.ws?.send({ t: 'pvpCancel' });
+        this.pvpUi?.setQueued(null);
+        this.pvpMatch = null;
+        if (this.t === this.ws) this.t = null;
+      },
+      practice: (mode, mon) => this.pvpPractice(mode, mon),
+      release: (uid) => releaseFromParty(this.profile, uid),
+      board: (mode) => { saveProfile(this.profile); this.requestBoard(mode); },
+      adventure: () => { this.pvpUi = null; this.select(); },
+      back: () => { saveProfile(this.profile); this.pvpUi = null; this.title(); },
+    }, ws.connected);
+    if (ws.connected) for (const mode of PVP_MODE_IDS) this.requestBoard(mode);
+  }
+
+  private requestBoard(mode: PvpMode) {
+    this.ws?.send({ t: 'pvpBoard', mode, ...pvpIdentity(this.profile) });
+  }
+
+  private pvpQueue(mode: PvpMode, mon: PartyMon) {
+    mobileFullscreen();
+    this.close();
+    this.solo = false;
+    this.t = this.ensureWs();
+    this.profile.pvpMode = mode;
+    this.profile.pvpPick = mon.uid;
+    saveProfile(this.profile);
+    this.pvpMatch = { mode, uid: mon.uid, practice: false, seats: [] };
+    this.send({ t: 'pvpQueue', mode, build: mon.build, name: this.name(), meta: this.meta(), v: PROTOCOL_VERSION, ...pvpIdentity(this.profile) });
+  }
+
+  private pvpPractice(mode: PvpMode, mon: PartyMon) {
+    mobileFullscreen();
+    if (this.pvpUi?.isQueued) this.ws?.send({ t: 'pvpCancel' });
+    this.close();
+    this.solo = false;
+    this.profile.pvpMode = mode;
+    this.profile.pvpPick = mon.uid;
+    saveProfile(this.profile);
+    this.pvpMatch = { mode, uid: mon.uid, practice: true, seats: [] };
+    const allies = this.profile.party.filter((m) => m.uid !== mon.uid).map((m) => m.build);
+    const t = new LocalPvpTransport(mode, { name: this.name(), build: mon.build, meta: this.meta() }, allies);
+    this.t = t;
+    t.onMessage = (m) => this.onMessage(m);
+  }
+
+  private leavePvp() {
+    const practice = this.pvpMatch?.practice;
+    this.pvpMatch = null;
+    this.close();
+    this.menu.start();
+    if (!practice) toast('你离开了对战，本场判负', 'error');
+    this.pvpCenter();
+  }
+
+  private endPvp(res: PvpMatchResult, you: number, rating: PvpRatingChange | null) {
+    const match = this.pvpMatch;
+    this.pvpMatch = null;
+    const me = res.players.find((p) => p.id === you);
+    const outcome = !me || res.winner < 0 ? 'draw' : res.winner === me.team ? 'win' : 'loss';
+    const mon = match ? this.profile.party.find((m) => m.uid === match.uid) : undefined;
+    if (mon && match && !match.practice) {
+      if (outcome === 'win') mon.pvp.wins++;
+      else if (outcome === 'loss') mon.pvp.losses++;
+      else mon.pvp.draws++;
+      saveProfile(this.profile);
+    }
+    const t = this.t;
+    this.t = null;
+    if (t instanceof LocalPvpTransport) t.close();
+    this.leaveGame();
+    this.where = 'results';
+    this.menu.start();
+    this.screen.classList.remove('hidden');
+    playMusic('shop');
+    sfx(outcome === 'win' ? 'clear' : outcome === 'loss' ? 'down' : 'wave');
+    pvpResultsScreen(this.screen, res, you, rating, match?.seats ?? [], !!match?.practice, {
+      again: () => {
+        this.pvpCenter();
+        const again = match && this.profile.party.find((m) => m.uid === match.uid);
+        if (!match || !again) return;
+        if (match.practice) this.pvpPractice(match.mode, again);
+        else if (this.ws?.connected) { this.pvpUi?.setWaiting(); this.pvpQueue(match.mode, again); }
+      },
+      back: () => this.pvpCenter(),
+    });
   }
 
   private meta() { return { ...this.profile.upgrades }; }
@@ -229,7 +347,7 @@ class App {
   close() {
     const t = this.t;
     this.t = null;
-    if (t instanceof LocalTransport) t.close();
+    if (t instanceof LocalTransport || t instanceof LocalPvpTransport) t.close();
     else if (t) t.send({ t: 'leave' });
     this.leaveGame();
   }
@@ -260,6 +378,13 @@ class App {
       case 'error':
         toast(m.msg, 'error', 3500);
         sfx('error');
+        if (this.pvpMatch && (this.where === 'pvp' || m.fatal)) {
+          this.pvpMatch = null;
+          this.pvpUi?.setQueued(null);
+          if (this.t === this.ws) this.t = null;
+          if (m.fatal) { this.leaveGame(); this.menu.start(); this.pvpCenter(); }
+          break;
+        }
         if (this.joining || m.fatal) {
           this.joining = false;
           if (this.t === this.ws) this.t = null;
@@ -267,14 +392,15 @@ class App {
           else this.title();
         }
         break;
-      case 'start': this.beginGame(m.w, m.h, m.players); break;
+      case 'start': this.beginGame(m.w, m.h, m.players, m.pvp?.seats); break;
+      case 'pvpEnd': this.endPvp(m.result, m.you, m.rating); break;
       case 'ev': this.view?.onEvents(m.e); break;
       case 'st': this.onPublic(m.s); break;
       case 'me': this.onMe(m.s); break;
       case 'cmdErr': toast(m.msg, 'error'); sfx('error'); break;
       case 'paused': this.paused = m.on; this.renderPause(); break;
       case 'end': this.endGame(m.victory, m.summary, m.board); break;
-      case 'pong': case 'left': case 'rooms': case 'stats': break;
+      case 'pong': case 'left': case 'rooms': case 'stats': case 'pvpBoard': case 'pvpQueued': case 'pvpCancelled': break;
     }
   }
 
@@ -293,8 +419,9 @@ class App {
     history.replaceState(null, '', `?room=${this.code}`);
   }
 
-  private beginGame(w: number, h: number, players: { id: number; name: string; line: LineId }[]) {
+  private beginGame(w: number, h: number, players: { id: number; name: string; line: LineId }[], pvpSeats?: PvpSeatInfo[]) {
     this.leaveGame();
+    this.pvpUi = null;
     this.where = 'game';
     this.menu.stop();
     clear(this.screen);
@@ -311,8 +438,15 @@ class App {
     for (const p of players) this.view.names.set(p.id, p.name);
     this.view.send = (x, y, moving, dir) => this.send({ t: 'pos', x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, m: moving ? 1 : 0, d: Math.round(dir * 100) / 100 });
     this.view.canMove = () => !this.paused && !(this.inter?.visible ?? false);
-    this.hud = new Hud(this.ui, this.solo ? () => this.setPause(true) : null);
-    this.inter = new Intermission(this.ui, (c) => this.send(c));
+    if (pvpSeats) {
+      if (this.pvpMatch) this.pvpMatch.seats = pvpSeats;
+      this.view.setPvp(pvpSeats);
+      this.hud = new Hud(this.ui, null, () => { if (this.pvpMatch?.practice || confirm('现在离开会被判负，确定要离开对战吗？')) this.leavePvp(); });
+      this.hud.setPvp(pvpSeats, this.you);
+    } else {
+      this.hud = new Hud(this.ui, this.solo ? () => this.setPause(true) : null);
+      this.inter = new Intermission(this.ui, (c) => this.send(c));
+    }
     setInputEnabled(true);
     playMusic('battle');
   }
@@ -374,7 +508,7 @@ class App {
     resultsScreen(this.screen, victory, summary, reward, board, this.you, () => {
       if (this.solo) { this.close(); this.select(); }
       else this.showLobby();
-    }, this.solo ? '再来一局' : '返回房间');
+    }, this.solo ? '再来一局' : '返回房间', this.profile);
   }
 
   private leaveGame() {

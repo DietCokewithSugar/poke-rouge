@@ -3,6 +3,8 @@ import { SKILLS } from '../../shared/skills';
 import { BIOMES } from '../../shared/waves';
 import { DIFFICULTIES } from '../../shared/difficulty';
 import type { MeState, PublicState } from '../../shared/sim/game';
+import type { PvpSeatInfo } from '../../shared/protocol';
+import { PVP_MODES } from '../../shared/pvp/sim';
 import { Animator } from '../gfx/sprites';
 import { clear, h, tip } from './dom';
 import { skillIcon, skillInfo } from './describe';
@@ -26,7 +28,7 @@ export class Hud {
   private team = h('div', { class: 'hud-team' });
   private skills = h('div', { class: 'hud-skills' });
   private banner = h('div', { class: 'hud-banner' });
-  private downBox = h('div', { class: 'hud-down hidden' }, h('b', null, '你倒下了！'), h('div', null, '队友站到你身边就能把你救起来'));
+  private downBox = h('div', { class: 'hud-down hidden' }, h('b', null, '你倒下了！'), h('div', { class: 'hud-down-sub' }, '队友站到你身边就能把你救起来'));
   private hordeEl = h('div', { class: 'hud-horde hidden' }, '群聚波！');
   private sub = h('div', { class: 'hud-sub' });
   pauseBtn: HTMLButtonElement;
@@ -36,9 +38,14 @@ export class Hud {
   private bannerTimer = 0;
   private subTimer = 0;
 
-  constructor(parent: HTMLElement, onPause: (() => void) | null) {
-    this.pauseBtn = h('button', { class: 'btn small hud-pause', onclick: () => onPause?.() }, '暂停');
-    if (!onPause) this.pauseBtn.classList.add('hidden');
+  private pvpBox = h('div', { class: 'hud-pvp box tight hidden' });
+  private pvpSeats: PvpSeatInfo[] = [];
+  private myTeam = 0;
+  private lastCount = -1;
+
+  constructor(parent: HTMLElement, onPause: (() => void) | null, onLeave?: () => void) {
+    this.pauseBtn = h('button', { class: 'btn small hud-pause', onclick: () => (onLeave ?? onPause)?.() }, onLeave ? '离开' : '暂停');
+    if (!onPause && !onLeave) this.pauseBtn.classList.add('hidden');
     this.root = h('div', { id: 'hud' },
       h('div', { class: 'hud-me box tight' },
         this.me.portrait,
@@ -51,6 +58,7 @@ export class Hud {
       ),
       h('div', { class: 'hud-center' },
         h('div', { class: 'box tight hud-wavebox' }, this.wave, this.timer, this.hordeEl),
+        this.pvpBox,
         this.bossBox,
       ),
       this.team,
@@ -65,6 +73,51 @@ export class Hud {
   }
 
   destroy() { this.root.remove(); }
+
+  /** 对战：顶部显示两队宝可梦、倒计时与缩圈状态 */
+  setPvp(seats: PvpSeatInfo[], you: number) {
+    this.pvpSeats = seats;
+    this.myTeam = seats.find((s) => s.id === you)?.team ?? 0;
+    this.root.classList.add('pvp');
+    this.pvpBox.classList.remove('hidden');
+    set(this.downBox.querySelector('.hud-down-sub') as HTMLElement, '队友站到你身边就能把你救起来（附近有对手时无法救援）');
+    const chip = (s: PvpSeatInfo) => h('div', { class: `pvp-chip ${s.id === you ? 'me' : ''}`, 'data-id': s.id, title: `${s.name}${s.bot ? '（AI）' : ''} · Lv${s.level}` },
+      h('div', { class: 'pvp-chip-portrait' }, Animator.portrait(s.dex, 1)),
+      h('div', { class: 'pvp-chip-body' },
+        h('div', { class: 'pvp-chip-name' }, s.name, s.bot ? h('i', null, 'AI') : null),
+        h('div', { class: 'bar thin' }, h('div', { class: 'bar-fill hp' })),
+      ),
+    );
+    clear(this.pvpBox);
+    const mode = seats.length > 2 ? '4v4' : '1v1';
+    this.pvpBox.classList.toggle('compact', mode === '4v4');
+    this.pvpBox.append(
+      h('div', { class: 'pvp-side ally' }, seats.filter((s) => s.team === this.myTeam).map(chip)),
+      h('div', { class: 'pvp-mid' }, h('div', { class: 'pvp-mode-name' }, PVP_MODES[mode].name), this.timer, h('div', { class: 'pvp-ring small' })),
+      h('div', { class: 'pvp-side enemy' }, seats.filter((s) => s.team !== this.myTeam).map(chip)),
+    );
+  }
+
+  private updatePvp(pub: PublicState) {
+    const pv = pub.pvp!;
+    for (const p of pub.players) {
+      const el = this.pvpBox.querySelector(`[data-id="${p.id}"]`) as HTMLElement | null;
+      if (!el) continue;
+      (el.querySelector('.bar-fill') as HTMLElement).style.width = `${p.down ? 0 : (p.hp / Math.max(1, p.maxHp)) * 100}%`;
+      el.classList.toggle('down', p.down);
+    }
+    if (pub.phase === 'inter') {
+      set(this.timer, `${pv.countdown}`);
+      if (pv.countdown !== this.lastCount) { this.lastCount = pv.countdown; if (pv.countdown > 0) this.announce(String(pv.countdown)); }
+    } else {
+      if (this.lastCount !== 0) { this.lastCount = 0; this.announce('对战开始！'); }
+      const left = Math.max(0, Math.ceil(pub.dur - pub.time));
+      set(this.timer, `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`);
+      this.timer.classList.toggle('urgent', left <= 10);
+    }
+    const t0 = PVP_MODES[pv.mode].dur * 0.3;
+    set(this.pvpBox.querySelector('.pvp-ring') as HTMLElement, pv.ring.shrinking ? '场地正在缩小！' : pub.time < t0 ? `${Math.ceil(t0 - pub.time)} 秒后缩圈` : '场地已缩到最小');
+  }
 
   show(on: boolean) { this.root.classList.toggle('hidden', !on); }
 
@@ -106,7 +159,10 @@ export class Hud {
         cd.style.setProperty('--p', `${Math.round(frac * 100)}%`);
       });
     }
-    if (pub) {
+    if (pub?.pvp) {
+      this.updatePvp(pub);
+      this.downBox.classList.toggle('hidden', !(me?.down && pub.phase === 'wave' && this.pvpSeats.filter((s) => s.team === this.myTeam).length > 1));
+    } else if (pub) {
       const D = DIFFICULTIES[pub.difficulty];
       set(this.wave, `${D.name} · 第 ${pub.wave} / ${pub.total} 波 · ${BIOMES[pub.biome]?.name ?? ''}`);
       this.hordeEl.classList.toggle('hidden', !(pub.horde && pub.phase === 'wave'));
