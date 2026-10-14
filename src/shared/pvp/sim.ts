@@ -24,9 +24,11 @@ export const PVP_MODES: Record<PvpMode, PvpModeDef> = {
 
 export const PVP_COUNTDOWN = 3;
 /** 对战伤害倍率：冒险模式的技能是按成群的野生宝可梦设计的，直接打玩家太快 */
-export const PVP_DMG = 0.12;
+export const PVP_DMG = 0.155;
 /** 伤害随冒险波次的增长比 HP 快得多；按受击方等级缩放，让各个阶段的对局时长接近。团战会被集火，额外降低伤害 */
-export const pvpDamageScale = (level: number, mode: PvpMode) => (PVP_DMG / (1 + level / 8)) * (mode === '4v4' ? 0.7 : 1);
+export const pvpDamageScale = (level: number, mode: PvpMode) => (PVP_DMG / (1 + level / 8) ** 1.35) * (mode === '4v4' ? 0.7 : 1);
+/** 加时：场地缩到最小后伤害逐渐提高，到时间结束时为 2.5 倍，避免回复型构筑互相拖到超时 */
+export const OVERTIME_MAX = 2.5;
 /** 圈外每秒损失最大 HP 的比例 */
 export const RING_DPS = 0.08;
 /** 竞技场地面（tiles.ts 的第 5 种场地） */
@@ -86,6 +88,7 @@ export class PvpSim extends GameSim {
   private ringAcc = 0;
   private logAcc = 0;
   private ringWarned = false;
+  private overtimeWarned = false;
   private bots = new Map<number, BotMem>();
 
   constructor(mode: PvpMode, inits: PvpInit[], seed: number) {
@@ -169,7 +172,7 @@ export class PvpSim extends GameSim {
     }
     if (p && !o.dot && this.rng.chance(p.d.crit + (o.crit ?? 0) / 100)) { dmg *= 1.5; flags |= 1; p.stats.crits++; }
     if (o.dot) flags |= 8;
-    dmg *= pvpDamageScale(t.level, this.mode);
+    dmg *= pvpDamageScale(t.level, this.mode) * this.overtime();
     const cat = o.skill?.cat === 'phys' ? 'phys' : 'spec';
     // 只有近身的物理招式会触发对方的反伤与静电
     const contact = p && !o.noEff && cat === 'phys' ? this.proxies.get(p.id) : undefined;
@@ -185,6 +188,12 @@ export class PvpSim extends GameSim {
       applyStatus(e, s, dealt, p?.id ?? -1, o.heal);
     }
     return dealt;
+  }
+
+  overtime() {
+    const R = this.ring;
+    if (this.matchT <= R.t1) return 1;
+    return 1 + (OVERTIME_MAX - 1) * Math.min(1, (this.matchT - R.t1) / (this.def.dur - R.t1));
   }
 
   private credit(p: SimPlayer, t: SimPlayer, dealt: number, key: string) {
@@ -305,6 +314,10 @@ export class PvpSim extends GameSim {
     if (!this.ringWarned && this.matchT >= R.t0 - 5) {
       this.ringWarned = true;
       this.emit(['msg', '5 秒后场地开始缩小！留在圈内！']);
+    }
+    if (!this.overtimeWarned && this.matchT > R.t1) {
+      this.overtimeWarned = true;
+      this.emit(['msg', '加时！伤害逐渐提高！']);
     }
     this.ringAcc += dt;
     if (this.ringAcc < 0.5) return;
