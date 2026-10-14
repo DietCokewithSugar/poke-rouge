@@ -15,7 +15,9 @@ const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 const MAX_ROOMS = Number(process.env.MAX_ROOMS || 300);
 const here = path.dirname(fileURLToPath(import.meta.url));
-const STATIC_DIR = process.env.STATIC_DIR || path.resolve(here, '../dist');
+const STATIC_DIR = process.env.STATIC_DIR
+  || [path.resolve(here, '../dist'), path.resolve(here, '../../dist')].find((d) => fs.existsSync(path.join(d, 'index.html')))
+  || path.resolve(here, '../dist');
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
