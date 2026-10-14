@@ -28,6 +28,21 @@ export function skillIcon(id: string, lv = 1, small = false) {
   );
 }
 
+/** 技能卡片的内容：图标、名字与等级、属性与级别、威力与冷却、简介 */
+export function skillCardBody(id: string, lv: number, line?: LineId) {
+  const s = SKILLS[id];
+  const native = line ? LINES[line].start.includes(id) || LINES[line].learnset.some((e) => e.skill === id) : true;
+  return h('div', { class: 'sk-card' },
+    skillIcon(id, lv),
+    h('div', { class: 'sk-card-body' },
+      h('div', { class: 'sk-card-name' }, s.name, lv > 1 ? h('span', { class: 'gold' }, ` +${lv - 1}`) : null),
+      h('div', { class: 'sk-card-tags' }, typeBadge(s.type), ' ', tierBadge(s.tier), !native ? h('span', { class: 'muted small' }, ' 外来') : null),
+      h('div', { class: 'small muted' }, s.power > 0 ? `威力 ${Math.round(s.power * skillLevelDmg(lv))} · 冷却 ${(s.cd * skillLevelCd(lv)).toFixed(1)}s` : `${CAT_NAME[s.cat]} · 冷却 ${(s.cd * skillLevelCd(lv)).toFixed(1)}s`),
+      h('div', { class: 'small sk-card-desc' }, s.desc),
+    ),
+  );
+}
+
 export function skillInfo(id: string, lv = 1, line?: LineId) {
   const s = SKILLS[id];
   const native = line ? LINES[line].start.includes(id) || LINES[line].learnset.some((e) => e.skill === id) : true;
@@ -44,7 +59,7 @@ export function itemLines(id: string): string[] {
   const it = ITEMS[id];
   const out: string[] = [];
   if (it.mods) for (const [k, v] of Object.entries(it.mods)) if (k !== 'slots' && v) out.push(fmtMod(k as ModKey, v));
-  if (it.mods?.slots) out.push(`技能栏 ${it.mods.slots > 0 ? '+' : ''}${it.mods.slots}`);
+  if (it.mods?.slots) out.push(`技能栏位 ${it.mods.slots > 0 ? '+' : ''}${it.mods.slots}`);
   if (it.typeMods) for (const [t, v] of Object.entries(it.typeMods)) out.push(`${TYPE_NAME[t as PType]}系技能伤害 +${v}%`);
   if (it.desc) out.push(it.desc);
   if (it.max) out.push(`最多持有 ${it.max} 个`);
@@ -56,7 +71,7 @@ export function itemInfo(id: string, count = 0) {
   return h('div', { class: 'info' },
     h('div', { class: 'info-head' }, iconImg(it.icon, 2), h('b', null, it.name, count > 1 ? ` ×${count}` : ''), tierBadge(it.tier)),
     h('div', { class: 'muted small' }, GROUP_NAME[it.group]),
-    ...itemLines(id).map((l) => h('div', { class: l.includes('-') && !l.includes('技能栏') ? 'neg' : 'pos' }, l)),
+    ...itemLines(id).map((l) => h('div', { class: /-\d/.test(l) ? 'neg' : 'pos' }, l)),
   );
 }
 

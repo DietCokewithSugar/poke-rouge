@@ -159,6 +159,7 @@ export class LocalPvpTransport implements Transport {
     for (const b of team.slice(1)) seats.push({ id: id++, name: names.pop()!, team: 0, build: b, meta: me.meta, conn: null, bot: true, rating: 1000 });
     for (const b of team) seats.push({ id: id++, name: names.pop()!, team: 1, build: generateBuild(rng, b.level + rng.int(-1, 1)), meta: me.meta, conn: null, bot: true, rating: 1000 });
     this.room = new PvpRoom('练习赛', mode, seats);
+    this.room.local = true;
     if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __pvpRoom: PvpRoom }).__pvpRoom = this.room;
     this.room.begin();
     const step = 1000 / TICK_RATE;

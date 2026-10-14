@@ -11,7 +11,12 @@ import { BORDER, arenaCanvas } from '../gfx/tiles';
 import { moveVector } from '../input';
 import type { Settings } from '../save';
 
-const INTERP_MS = 110;
+/**
+ * 插值缓冲：画面比服务器晚这么多毫秒显示，用来平滑网络抖动。
+ * 按最近几秒快照到达的延迟波动自动调整：网络稳定时更跟手，抖动大时宁可稍晚也不卡顿跳跃。
+ */
+const INTERP_MIN = 90;
+const INTERP_MAX = 320;
 
 /** 画布的像素密度：流畅模式按 1 倍渲染（高分屏上像素减少到 1/4），像素画由 CSS 无模糊放大 */
 export function renderDpr(s: Settings) {
@@ -19,10 +24,10 @@ export function renderDpr(s: Settings) {
 }
 const FX_PATTERN = new Map<string, string>();
 for (const s of Object.values(SKILLS)) if (!FX_PATTERN.has(s.fx)) FX_PATTERN.set(s.fx, s.pattern);
-const SEND_EVERY = 1000 / 30;
+const SEND_EVERY = 1000 / 20;
 
 interface TimedSnap { t: number; s: Snapshot; players: Map<number, SnapPlayer>; enemies: Map<number, SnapEnemy>; projs: Map<number, SnapProj> }
-interface EnemyVis { anim: Animator; flash: number; lx: number; ly: number; dir: number; scale: number }
+interface EnemyVis { anim: Animator; flash: number; lx: number; ly: number; dir: number; scale: number; seen: number }
 interface PlayerVis { anim: Animator; flash: number; down: boolean; evoFlash: number }
 interface Corpse { anim: Animator; x: number; y: number; t: number; scale: number }
 interface Flyer { x: number; y: number; kind: number; value: number; pid: number; t: number }
@@ -45,6 +50,11 @@ export class GameView {
   biome = 0;
   private snaps: TimedSnap[] = [];
   private clockOffset: number | null = null;
+  /** 当前的插值延迟（毫秒）与最近快照的迟到量 */
+  interpMs = 110;
+  private late: number[] = [];
+  /** 画面尺寸变化时告诉服务器（服务器只发视野附近的数据） */
+  onView: (w: number, h: number) => void = () => {};
   private enemyVis = new Map<number, EnemyVis>();
   private playerVis = new Map<number, PlayerVis>();
   private corpses: Corpse[] = [];
@@ -106,6 +116,7 @@ export class GameView {
     this.scale = Math.max(1, Math.round(Math.min(ch / 330, cw / 560)));
     this.viewW = Math.ceil(cw / this.scale);
     this.viewH = Math.ceil(ch / this.scale);
+    this.onView?.(this.viewW, this.viewH);
   };
 
   // ------------------------------------------------------------ 网络输入
@@ -117,6 +128,13 @@ export class GameView {
     const off = now - serverMs;
     // 取较小的偏移（到达最早的那次），抖动时缓慢回调
     this.clockOffset = this.clockOffset === null ? off : Math.min(off, this.clockOffset + 0.5);
+    // 这一帧比「最快到达」晚了多少：取最近 3 秒里较高的分位数作为抖动
+    this.late.push(off - this.clockOffset);
+    if (this.late.length > 45) this.late.shift();
+    const sorted = this.late.slice().sort((a, b) => a - b);
+    const jitter = sorted[Math.floor(sorted.length * 0.9)] ?? 0;
+    const target = Math.max(INTERP_MIN, Math.min(INTERP_MAX, 70 + jitter + 15));
+    this.interpMs += (target - this.interpMs) * (target > this.interpMs ? 0.25 : 0.03);
     const ts: TimedSnap = {
       t: serverMs, s,
       players: new Map(s.players.map((p) => [p.id, p])),
@@ -124,6 +142,8 @@ export class GameView {
       projs: new Map(s.projs.map((p) => [p.id, p])),
     };
     this.snaps.push(ts);
+    // 联机时视野外的敌人不再出现在快照里，清掉很久没见到的
+    if (s.tick % 30 === 0) for (const [id, v] of this.enemyVis) if (this.time - v.seen > 2) this.enemyVis.delete(id);
     if (this.snaps.length > 12) this.snaps.shift();
     const mine = ts.players.get(this.you);
     if (mine) {
@@ -379,7 +399,7 @@ export class GameView {
   private interp(): { a: TimedSnap; b: TimedSnap; f: number } | null {
     const n = this.snaps.length;
     if (!n || this.clockOffset === null) return null;
-    const rt = performance.now() - this.clockOffset - INTERP_MS;
+    const rt = performance.now() - this.clockOffset - this.interpMs;
     for (let i = n - 1; i > 0; i--) {
       const a = this.snaps[i - 1], b = this.snaps[i];
       if (a.t <= rt) {
@@ -449,7 +469,7 @@ export class GameView {
         if (!def) continue;
         let v = this.enemyVis.get(e.id);
         if (!v) {
-          v = { anim: new Animator(def.dex), flash: 0, lx: x, ly: y, dir: 0, scale: def.scale ?? 1 };
+          v = { anim: new Animator(def.dex), flash: 0, lx: x, ly: y, dir: 0, scale: def.scale ?? 1, seen: t };
           v.anim.loop('Walk');
           this.enemyVis.set(e.id, v);
         }
@@ -458,6 +478,7 @@ export class GameView {
         if (Math.abs(mdx) + Math.abs(mdy) > 0.15) vis.anim.dir = dirRow(Math.atan2(mdy, mdx));
         vis.anim.loop((e.flags & 128) ? 'Idle' : 'Walk', (e.flags & 16) ? 0 : 1);
         vis.lx = x; vis.ly = y;
+        vis.seen = t;
         vis.anim.update(dt);
         vis.flash = Math.max(-1, vis.flash - dt);
         if (e.flags & 1) continue;

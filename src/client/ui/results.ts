@@ -162,13 +162,14 @@ function storeButton(p: Profile, s: RunSummary, state: { stored: boolean }) {
   return btn;
 }
 
-export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: BoardEntry[], you: number, onContinue: () => void, label: string, profile?: Profile) {
+export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: BoardEntry[], you: number, onContinue: () => void, label: string, profile?: Profile, onHome?: () => void) {
   const state = { tab: 0, stored: false, items: 0, waves: 0, achs: 0 };
   const render = () => {
     const head = h('div', { class: 'r-head' },
       h('h2', { class: victory ? 'gold' : '' }, victory ? '通关！你是真正的宝可梦大师！' : '眼前一片漆黑……'),
       h('div', { class: 'row' },
         s?.build && profile && typeof validateBuild(s.build) !== 'string' ? storeButton(profile, s, state) : null,
+        onHome ? h('button', { class: 'btn ghost', 'data-back': '1', onclick: onHome }, '返回首页') : null,
         h('button', { class: 'btn gold big', 'data-key': 'y', onclick: onContinue }, label),
       ),
     );

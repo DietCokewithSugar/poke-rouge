@@ -449,13 +449,17 @@ export function shopLock(p: SimPlayer, idx: number) {
   p.shop.locked[idx] = !p.shop.locked[idx];
 }
 
+/** 遗忘技能返还的金钱 */
+export function forgetRefund(skillId: string, lv: number, wave: number) {
+  return Math.round(SKILL_PRICE[SKILLS[skillId]?.tier ?? 1] * 0.3 * lv * priceMult(wave));
+}
+
 export function forgetSkill(sim: GameSim, p: SimPlayer, slot: number): string | null {
   if (p.skills.length <= 1) return '至少要保留一个技能';
   const s = p.skills[slot];
   if (!s) return '无效的技能栏';
   p.skills.splice(slot, 1);
-  const refund = Math.round(SKILL_PRICE[SKILLS[s.id].tier] * 0.3 * s.lv * priceMult(sim.wave));
-  p.money += refund;
+  p.money += forgetRefund(s.id, s.lv, sim.wave);
   return null;
 }
 

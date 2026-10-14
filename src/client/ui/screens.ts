@@ -38,8 +38,6 @@ export interface TitleActions {
 export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stats: ServerStats | null) {
   const name = h('input', { class: 'field', maxlength: 12, placeholder: '训练家名字', value: p.name }) as HTMLInputElement;
   name.addEventListener('change', () => { p.name = name.value.trim().slice(0, 12); saveProfile(p); });
-  const code = h('input', { class: 'field code', maxlength: 5, inputmode: 'numeric', placeholder: '房间号' }) as HTMLInputElement;
-  code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 5); });
   const keepName = () => { p.name = name.value.trim().slice(0, 12) || p.name; saveProfile(p); };
   const unlockedAch = Object.keys(p.achievements).length;
   mount(root, h('div', { class: 'title-wrap' },
@@ -52,10 +50,6 @@ export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stat
         h('small', { id: 'title-online' }, onlineText(stats))),
       h('button', { class: 'menu-item pvp-entry', onclick: () => { keepName(); sfx('click'); a.pvp(); } }, '宝可梦对战',
         h('small', { id: 'title-pvp' }, pvpText(p, stats))),
-      h('div', { class: 'join-row' },
-        code,
-        h('button', { class: 'btn', onclick: () => { keepName(); if (code.value.length !== 5) { toast('请输入 5 位房间号', 'error'); return; } sfx('click'); a.join(code.value); } }, '加入房间'),
-      ),
       h('button', { class: 'menu-item', onclick: () => { sfx('click'); a.lab(); } }, '大木研究所', h('small', null, `局外成长 · 星之沙 ${p.stardust}`)),
       h('button', { class: 'menu-item', onclick: () => { sfx('click'); a.achievements(); } }, '成就', h('small', null, `${unlockedAch} / ${ACHIEVEMENTS.length} · 达成成就解锁新的宝可梦`)),
       h('div', { class: 'row' },
@@ -64,7 +58,6 @@ export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stat
       ),
     ),
   ), 'title');
-  code.addEventListener('keydown', (e) => { if (e.key === 'Enter') (code.nextElementSibling as HTMLButtonElement).click(); });
 }
 
 // ---------------------------------------------------------------- 选择宝可梦
@@ -191,7 +184,7 @@ export function pvpText(p: Profile, stats: ServerStats | null) {
 }
 
 export function onlineText(stats: ServerStats | null) {
-  return stats ? `当前在线 ${stats.online} 人 · ${stats.rooms} 个房间 · 最多 4 人联机` : '最多 4 人联机 · 查看房间列表、创建或加入房间';
+  return stats ? `在线 ${stats.online} 人 · ${stats.rooms} 个房间 · 创建房间或输入房间号加入` : '最多 4 人联机 · 创建房间或输入房间号加入';
 }
 
 export interface LobbyActions {

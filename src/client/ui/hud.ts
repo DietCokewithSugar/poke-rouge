@@ -32,6 +32,7 @@ export class Hud {
   private downBox = h('div', { class: 'hud-down hidden' }, h('b', null, '你倒下了！'), h('div', { class: 'hud-down-sub' }, '队友站到你身边就能把你救起来'));
   private hordeEl = h('div', { class: 'hud-horde hidden' }, '群聚波！');
   private sub = h('div', { class: 'hud-sub' });
+  private net = h('div', { class: 'hud-net hidden' });
   pauseBtn: HTMLButtonElement;
   private lastDex = -1;
   private skillKey = '';
@@ -70,12 +71,22 @@ export class Hud {
       this.banner,
       this.sub,
       this.downBox,
+      this.net,
     );
     this.bossBox.append(this.bossName, h('div', { class: 'bar boss' }, this.bossFill));
     parent.appendChild(this.root);
   }
 
   destroy() { this.root.remove(); }
+
+  /** 联机延迟：往返时间与画面缓冲 */
+  setNet(rtt: number, buffer: number) {
+    const ms = Math.round(rtt);
+    const level = ms < 120 && buffer < 160 ? 'good' : ms < 250 && buffer < 240 ? 'ok' : 'bad';
+    this.net.className = `hud-net ${level}`;
+    set(this.net, `${level === 'bad' ? '网络不稳定 · ' : ''}延迟 ${ms}ms`);
+    this.net.title = `往返延迟 ${ms}ms · 画面缓冲 ${Math.round(buffer)}ms（网络抖动越大，缓冲越大）`;
+  }
 
   /** 对战：顶部显示两队宝可梦、倒计时与缩圈状态 */
   setPvp(seats: PvpSeatInfo[], you: number) {

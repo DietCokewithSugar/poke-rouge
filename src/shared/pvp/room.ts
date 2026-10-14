@@ -4,7 +4,8 @@
  */
 import { formOf } from '../pokemon';
 import { encodeSnapshot, type C2S, type PvpRatingChange, type PvpSeatInfo, type S2C } from '../protocol';
-import { Room, type Conn } from '../room';
+import { Room } from '../room';
+import { CONGESTED_BYTES, PeerSync, cullEvents, type Conn } from '../netsync';
 import { TICK_RATE } from '../sim/game';
 import type { SavedBuild } from './build';
 import { PvpSim, type PvpMatchResult, type PvpMode } from './sim';
@@ -21,6 +22,7 @@ export interface PvpSeat {
   /** 真人玩家的对战身份 */
   pid?: string;
   left?: boolean;
+  sync?: PeerSync;
 }
 
 const SNAPSHOT_EVERY = 2;
@@ -33,11 +35,14 @@ export class PvpRoom {
   result: PvpMatchResult | null = null;
   private tick = 0;
   private lastPhase = '';
+  /** 浏览器里的练习赛：不裁剪视野 */
+  local = false;
   /** 对局结束时调用：返回每个座位的积分变化（练习赛返回 null） */
   onEnd?: (res: PvpMatchResult, room: PvpRoom) => Map<number, PvpRatingChange> | null;
 
   constructor(readonly code: string, readonly mode: PvpMode, seats: PvpSeat[], seed = (Math.random() * 2 ** 31) | 0) {
     this.seats = seats;
+    for (const s of seats) s.sync = new PeerSync();
     this.sim = new PvpSim(mode, seats.map((s) => ({ id: s.id, name: s.name, team: s.team, build: s.build, meta: s.meta, bot: s.bot })), seed);
   }
 
@@ -78,10 +83,16 @@ export class PvpRoom {
     const steps = this.humans().length ? 1 : 12;
     for (let i = 0; i < steps && sim.phase !== 'over'; i++) sim.step(1 / TICK_RATE);
     this.tick++;
-    if (this.tick % SNAPSHOT_EVERY === 0 || sim.phase !== this.lastPhase) {
-      this.broadcast(encodeSnapshot(sim, this.tick));
+    const phaseChanged = sim.phase !== this.lastPhase;
+    if (this.tick % SNAPSHOT_EVERY === 0 || phaseChanged) {
       const ev = sim.flushEvents();
-      if (ev.length) this.broadcast({ t: 'ev', e: ev });
+      for (const s of this.humans()) {
+        const box = this.local ? null : s.sync!.box(sim.players.find((p) => p.id === s.id));
+        const congested = (s.conn!.buffered?.() ?? 0) > CONGESTED_BYTES;
+        if (phaseChanged || !congested || this.tick % (SNAPSHOT_EVERY * 2) === 0) s.conn!.send(encodeSnapshot(sim, this.tick, box), !phaseChanged);
+        const list = cullEvents(ev, box, congested);
+        if (list.length) s.conn!.send(JSON.stringify({ t: 'ev', e: list } satisfies S2C));
+      }
     }
     if (sim.phase !== this.lastPhase || this.tick % STATE_EVERY === 0) {
       this.lastPhase = sim.phase;
@@ -97,7 +108,9 @@ export class PvpRoom {
     for (const id of sim.dirty) {
       const p = sim.players.find((q) => q.id === id);
       const s = this.seats.find((x) => x.id === id);
-      if (p && s?.conn && !s.left) this.send(s.conn, { t: 'me', s: sim.privateState(p) });
+      if (!p || !s?.conn || s.left) continue;
+      const msg = s.sync!.privateMsg(sim, p);
+      if (msg) s.conn.send(msg);
     }
     sim.dirty.clear();
   }
@@ -111,6 +124,9 @@ export class PvpRoom {
         return;
       case 'ping':
         this.send(s.conn, { t: 'pong', at: msg.at });
+        return;
+      case 'view':
+        s.sync?.setView(+msg.w, +msg.h);
         return;
       case 'leave':
         this.leave(id);

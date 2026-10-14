@@ -436,7 +436,7 @@ function feedList(res: PvpMatchResult, myTeam: number, page: number, onPage: (n:
   return h('div', { class: 'r-paged' }, pg.list, pg.nav);
 }
 
-export interface PvpResultActions { again(): void; back(): void }
+export interface PvpResultActions { again(): void; back(): void; home(): void }
 
 export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: number, rating: PvpRatingChange | null, seats: PvpSeatInfo[], practice: boolean, a: PvpResultActions, tab = 0, feedPage = 0) {
   const again = (t: number, f: number) => pvpResultsScreen(root, res, you, rating, seats, practice, a, t, f);
@@ -448,6 +448,7 @@ export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: nu
   const head = h('div', { class: 'r-head' },
     h('div', null, h('h2', { class: outcome === 'win' ? 'gold' : outcome === 'loss' ? 'neg' : '' }, title), h('div', { class: 'small muted' }, `${PVP_MODES[res.mode].name} · ${reason}${practice ? ' · 练习赛（不计分）' : ''}`)),
     h('div', { class: 'row' },
+      h('button', { class: 'btn ghost', onclick: a.home }, '首页'),
       h('button', { class: 'btn ghost', 'data-back': '1', onclick: a.back }, '返回对战中心'),
       h('button', { class: 'btn gold big', 'data-key': 'y', onclick: a.again }, '再来一场'),
     ),

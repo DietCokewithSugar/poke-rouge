@@ -11,11 +11,12 @@ import { sfx } from '../audio';
 import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
 import { clear, h, hideTip, tip } from './dom';
-import { confirmButton, pager } from './layout';
+import { pager } from './layout';
 
 const INV_PER_PAGE = 26;
 const STATS_PER_PAGE = 12;
-import { STAT_ROWS, itemInfo, itemLines, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
+import { STAT_ROWS, itemInfo, itemLines, skillCardBody, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
+import { forgetRefund } from '../../shared/sim/player';
 
 const STAT_ICON: Record<string, string> = {
   maxHp: 'vitamin_hp', atk: 'vitamin_r', spa: 'vitamin_b', def: 'vitamin_g', spd: 'vitamin_y', spe: 'vitamin_spe',
@@ -179,17 +180,70 @@ export class Intermission {
   private chooseSkill(me: MeState, id: string, done: (slot?: number) => void) {
     const owned = me.skills.some((s) => s.id === id);
     if (owned || me.skills.length < me.slots) { sfx('click'); done(); return; }
-    clear(this.modal);
-    this.modal.classList.remove('hidden');
-    this.modal.appendChild(h('div', { class: 'box modal-box' },
-      h('h3', null, `想要学习「${SKILLS[id].name}」`),
-      h('p', { class: 'sub' }, '但技能栏已经满了。要忘记哪个技能？'),
-      h('div', { class: 'forget-list' },
-        me.skills.map((s, slot) => h('button', { class: 'btn forget', onclick: () => { this.modal.classList.add('hidden'); sfx('click'); done(slot); } },
-          skillIcon(s.id, s.lv, true), SKILLS[s.id].name, s.lv > 1 ? ` +${s.lv - 1}` : '')),
+    sfx('click');
+    let pick = -1;
+    const confirmBtn = h('button', { class: 'btn gold swap-go', 'data-key': 'y', disabled: true, onclick: () => {
+      if (pick < 0) return;
+      this.closeModal();
+      sfx('buy');
+      done(pick);
+    } }, '先选一个要遗忘的技能') as HTMLButtonElement;
+    const cards = me.skills.map((s, slot) => {
+      const el = h('button', { class: 'swap-card', onclick: () => {
+        pick = slot;
+        sfx('click');
+        cards.forEach((c, k) => c.classList.toggle('on', k === slot));
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = `遗忘「${SKILLS[s.id].name}」，学习「${SKILLS[id].name}」`;
+      } }, skillCardBody(s.id, s.lv, me.line), h('div', { class: 'swap-mark' }, '遗忘'));
+      tip(el, () => skillInfo(s.id, s.lv, me.line));
+      return el;
+    });
+    this.openModal(h('div', { class: 'box modal-box skill-swap' },
+      h('div', { class: 'swap-head' },
+        h('h2', null, '技能栏已满'),
+        h('div', { class: 'sub' }, `想要学习「${SKILLS[id].name}」，需要先遗忘一个技能（${me.skills.length} / ${me.slots}）。`),
       ),
-      h('button', { class: 'btn ghost', onclick: () => this.modal.classList.add('hidden') }, '算了，不学了'),
+      h('div', { class: 'swap-body' },
+        h('div', { class: 'swap-new' }, h('div', { class: 'swap-label gold' }, '新技能'), h('div', { class: 'swap-card new' }, skillCardBody(id, 1, me.line))),
+        h('div', { class: 'swap-arrow' }, '⇄'),
+        h('div', { class: 'swap-old' }, h('div', { class: 'swap-label' }, '选择要遗忘的技能'), h('div', { class: `swap-grid ${cards.length > 4 ? 'dense' : ''}`, style: `grid-template-rows:repeat(${Math.max(2, Math.ceil(cards.length / 2))},minmax(0,1fr))` }, cards)),
+      ),
+      h('div', { class: 'swap-foot' },
+        h('button', { class: 'btn ghost', 'data-back': '1', onclick: () => { sfx('click'); this.closeModal(); } }, '算了，不学了'),
+        confirmBtn,
+      ),
     ));
+  }
+
+  /** 侧栏的「遗忘」：确认后返还少量金钱 */
+  private confirmForget(me: MeState, slot: number) {
+    const s = me.skills[slot];
+    if (!s) return;
+    sfx('click');
+    const refund = forgetRefund(s.id, s.lv, this.pub?.wave ?? 1);
+    this.openModal(h('div', { class: 'box modal-box skill-forget' },
+      h('h2', null, '遗忘技能'),
+      h('div', { class: 'swap-card new' }, skillCardBody(s.id, s.lv, me.line)),
+      h('div', { class: 'sub' }, `遗忘后返还 ₽${refund}，空出的技能栏可以学习新技能。`, s.lv > 1 ? '技能强化等级不会保留。' : ''),
+      h('div', { class: 'swap-foot' },
+        h('button', { class: 'btn ghost', 'data-back': '1', onclick: () => { sfx('click'); this.closeModal(); } }, '取消'),
+        h('button', { class: 'btn gold', 'data-key': 'y', onclick: () => { this.closeModal(); sfx('pickup'); this.send({ t: 'forget', slot }); } }, `遗忘「${SKILLS[s.id].name}」 +₽${refund}`),
+      ),
+    ));
+  }
+
+  private openModal(box: HTMLElement) {
+    hideTip();
+    clear(this.modal);
+    this.modal.appendChild(box);
+    this.modal.classList.remove('hidden');
+  }
+
+  private closeModal() {
+    hideTip();
+    this.modal.classList.add('hidden');
+    clear(this.modal);
   }
 
   // ---------------------------------------------------------------- 道具球
@@ -371,7 +425,7 @@ export class Intermission {
       const row = h('div', { class: 'side-skill' },
         skillIcon(s.id, s.lv, true),
         h('span', { class: 'grow side-skill-name' }, SKILLS[s.id].name, s.lv > 1 ? ` +${s.lv - 1}` : ''),
-        !me.cards && me.skills.length > 1 ? confirmButton('遗忘', '确定？', 'btn tiny ghost', () => this.send({ t: 'forget', slot }), { title: '遗忘并返还少量金钱' }) : null,
+        !me.cards && me.skills.length > 1 ? h('button', { class: 'btn tiny ghost', title: '遗忘并返还少量金钱', onclick: (e: Event) => { e.stopPropagation(); this.confirmForget(me, slot); } }, '遗忘') : null,
       );
       tip(row, () => skillInfo(s.id, s.lv, me.line));
       sk.appendChild(row);

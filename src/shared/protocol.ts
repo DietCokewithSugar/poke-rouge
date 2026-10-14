@@ -33,6 +33,8 @@ export interface RoomInfo {
 
 export interface ServerStats { online: number; playing: number; rooms: number; pvpQueue?: number; pvpPlaying?: number }
 
+export interface MeDyn { hp: number; maxHp: number; xp: number; money: number; down: boolean; speed: number; cds: number[] }
+
 export interface BoardEntry { id: number; name: string; line: LineId; dex: number; level: number; kills: number; damage: number; taken: number; revives: number }
 
 export type C2S =
@@ -49,6 +51,8 @@ export type C2S =
   | { t: 'stats' }
   | { t: 'debug'; cmd: 'down' | 'endWave' | 'xp' }
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number }
+  /** 客户端画面能看到的世界范围（宽高，世界像素），服务器据此裁剪快照 */
+  | { t: 'view'; w: number; h: number }
   | { t: 'ping'; at: number }
   | { t: 'pvpQueue'; mode: PvpMode; build: SavedBuild; name: string; meta: Record<string, number>; v: number; pid: string; secret: string }
   | { t: 'pvpCancel' }
@@ -66,6 +70,8 @@ export type S2C =
   | { t: 'ev'; e: Ev[] }
   | { t: 'st'; s: PublicState }
   | { t: 'me'; s: MeState }
+  /** 波次进行中只发变化频繁的字段（HP、经验、金钱、冷却……），其它没变就不重发整份状态 */
+  | { t: 'md'; s: MeDyn }
   | { t: 'paused'; on: boolean }
   | { t: 'end'; victory: boolean; summary: RunSummary | null; board: BoardEntry[] }
   | { t: 'pong'; at: number }
@@ -90,11 +96,18 @@ const angToByte = (a: number) => ((Math.round((a / TAU) * 256) % 256) + 256) % 2
 export const byteToAng = (b: number) => (b / 256) * TAU;
 const q = (v: number) => Math.max(-32768, Math.min(32767, Math.round(v * 4)));
 
-export function encodeSnapshot(sim: GameSim, tick: number): ArrayBuffer {
+/** 某位玩家视野附近的矩形（世界坐标）；快照和特效事件只发这个范围里的东西 */
+export interface ViewBox { x0: number; y0: number; x1: number; y1: number }
+
+export const inBox = (b: ViewBox | null | undefined, x: number, y: number, pad = 0) =>
+  !b || (x >= b.x0 - pad && x <= b.x1 + pad && y >= b.y0 - pad && y <= b.y1 + pad);
+
+export function encodeSnapshot(sim: GameSim, tick: number, box?: ViewBox | null): ArrayBuffer {
   const ps = sim.players;
-  const es = sim.enemies.filter((e) => !e.dead);
-  const prs = sim.projs.length > 700 ? sim.projs.slice(-700) : sim.projs;
-  const zs = sim.zones;
+  const es = sim.enemies.filter((e) => !e.dead && inBox(box, e.x, e.y, e.r));
+  const pAll = box ? sim.projs.filter((p) => inBox(box, p.x, p.y, 8)) : sim.projs;
+  const prs = pAll.length > 700 ? pAll.slice(-700) : pAll;
+  const zs = box ? sim.zones.filter((z) => inBox(box, z.x, z.y, z.r)) : sim.zones;
   const size = 1 + 4 + 1 + 1 + 2 + 2 + 2 + ps.length * 15 + es.length * 10 + prs.length * 10 + zs.length * 9;
   const buf = new ArrayBuffer(size);
   const v = new DataView(buf);
