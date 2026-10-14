@@ -901,6 +901,12 @@ export class GameSim {
     };
   }
 
+  /** 调试：直接给经验 */
+  debugXp(p: SimPlayer, amount: number) {
+    addXp(this, p, amount);
+    this.dirty.add(p.id);
+  }
+
   /** 供无头测试：直接给予道具 */
   debugGive(id: number, item: string) {
     const p = this.players.find((q) => q.id === id);

@@ -36,6 +36,7 @@ function cleanMeta(meta: unknown): Record<string, number> {
 
 /** 一个房间：大厅（选精灵/准备）+ 对局（权威模拟）。服务器与单人模式共用。 */
 export class Room {
+  static allowDebug = false;
   readonly code: string;
   readonly solo: boolean;
   members = new Map<number, Member>();
@@ -151,6 +152,16 @@ export class Room {
       case 'browse':
       case 'stats':
         return;
+      case 'debug': {
+        // 仅在服务器以 POKE_DEBUG=1 启动（或本地单人调试）时可用，方便测试
+        const sim = this.sim;
+        const p = sim?.players.find((q) => q.id === id);
+        if (!Room.allowDebug || !sim || !p) return;
+        if (msg.cmd === 'down') sim.downPlayer(p);
+        else if (msg.cmd === 'endWave') sim.waveT = sim.waveDur;
+        else if (msg.cmd === 'xp') sim.debugXp(p, 400);
+        return;
+      }
       case 'pause':
         if (this.solo && this.sim) {
           this.paused = !!msg.on;

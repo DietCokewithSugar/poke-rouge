@@ -24,7 +24,7 @@ let focused: HTMLElement | null = null;
 export function initGamepad(h: PadHooks) {
   hooks = h;
   window.addEventListener('gamepadconnected', (e) => {
-    const name = (e as GamepadEvent).gamepad.id.replace(/\(.*?\)/g, '').trim().slice(0, 40) || '手柄';
+    const name = ((e as GamepadEvent).gamepad?.id ?? '').replace(/\(.*?\)/g, '').trim().slice(0, 40) || '手柄';
     toast(`已连接手柄：${name}。左摇杆移动，A 确认，B 返回，X 刷新，Y 出发，Start 暂停`, 'info', 5000);
   });
   window.addEventListener('gamepaddisconnected', () => { setPadVector(0, 0); toast('手柄已断开', 'error'); });
@@ -116,7 +116,7 @@ function current(layer: HTMLElement): HTMLElement | null {
 }
 
 function preferred(list: HTMLElement[]): HTMLElement | undefined {
-  return list.find((el) => el.matches('button.card, .btn.gold')) ?? list[0];
+  return list.find((el) => el.matches('button.card, .btn.gold, .menu-item.play')) ?? list.find((el) => el.tagName === 'BUTTON') ?? list[0];
 }
 
 function move(layer: HTMLElement, dir: string) {

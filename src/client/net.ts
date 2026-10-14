@@ -80,6 +80,7 @@ export class LocalTransport implements Transport {
   constructor() {
     const params = new URLSearchParams(location.search);
     if (params.has('debug')) {
+      Room.allowDebug = true;
       (window as unknown as { __room: Room }).__room = this.room;
       // 调试：?debug=1&skills=ember,surf,... 开局直接装备这些技能，方便查看特效
       const skills = (params.get('skills') ?? '').split(',').filter((id) => SKILLS[id]);

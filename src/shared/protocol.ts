@@ -35,6 +35,7 @@ export type C2S =
   | { t: 'visibility'; public: boolean }
   | { t: 'browse'; on: boolean }
   | { t: 'stats' }
+  | { t: 'debug'; cmd: 'down' | 'endWave' | 'xp' }
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number }
   | { t: 'ping'; at: number }
   | Command;

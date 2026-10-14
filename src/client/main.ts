@@ -8,6 +8,8 @@ import { BIOMES } from '../shared/waves';
 import { initAudio, playMusic, setVolume, sfx } from './audio';
 import { GameView } from './game/view';
 import { Animator, dirRow, preload } from './gfx/sprites';
+import { iconUrl } from './gfx/icons';
+import { ITEMS } from '../shared/items';
 import { BORDER, arenaCanvas } from './gfx/tiles';
 import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
@@ -88,6 +90,7 @@ class App {
     this.title();
     void preload(ALL_DEX);
     const params = new URLSearchParams(location.search);
+    if (params.has('debug')) Object.assign(window, { __send: (m: C2S) => this.send(m), __icons: { iconUrl, ITEMS } });
     const room = params.get('room');
     if (room && /^\d{5}$/.test(room)) this.joinRoom(room);
   }

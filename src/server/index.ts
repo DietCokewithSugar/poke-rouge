@@ -26,6 +26,7 @@ const MIME: Record<string, string> = {
 };
 
 const rooms = new Map<string, Room>();
+Room.allowDebug = process.env.POKE_DEBUG === '1';
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || '/', 'http://x');
