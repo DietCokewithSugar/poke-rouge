@@ -1,6 +1,6 @@
 import { LINES, formOf } from '../pokemon';
 import { SKILLS, skillLevelCd, skillLevelDmg, type SkillDef } from '../skills';
-import { gameEffectiveness, type PType } from '../types';
+import { TYPES, gameEffectiveness, type PType } from '../types';
 import type { Enemy, SimPlayer, StatusApply } from './entities';
 import type { GameSim } from './game';
 
@@ -68,7 +68,7 @@ export function hitEnemy(sim: GameSim, e: Enemy, p: SimPlayer | null, raw: numbe
     if (!o.dot && p.d.lifesteal > 0 && sim.rng.chance(p.d.lifesteal)) healPlayer(sim, p, 1, true);
     if (!o.dot && p.d.stun > 0 && sim.rng.chance(p.d.stun)) applyStatus(e, { kind: 'stun', chance: 1, dur: 0.5 }, dmg, p.id);
   }
-  sim.addHit(e, dmg, flags);
+  sim.addHit(e, dmg, flags, TYPES.indexOf(type));
   if (o.status && sim.rng.chance(o.status.chance)) applyStatus(e, o.status, dmg, p?.id ?? -1, o.heal);
   if (o.knock && e.def.knockResist !== 1) {
     const k = o.knock * (1 - (e.def.knockResist ?? 0));

@@ -18,6 +18,13 @@ import {
   achievementsScreen, creditsScreen, labScreen, lobbyScreen, pauseScreen, resultsScreen, selectScreen, settingsScreen, titleScreen,
 } from './ui/screens';
 
+/** 触屏设备开局时尝试全屏并锁定横屏（需要在点击事件里调用）。 */
+function mobileFullscreen() {
+  if (!window.matchMedia('(pointer: coarse)').matches || document.fullscreenElement) return;
+  const lock = () => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {});
+  document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }).then(lock, () => {});
+}
+
 const ALL_DEX = [...new Set([...Object.values(LINES).flatMap((l) => l.forms.map((f) => f.dex)), ...Object.values(ENEMIES).map((e) => e.dex)])];
 
 class App {
@@ -54,6 +61,13 @@ class App {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.where === 'game' && this.solo && this.pub?.phase === 'wave' && !this.paused) this.setPause(true);
     });
+    // 手机竖屏：显示旋转提示；单人对局自动暂停
+    const portrait = window.matchMedia('(orientation: portrait) and (pointer: coarse)');
+    const onOrient = () => {
+      if (portrait.matches && this.where === 'game' && this.solo && this.pub?.phase === 'wave' && !this.paused) this.setPause(true);
+    };
+    portrait.addEventListener('change', onOrient);
+    $('#rotate-fs').addEventListener('click', () => mobileFullscreen());
     this.menu.start();
     this.title();
     void preload(ALL_DEX);
@@ -94,6 +108,7 @@ class App {
   private name() { return this.profile.name || '训练家'; }
 
   startSolo(line: LineId) {
+    mobileFullscreen();
     this.close();
     this.solo = true;
     this.pendingLine = line;
@@ -102,6 +117,7 @@ class App {
   }
 
   createRoom() {
+    mobileFullscreen();
     this.close();
     this.solo = false;
     this.open(new WsTransport());
@@ -110,6 +126,7 @@ class App {
   }
 
   joinRoom(code: string) {
+    if (navigator.userActivation?.isActive) mobileFullscreen();
     this.close();
     this.solo = false;
     this.open(new WsTransport());

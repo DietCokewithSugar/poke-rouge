@@ -96,7 +96,7 @@ export class GameSim {
   /** 每位玩家的私有状态是否需要重发 */
   dirty = new Set<number>();
   private events: Ev[] = [];
-  private hits = new Map<number, { x: number; y: number; dmg: number; flags: number }>();
+  private hits = new Map<number, { x: number; y: number; dmg: number; flags: number; type: number }>();
   private idSeq = 1;
   private spawnAcc = 0;
   private elitesDone = 0;
@@ -120,15 +120,15 @@ export class GameSim {
   emitCast(p: SimPlayer, anim: number) { this.emit(['cast', p.id, anim]); }
   recompute(p: SimPlayer) { recompute(p); this.dirty.add(p.id); }
 
-  addHit(e: Enemy, dmg: number, flags: number) {
+  addHit(e: Enemy, dmg: number, flags: number, type: number) {
     const h = this.hits.get(e.id);
-    if (h) { h.dmg += dmg; h.flags |= flags; h.x = e.x; h.y = e.y; }
-    else this.hits.set(e.id, { x: e.x, y: e.y, dmg, flags });
+    if (h) { h.dmg += dmg; h.flags |= flags; h.x = e.x; h.y = e.y; if (!(flags & 8)) h.type = type; }
+    else this.hits.set(e.id, { x: e.x, y: e.y, dmg, flags, type });
   }
 
   flushEvents(): Ev[] {
     const out = this.events;
-    for (const [id, h] of this.hits) out.push(['h', id, Math.round(h.x), Math.round(h.y), h.dmg, h.flags]);
+    for (const [id, h] of this.hits) out.push(['h', id, Math.round(h.x), Math.round(h.y), h.dmg, h.flags, h.type]);
     this.hits.clear();
     this.events = [];
     return out;

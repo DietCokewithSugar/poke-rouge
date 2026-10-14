@@ -521,5 +521,7 @@ export function iconImg(icon: string, scale = 3, cls = 'ico'): HTMLImageElement 
   img.src = iconUrl(icon, scale);
   img.className = cls;
   img.draggable = false;
+  img.style.setProperty('--iw', `${(12 * scale) / 16}rem`);
+  img.style.setProperty('--ih', `${(12 * scale) / 16}rem`);
   return img;
 }

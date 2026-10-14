@@ -172,6 +172,8 @@ export class Animator {
     const w = m?.w ?? 32, h = m?.h ?? 32;
     c.width = w * scale;
     c.height = h * scale;
+    c.style.setProperty('--pw', `${(w * scale) / 16}rem`);
+    c.style.setProperty('--ph', `${(h * scale) / 16}rem`);
     const draw = () => {
       const s = sheet(dex, 'Idle');
       if (!s.ready || !m) return false;
