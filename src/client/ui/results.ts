@@ -97,7 +97,7 @@ function skillChart(s: RunSummary) {
   // 持有但没有造成伤害的技能（护盾、回复等）
   for (const x of s.detail.skills) {
     if (rows.some(([id]) => id === x.id)) continue;
-    const row = h('div', { class: 'r-skill' }, skillIcon(x.id, x.lv, true), h('div', { class: 'r-skill-name' }, SKILLS[x.id].name, x.lv > 1 ? ` +${x.lv - 1}` : ''), h('div', { class: 'r-skill-bar' }), h('div', { class: 'r-skill-num muted' }, '辅助技能'));
+    const row = h('div', { class: 'r-skill' }, skillIcon(x.id, x.lv, true), h('div', { class: 'r-skill-name' }, SKILLS[x.id].name, x.lv > 1 ? ` +${x.lv - 1}` : ''), h('div', { class: 'r-skill-bar' }), h('div', { class: 'r-skill-num muted' }, SKILLS[x.id].cat === 'status' ? '辅助技能' : '没有造成伤害'));
     tip(row, () => skillInfo(x.id, x.lv, s.line));
     list.appendChild(row);
   }
