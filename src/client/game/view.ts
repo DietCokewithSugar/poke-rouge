@@ -10,6 +10,8 @@ import { moveVector } from '../input';
 import type { Settings } from '../save';
 
 const INTERP_MS = 110;
+const FX_PATTERN = new Map<string, string>();
+for (const s of Object.values(SKILLS)) if (!FX_PATTERN.has(s.fx)) FX_PATTERN.set(s.fx, s.pattern);
 const SEND_EVERY = 1000 / 30;
 
 interface TimedSnap { t: number; s: Snapshot; players: Map<number, SnapPlayer>; enemies: Map<number, SnapEnemy>; projs: Map<number, SnapProj> }
@@ -135,7 +137,8 @@ export class GameView {
       case 'h': {
         const id = n(1), x = n(2), y = n(3), dmg = n(4), f = n(5);
         const v = this.enemyVis.get(id);
-        if (v) v.flash = 0.12;
+        // 受击闪白要有间隔，否则持续挨打的首领会一直是白色剪影
+        if (v && v.flash < -0.14) v.flash = 0.08;
         if (f & 8) { this.fx.text(x, y - 18, String(dmg), '#d890f0', 10, 0.6); break; }
         const crit = !!(f & 1);
         const col = crit ? '#ffd23f' : f & 2 ? '#ff8c5a' : f & 4 ? '#a0a8b8' : '#ffffff';
@@ -258,8 +261,7 @@ export class GameView {
     const a = ev[5] as number, b = ev[6] as number, owner = ev[7] as number;
     if (fx.endsWith('_pre')) { this.fx.add('pre', fx, x, y, 0, a, 0, b / 1000); return; }
     if (fx.endsWith('_charge')) { this.fx.add('charge', fx, x, y, ang, a, b, (ev[8] as number) / 1000, undefined, owner); return; }
-    const skill = Object.values(SKILLS).find((s) => s.fx === fx);
-    const pat = skill?.pattern;
+    const pat = FX_PATTERN.get(fx);
     if (pat === 'melee') this.fx.add('melee', fx, x, y, ang, a, b, 0.2);
     else if (pat === 'beam') { this.fx.add('beam', fx, x, y, ang, a, b, 0.28); if (b >= 20 && this.settings.shake) this.fx.shake = Math.max(this.fx.shake, 2); }
     else if (pat === 'nova') { this.fx.add('nova', fx, x, y, 0, a, 0, 0.3); if (fx === 'earthquake' && this.settings.shake) this.fx.shake = 5; }
@@ -390,7 +392,7 @@ export class GameView {
         vis.anim.loop((e.flags & 128) ? 'Idle' : 'Walk', (e.flags & 16) ? 0 : 1);
         vis.lx = x; vis.ly = y;
         vis.anim.update(dt);
-        vis.flash = Math.max(0, vis.flash - dt);
+        vis.flash = Math.max(-1, vis.flash - dt);
         if (e.flags & 1) continue;
         list.push({ y, draw: () => this.drawEnemy(e, def.rank, def.dex, x, y, vis, t) });
       }
@@ -484,7 +486,7 @@ export class GameView {
       pxRing(ctx, x, y - 2, 9 * v.scale, rank === 'boss' ? '#f8d030' : '#f85050');
       ctx.globalAlpha = 1;
     }
-    v.anim.draw(ctx, x, y, v.scale, v.flash > 0 ? 1 : 0);
+    v.anim.draw(ctx, x, y, v.scale, v.flash > 0 ? 0.8 : 0);
     const f = e.flags;
     const top = y - 26 * v.scale;
     if (f & 2 && Math.random() < 0.3) this.fx.burst(x + (Math.random() - 0.5) * 8, y - 8, '#f88030', 1, 10, 1, -40, 0.4);

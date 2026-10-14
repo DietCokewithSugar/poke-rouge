@@ -192,9 +192,13 @@ interface Particle { x: number; y: number; vx: number; vy: number; life: number;
 
 export interface FloatText { x: number; y: number; text: string; color: string; t: number; dur: number; size: number; vy: number }
 
+const FX_TYPE_COLOR = new Map<string, string>();
+for (const s of Object.values(SKILLS)) if (!FX_TYPE_COLOR.has(s.fx)) FX_TYPE_COLOR.set(s.fx, TYPE_COLOR[s.type]);
+
 function colorOfFx(fx: string): string {
   const base = fx.replace(/_(pre|charge)$/, '');
-  for (const s of Object.values(SKILLS)) if (s.fx === base) return TYPE_COLOR[s.type];
+  const t = FX_TYPE_COLOR.get(base);
+  if (t) return t;
   const c = FX_COLOR[base];
   return c ? c[1] : '#ffffff';
 }
@@ -513,9 +517,15 @@ function drawBoom(ctx: CanvasRenderingContext2D, e: Effect, k: number) {
       x = nx;
     }
   }
+  const a = ctx.globalAlpha;
+  ctx.globalAlpha = a * 0.45;
   pxCircle(ctx, e.x, e.y, r, c[0]);
+  ctx.globalAlpha = a * 0.6;
   pxCircle(ctx, e.x, e.y, r * 0.65, c[1]);
+  ctx.globalAlpha = a * 0.8;
   pxCircle(ctx, e.x, e.y, r * 0.3, c[2]);
+  ctx.globalAlpha = a;
+  pxRing(ctx, e.x, e.y, r, c[1]);
 }
 
 function drawStrikePre(ctx: CanvasRenderingContext2D, e: Effect, k: number) {

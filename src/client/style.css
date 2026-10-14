@@ -44,10 +44,12 @@ img.ico, .portrait { image-rendering: pixelated; }
 
 .scr {
   position: fixed; inset: 0; z-index: 20;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
   padding: 16px;
   overflow: auto;
 }
+.scr > * { margin: auto; }
+.scr > .box { max-height: none; }
 
 /* ---------- PMD 对话框 ---------- */
 .box {
@@ -347,16 +349,45 @@ button.card:hover { transform: translateY(-3px); background: rgba(255, 255, 255,
 .joy-knob { position: absolute; left: 30px; top: 30px; width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 255, 255, .55); }
 
 @media (max-width: 860px) {
-  #inter { grid-template-columns: 1fr; overflow: auto; }
-  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pick-grid { grid-template-columns: repeat(3, 1fr); }
-  .slots { grid-template-columns: repeat(2, 1fr); }
+  #inter { grid-template-columns: minmax(0, 1fr) 240px; padding: 8px; gap: 8px; }
+  .pick-grid { grid-template-columns: repeat(5, 1fr); }
   .lab-grid, .ach-list { grid-template-columns: 1fr; }
-  .statbars { grid-template-columns: repeat(2, 1fr); }
   .logo-main { font-size: 46px; }
   .hud-team { top: auto; bottom: 70px; width: 160px; }
 }
+@media (max-width: 640px) {
+  #inter { grid-template-columns: 1fr; overflow: auto; }
+  #inter .box { max-height: none; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pick-grid { grid-template-columns: repeat(3, 1fr); }
+  .slots { grid-template-columns: repeat(2, 1fr); }
+  .statbars { grid-template-columns: repeat(2, 1fr); }
+}
 @media (max-height: 520px) {
+  .scr { padding: 8px; }
+  .box { padding: 10px 12px; }
+  .logo-main { font-size: 34px; letter-spacing: 3px; }
+  .logo-sub { margin-top: 2px; font-size: 12px; }
+  .title-wrap { gap: 6px; }
+  .menu-item { font-size: 17px; padding: 3px 10px 3px 30px; }
+  .menu-item.play { font-size: 19px; }
+  .menu-item small { font-size: 11px; }
+  .title-foot { display: none; }
   .hud-skill { width: 36px; height: 36px; }
-  .card { min-height: 160px; padding: 8px 6px; }
+  .hud-skills { bottom: 6px; }
+  .hud-me { min-width: 200px; }
+  .hud-timer { font-size: 22px; }
+  .card { min-height: 0; padding: 6px 4px; gap: 2px; }
+  .card img.ico { width: 30px; height: 30px; margin: 0; }
+  .card-body { font-size: 11px; }
+  .inter-side { font-size: 12px; }
+  .side-head .portrait { width: 40px; height: auto; }
+  h2 { font-size: 19px; }
+  .pick { padding: 2px; }
+  .pick .portrait { width: 48px; height: auto; }
+  .line-detail { padding: 6px 8px; gap: 4px; }
+  .ld-portrait { width: 70px; }
+  .ld-portrait .portrait { width: 64px; height: auto; }
+  .room-code { font-size: 32px; }
+  .slot { min-height: 80px; }
 }

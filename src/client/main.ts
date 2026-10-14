@@ -43,13 +43,17 @@ class App {
   start() {
     initInput(this.canvas);
     this.applySettings();
-    const unlock = () => { initAudio(); setVolume(this.profile.settings.volume, this.profile.settings.music); playMusic(this.where === 'game' ? 'battle' : 'shop'); };
+    const unlock = () => { initAudio(); setVolume(this.profile.settings.volume, this.profile.settings.music); };
+    playMusic('shop');
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
     window.addEventListener('keydown', (e) => {
       if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && this.where === 'game' && this.solo && this.pub?.phase === 'wave') this.setPause(!this.paused);
     });
     window.addEventListener('beforeunload', (e) => { if (this.where === 'game' && !this.solo) e.preventDefault(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.where === 'game' && this.solo && this.pub?.phase === 'wave' && !this.paused) this.setPause(true);
+    });
     this.menu.start();
     this.title();
     void preload(ALL_DEX);
@@ -69,6 +73,7 @@ class App {
 
   title() {
     this.where = 'menu';
+    if (location.search.includes('room=')) history.replaceState(null, '', location.pathname);
     this.screen.classList.remove('hidden');
     titleScreen(this.screen, this.profile, {
       solo: () => this.select(),
@@ -208,7 +213,7 @@ class App {
 
   private onPublic(s: PublicState) {
     this.pub = s;
-    if (this.view) this.view.pub = s;
+    if (this.view) { this.view.pub = s; this.view.biome = s.biome; }
     this.hud?.update(this.me, s, this.you);
     if (!this.inter) return;
     if (s.phase === 'inter' && !this.inter.visible) {

@@ -23,6 +23,7 @@ export function initAudio() {
   noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
   const d = noiseBuf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  if (wanted) playMusic(wanted as keyof typeof TRACKS);
 }
 
 export function setVolume(sfx: number, music: number) {
@@ -139,11 +140,15 @@ let current: string | null = null;
 let step = 0;
 let nextAt = 0;
 
+let wanted: string | null = null;
+
 export function playMusic(name: keyof typeof TRACKS | null) {
+  wanted = name;
+  if (!ctx) return;
   if (current === name) return;
   current = name;
   window.clearInterval(musicTimer);
-  if (!name || !ctx) return;
+  if (!name) return;
   step = 0;
   nextAt = ctx.currentTime + 0.1;
   musicTimer = window.setInterval(schedule, 50);

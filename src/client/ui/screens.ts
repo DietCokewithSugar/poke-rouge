@@ -125,6 +125,12 @@ export function selectScreen(root: HTMLElement, p: Profile, onStart: (l: LineId)
 
 // ---------------------------------------------------------------- 大厅
 
+function copy(text: string, ok: string) {
+  const done = () => toast(ok);
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, () => prompt('复制下面的内容：', text));
+  else prompt('复制下面的内容：', text);
+}
+
 export interface LobbyActions { pick(l: LineId): void; ready(on: boolean): void; start(): void; leave(): void }
 
 export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: number, players: LobbyPlayer[], a: LobbyActions) {
@@ -147,7 +153,8 @@ export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: nu
     h('div', { class: 'row between' },
       h('div', null, h('div', { class: 'muted small' }, '房间号'), h('div', { class: 'room-code' }, code)),
       h('div', { class: 'row' },
-        h('button', { class: 'btn small', onclick: () => { void navigator.clipboard?.writeText(code).then(() => toast('房间号已复制')); } }, '复制房间号'),
+        h('button', { class: 'btn small', onclick: () => copy(code, '房间号已复制') }, '复制房间号'),
+        h('button', { class: 'btn small', onclick: () => copy(`${location.origin}${location.pathname}?room=${code}`, '邀请链接已复制，发给朋友直接打开即可加入') }, '复制邀请链接'),
         h('button', { class: 'btn small ghost', onclick: a.leave }, '离开房间'),
       ),
     ),

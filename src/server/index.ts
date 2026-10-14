@@ -71,7 +71,10 @@ wss.on('connection', (ws: WebSocket) => {
   const c: Client = { ws, room: null, id: 0, alive: true, budget: 200 };
   const conn = {
     send(data: string | ArrayBuffer) {
-      if (ws.readyState === ws.OPEN) ws.send(data);
+      if (ws.readyState !== ws.OPEN) return;
+      // 网络太慢时丢弃快照（下一帧会带上最新状态），避免积压
+      if (typeof data !== 'string' && ws.bufferedAmount > 512 * 1024) return;
+      ws.send(data);
     },
   };
   const fail = (msg: string) => conn.send(JSON.stringify({ t: 'error', msg, fatal: true } satisfies S2C));
