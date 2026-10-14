@@ -109,10 +109,15 @@ export function selectScreen(root: HTMLElement, p: Profile, onStart: (l: LineId)
   const render = () => {
     clear(root);
     root.appendChild(h('div', { class: 'box select' },
-      h('div', { class: 'row between' }, h('h2', null, '选择你的伙伴'), h('button', { class: 'btn small ghost', onclick: onBack }, '返回')),
+      h('div', { class: 'row between' },
+        h('h2', null, '选择你的伙伴'),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn small ghost', onclick: onBack }, '返回'),
+          h('button', { class: 'btn gold', onclick: () => { p.lastLine = sel; saveProfile(p); sfx('wave'); onStart(sel); } }, `就决定是你了，${LINES[sel].name}！`),
+        ),
+      ),
       pickGrid(p, sel, (l) => { sel = l; render(); }),
       lineDetail(sel),
-      h('div', { class: 'row end' }, h('button', { class: 'btn gold big', onclick: () => { p.lastLine = sel; saveProfile(p); sfx('wave'); onStart(sel); } }, `就决定是你了，${LINES[sel].name}！`)),
     ));
   };
   render();

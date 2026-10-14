@@ -74,6 +74,7 @@ export class LocalTransport implements Transport {
   onClose: (reason: string) => void = () => {};
 
   constructor() {
+    if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __room: Room }).__room = this.room;
     const step = 1000 / TICK_RATE;
     this.timer = window.setInterval(() => {
       const now = performance.now();

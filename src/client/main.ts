@@ -316,7 +316,7 @@ class MenuScene {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const cw = Math.floor(window.innerWidth * dpr), ch = Math.floor(window.innerHeight * dpr);
     if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
-    const S = Math.max(1, Math.round(Math.min(ch / 290, cw / 430)));
+    const S = Math.max(1, Math.round(Math.min(ch / 330, cw / 560)));
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(1, 0, 0, 1, 0, 0);

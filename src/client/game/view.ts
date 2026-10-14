@@ -84,7 +84,7 @@ export class GameView {
     const cw = Math.floor(window.innerWidth * dpr), ch = Math.floor(window.innerHeight * dpr);
     this.canvas.width = cw;
     this.canvas.height = ch;
-    this.scale = Math.max(1, Math.round(Math.min(ch / 290, cw / 430)));
+    this.scale = Math.max(1, Math.round(Math.min(ch / 330, cw / 560)));
     this.viewW = Math.ceil(cw / this.scale);
     this.viewH = Math.ceil(ch / this.scale);
   };

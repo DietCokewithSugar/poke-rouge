@@ -278,7 +278,9 @@ export function rollShop(sim: GameSim, p: SimPlayer, keepLocked = true) {
   const s = p.shop;
   for (let i = 0; i < 4; i++) {
     if (keepLocked && s.locked[i] && s.offers[i]) continue;
-    s.offers[i] = rollOffer(sim, p);
+    let o = rollOffer(sim, p);
+    for (let tries = 0; tries < 6 && s.offers.some((x, j) => j !== i && x && x.id === o.id && (j < i || s.locked[j])); tries++) o = rollOffer(sim, p);
+    s.offers[i] = o;
     s.locked[i] = false;
   }
   // 保证皮卡丘迟早能买到雷之石
