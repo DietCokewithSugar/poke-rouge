@@ -1,7 +1,7 @@
 import { LINES, LINE_IDS, formOf, type LineId } from './pokemon';
 import { DIFFICULTY_IDS, type DifficultyId } from './difficulty';
 import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
-import { CONGESTED_BYTES, PeerSync, cullEvents, type Conn } from './netsync';
+import { PeerSync, cullEvents, type Conn } from './netsync';
 import { GameSim, TICK_RATE } from './sim/game';
 
 export type { Conn } from './netsync';
@@ -173,6 +173,10 @@ export class Room {
         return;
       case 'pos':
         if (this.sim && !this.paused) this.sim.setPlayerPos(id, +msg.x, +msg.y, !!msg.m, +msg.d);
+        if (msg.k !== undefined) m.sync.ack(+msg.k, performance.now());
+        return;
+      case 'ack':
+        m.sync.ack(+msg.k, performance.now());
         return;
       case 'view':
         m.sync.setView(+msg.w, +msg.h);
@@ -236,25 +240,33 @@ export class Room {
       }
     }
     if (sim.phase !== this.lastPhase || this.tick % STATE_EVERY === 0) {
+      const force = sim.phase !== this.lastPhase;
       this.lastPhase = sim.phase;
-      this.sendPublic();
+      this.sendPublic(force);
     }
     if (sim.phase === 'wave' && this.tick % STATE_EVERY === 3) for (const p of sim.players) sim.dirty.add(p.id);
     this.flushPrivate();
     if (sim.phase === 'over' || sim.phase === 'won') this.endGame();
   }
 
-  /** 联机：按这位玩家的视野裁剪快照与特效；网络拥堵时快照减半、只发关键事件 */
+  /** 联机：按这位玩家的视野裁剪快照与特效；网络拥堵时降低快照频率、只发关键事件 */
   private sendFrame(sim: GameSim, id: number, m: Member, ev: ReturnType<GameSim['flushEvents']>, force: boolean) {
     const box = m.sync.box(sim.players.find((p) => p.id === id));
-    const congested = (m.conn.buffered?.() ?? 0) > CONGESTED_BYTES;
-    if (force || !congested || this.tick % (SNAPSHOT_EVERY * 2) === 0) m.conn.send(encodeSnapshot(sim, this.tick, box), !force);
-    const list = cullEvents(ev, box, congested);
+    const now = performance.now();
+    const level = m.sync.congestion(now, m.conn.buffered?.() ?? 0);
+    if (force || m.sync.shouldSend(this.tick, level)) {
+      m.conn.send(encodeSnapshot(sim, this.tick, box), !force);
+      m.sync.markSent(this.tick, now);
+    }
+    const list = cullEvents(ev, box, level > 0);
     if (list.length) m.conn.send(JSON.stringify({ t: 'ev', e: list } satisfies S2C));
   }
 
-  private sendPublic() {
-    if (this.sim) this.broadcast({ t: 'st', s: this.sim.publicState() });
+  /** force：阶段变化等必须马上发的情况；平时堵塞的连接只发三分之一 */
+  private sendPublic(force = true) {
+    if (!this.sim) return;
+    const msg = JSON.stringify({ t: 'st', s: this.sim.publicState() } satisfies S2C);
+    for (const m of this.members.values()) if (force || m.sync.level < 2 || this.tick % (STATE_EVERY * 3) === 0) m.conn.send(msg);
   }
 
   private flushPrivate() {

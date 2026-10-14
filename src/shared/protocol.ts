@@ -7,7 +7,7 @@ import type { SavedBuild } from './pvp/build';
 import type { PvpMatchResult, PvpMode } from './pvp/sim';
 import { formOf } from './pokemon';
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const MAX_PLAYERS = 4;
 
 // ---------------------------------------------------------------- 对战
@@ -50,7 +50,9 @@ export type C2S =
   | { t: 'browse'; on: boolean }
   | { t: 'stats' }
   | { t: 'debug'; cmd: 'down' | 'endWave' | 'xp' }
-  | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number }
+  /** k：客户端收到的最新快照编号（顺便确认收到，服务器据此估计网络排队） */
+  | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number; k?: number }
+  | { t: 'ack'; k: number }
   /** 客户端画面能看到的世界范围（宽高，世界像素），服务器据此裁剪快照 */
   | { t: 'view'; w: number; h: number }
   | { t: 'ping'; at: number }

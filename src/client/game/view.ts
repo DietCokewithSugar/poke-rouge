@@ -55,6 +55,10 @@ export class GameView {
   private late: number[] = [];
   /** 画面尺寸变化时告诉服务器（服务器只发视野附近的数据） */
   onView: (w: number, h: number) => void = () => {};
+  /** 收到的最新快照编号：随位置一起发回服务器，没有位置要发时单独确认 */
+  lastTick = -1;
+  sendAck: (k: number) => void = () => {};
+  private lastAck = 0;
   private enemyVis = new Map<number, EnemyVis>();
   private playerVis = new Map<number, PlayerVis>();
   private corpses: Corpse[] = [];
@@ -123,6 +127,7 @@ export class GameView {
 
   onSnapshot(buf: ArrayBuffer) {
     const s = decodeSnapshot(buf);
+    this.lastTick = Math.max(this.lastTick, s.tick);
     const now = performance.now();
     const serverMs = (s.tick * 1000) / 30;
     const off = now - serverMs;
@@ -392,7 +397,11 @@ export class GameView {
     }
     if (inWave && !down && this.local.synced && now - this.lastSend >= SEND_EVERY) {
       this.lastSend = now;
+      this.lastAck = now;
       this.send(this.local.x, this.local.y, this.local.moving, this.local.dir);
+    } else if (this.lastTick >= 0 && now - this.lastAck >= 100 && now - this.lastSend >= 100) {
+      this.lastAck = now;
+      this.sendAck(this.lastTick);
     }
   }
 

@@ -20,6 +20,14 @@ const MARGIN = 80;
 /** 待发送数据超过这个量就认为拥堵：快照减半、只发关键事件 */
 export const CONGESTED_BYTES = 8 * 1024;
 
+/**
+ * 只看服务器进程里待发送的数据量不够：数据一旦交给操作系统，慢线路上的积压会堆在内核的 TCP 发送缓冲区里
+ * （Linux 会自动扩大到几 MB），程序里看不到。所以客户端会确认收到的快照编号，服务器用「发出 → 确认」的往返时间
+ * 减去最近的最小往返时间，估计线路上排了多少毫秒的队，排队多了就主动少发。
+ */
+export const QUEUE_SLOW_MS = 150;
+export const QUEUE_JAM_MS = 500;
+
 /** 纯视觉事件：[位置 x 的下标, y 的下标, 额外余量] */
 const COSMETIC: Record<string, [number, number, number]> = {
   h: [2, 3, 40], fx: [2, 3, 240], boom: [1, 2, 120], die: [2, 3, 40], mark: [1, 2, 40], txt: [1, 2, 60],
@@ -51,6 +59,52 @@ export class PeerSync {
   view = { w: 720, h: 420 };
   private lastStatic = '';
   private lastDyn = '';
+  private sentAt = new Map<number, number>();
+  private rtt = 0;
+  private minRtt = Infinity;
+  private lastAckAt = 0;
+
+  /** 记录快照的发出时间 */
+  markSent(tick: number, now: number) {
+    this.sentAt.set(tick, now);
+    if (this.sentAt.size > 240) this.sentAt.delete(this.sentAt.keys().next().value!);
+  }
+
+  /** 客户端确认收到了编号为 k 的快照 */
+  ack(k: number, now: number) {
+    const t0 = this.sentAt.get(k);
+    if (t0 === undefined) return;
+    for (const t of this.sentAt.keys()) { if (t > k) break; this.sentAt.delete(t); }
+    this.rtt = now - t0;
+    // 最小往返时间缓慢上浮（每秒 2ms），线路长期变慢时也能慢慢适应
+    const drift = this.lastAckAt ? ((now - this.lastAckAt) / 1000) * 2 : 0;
+    this.minRtt = Math.min(this.minRtt + drift, this.rtt);
+    this.lastAckAt = now;
+  }
+
+  /** 线路上排队的估计（毫秒）；还没收到过确认（旧版客户端）时为 0 */
+  queueMs(now: number) {
+    if (!this.lastAckAt) return 0;
+    let oldest = Infinity;
+    for (const t of this.sentAt.values()) { oldest = t; break; }
+    const pending = oldest === Infinity ? 0 : now - oldest;
+    return Math.max(0, Math.max(this.rtt, pending) - this.minRtt);
+  }
+
+  /** 0 正常 · 1 变慢（快照降到 7.5 次/秒、不发视觉事件） · 2 堵塞（快照 3 次/秒） */
+  congestion(now: number, buffered: number) {
+    const q = this.queueMs(now);
+    this.level = q > QUEUE_JAM_MS || buffered > CONGESTED_BYTES * 4 ? 2 : q > QUEUE_SLOW_MS || buffered > CONGESTED_BYTES ? 1 : 0;
+    return this.level;
+  }
+
+  /** 最近一次估计的拥堵程度 */
+  level = 0;
+
+  /** 这一帧要不要发快照（拥堵时降低频率，保证还能收到确认） */
+  shouldSend(tick: number, level: number) {
+    return level === 0 || tick % (level === 1 ? 4 : 10) === 0;
+  }
 
   setView(w: number, h: number) {
     if (!Number.isFinite(w) || !Number.isFinite(h)) return;

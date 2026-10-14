@@ -5,7 +5,7 @@
 import { formOf } from '../pokemon';
 import { encodeSnapshot, type C2S, type PvpRatingChange, type PvpSeatInfo, type S2C } from '../protocol';
 import { Room } from '../room';
-import { CONGESTED_BYTES, PeerSync, cullEvents, type Conn } from '../netsync';
+import { PeerSync, cullEvents, type Conn } from '../netsync';
 import { TICK_RATE } from '../sim/game';
 import type { SavedBuild } from './build';
 import { PvpSim, type PvpMatchResult, type PvpMode } from './sim';
@@ -86,11 +86,15 @@ export class PvpRoom {
     const phaseChanged = sim.phase !== this.lastPhase;
     if (this.tick % SNAPSHOT_EVERY === 0 || phaseChanged) {
       const ev = sim.flushEvents();
+      const now = performance.now();
       for (const s of this.humans()) {
         const box = this.local ? null : s.sync!.box(sim.players.find((p) => p.id === s.id));
-        const congested = (s.conn!.buffered?.() ?? 0) > CONGESTED_BYTES;
-        if (phaseChanged || !congested || this.tick % (SNAPSHOT_EVERY * 2) === 0) s.conn!.send(encodeSnapshot(sim, this.tick, box), !phaseChanged);
-        const list = cullEvents(ev, box, congested);
+        const level = this.local ? 0 : s.sync!.congestion(now, s.conn!.buffered?.() ?? 0);
+        if (phaseChanged || s.sync!.shouldSend(this.tick, level)) {
+          s.conn!.send(encodeSnapshot(sim, this.tick, box), !phaseChanged);
+          s.sync!.markSent(this.tick, now);
+        }
+        const list = cullEvents(ev, box, level > 0);
         if (list.length) s.conn!.send(JSON.stringify({ t: 'ev', e: list } satisfies S2C));
       }
     }
@@ -121,6 +125,10 @@ export class PvpRoom {
     switch (msg.t) {
       case 'pos':
         this.sim.setPlayerPos(id, +msg.x, +msg.y, !!msg.m, +msg.d);
+        if (msg.k !== undefined) s.sync?.ack(+msg.k, performance.now());
+        return;
+      case 'ack':
+        s.sync?.ack(+msg.k, performance.now());
         return;
       case 'ping':
         this.send(s.conn, { t: 'pong', at: msg.at });

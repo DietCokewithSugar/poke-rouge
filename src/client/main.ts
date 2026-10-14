@@ -108,10 +108,11 @@ class App {
     portrait.addEventListener('change', onOrient);
     $('#rotate-fs').addEventListener('click', () => mobileFullscreen());
     this.menu.start();
+    // 先读地址栏参数：标题界面会把 ?room= 邀请参数清掉
+    const params = new URLSearchParams(location.search);
     this.ensureWs();
     this.title();
     void preload(ALL_DEX);
-    const params = new URLSearchParams(location.search);
     if (params.has('debug')) Object.assign(window, { __send: (m: C2S) => this.send(m), __icons: { iconUrl, ITEMS, skillIconUrl, SKILLS }, __app: this });
     const room = params.get('room');
     if (room && /^\d{5}$/.test(room)) this.joinRoom(room);
@@ -472,7 +473,8 @@ class App {
       this.send({ t: 'ping', at: performance.now() });
       this.pingTimer = window.setInterval(() => this.send({ t: 'ping', at: performance.now() }), 2000);
     }
-    this.view.send = (x, y, moving, dir) => this.send({ t: 'pos', x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, m: moving ? 1 : 0, d: Math.round(dir * 100) / 100 });
+    this.view.send = (x, y, moving, dir) => this.send({ t: 'pos', x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, m: moving ? 1 : 0, d: Math.round(dir * 100) / 100, k: this.view?.lastTick });
+    this.view.sendAck = (k) => { if (this.t === this.ws) this.send({ t: 'ack', k }); };
     this.view.canMove = () => !this.paused && !(this.inter?.visible ?? false);
     if (pvpSeats) {
       if (this.pvpMatch) this.pvpMatch.seats = pvpSeats;
