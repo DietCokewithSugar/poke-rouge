@@ -629,6 +629,8 @@ class App {
     this.townHud.refresh();
     this.townHud.setRejoin(this.session);
     this.townHud.show(true);
+    // 进建筑时收起了互动按钮；出来还站在门口（或 NPC 身边）就要重新显示
+    this.town.syncSpot();
     setInputEnabled(true);
     playMusic('town');
     hideTip();
