@@ -17,6 +17,8 @@ export interface PadHooks {
   pause(): void;
   /** 没有界面打开时按 A：在真新镇里和建筑 / NPC 互动 */
   action?(): void;
+  /** 没有界面打开时按 Y：真新镇的快速前往 */
+  menu?(): void;
 }
 
 const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, START: 9, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
@@ -106,6 +108,7 @@ function poll(now: number) {
   } else {
     setFocus(null);
     if (down(BTN.A)) hooks.action?.();
+    if (down(BTN.Y)) hooks.menu?.();
     if (down(BTN.START)) {
       const hud = document.getElementById('hud');
       if (!(hud && clickKey(hud, 'start'))) hooks.pause();

@@ -86,7 +86,7 @@ export class Hud {
   /** 左上角：训练家 + 宝可梦 */
   setTrainer(trainer: string, name: string) {
     clear(this.me.trainer);
-    this.me.trainer.appendChild(trainerPortrait(trainer, 2, 'tportrait'));
+    this.me.trainer.appendChild(trainerPortrait(trainer, 1, 'tportrait'));
     this.me.trainer.title = name;
   }
 

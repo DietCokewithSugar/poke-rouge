@@ -1004,7 +1004,7 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 }
 .tcard:hover { background: rgba(255, 255, 255, .08); }
 .tcard.on { border-color: var(--gold); background: rgba(255, 210, 63, .12); }
-.tcard.locked .tfull { filter: brightness(0) opacity(.5); }
+.tcard.locked .tfull, .tcard.locked .tportrait { filter: brightness(0) opacity(.5); }
 .tcard.locked .tcard-name { color: var(--muted); }
 .tcard-sprite { flex: none; display: flex; align-items: flex-end; justify-content: center; }
 .tcard-body { min-width: 0; display: grid; gap: 0.0625rem; text-align: center; }
@@ -1139,7 +1139,7 @@ body.pad .th-key::after { content: var(--g-a); }
 @media (pointer: coarse) { .th-key::after { content: '点我'; } }
 
 /* 战斗 HUD：训练家 + 宝可梦 */
-.hud-trainer { width: 2rem; display: flex; justify-content: center; align-items: center; }
+.hud-trainer { width: 2.25rem; display: flex; justify-content: center; align-items: center; background: rgba(0, 0, 0, .25); border-radius: 0.375rem; overflow: hidden; }
 .hud-pause.icon { padding: 0.3125rem; }
 
 /* 大厅：训练家 + 伙伴 */
@@ -1160,3 +1160,9 @@ body.pad .th-key::after { content: var(--g-a); }
 .card .lock { display: inline-flex; align-items: center; gap: 0.1875rem; }
 .card .lock img.uico { width: 0.75rem; height: 0.75rem; }
 .btn.undo .undo-head { display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem; }
+.th-quick { position: absolute; right: 0.625rem; bottom: 0.625rem; display: flex; gap: 0.375rem; }
+.th-quick .btn { position: relative; }
+.th-num { position: absolute; top: -0.375rem; right: -0.25rem; font-style: normal; font-size: 0.625rem; line-height: 1; padding: 0.0625rem 0.1875rem; border-radius: 0.25rem; background: #101830; color: var(--gold); text-shadow: none; }
+body.pad .th-num, .th-quick .btn:not(:hover) .th-num { opacity: .8; }
+@media (pointer: coarse) { .th-num { display: none; } }
+.box.quick-menu { width: 24rem; }

@@ -27,7 +27,7 @@ import { $, clear, toast } from './ui/dom';
 import { Hud } from './ui/hud';
 import { Intermission } from './ui/intermission';
 import { BrowseScreen, creditsScreen, lobbyScreen, pauseScreen, settingsScreen } from './ui/screens';
-import { TownHud, homeScreen, karpDialog, labHub, npcDialog, onlineText, partnerDex, partnerModal, routeScreen, setupScreen, titleScreen } from './ui/town';
+import { QUICK, TownHud, homeScreen, karpDialog, labHub, npcDialog, onlineText, partnerDex, partnerModal, quickMenu, routeScreen, setupScreen, titleScreen } from './ui/town';
 import { resultsScreen } from './ui/results';
 import { PvpScreen, pvpResultsScreen } from './ui/pvp';
 import { TownScene } from './town';
@@ -112,6 +112,7 @@ class App {
         else if (this.where === 'town') this.openPlace('settings');
       },
       action: () => { if (this.where === 'town') this.town?.interact(); },
+      menu: () => { if (this.where === 'town') this.openPlace('quick'); },
     });
     this.applySettings();
     const unlock = () => { initAudio(); setVolume(this.profile.settings.volume, this.profile.settings.music); };
@@ -123,6 +124,13 @@ class App {
       if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && this.where === 'game' && this.solo && this.pub?.phase === 'wave') this.setPause(!this.paused);
     });
     window.addEventListener('beforeunload', (e) => { if (this.where === 'game' && !this.solo) e.preventDefault(); });
+    // 真新镇里的快捷键：1~5 直接打开对应的地方，M 打开快速前往
+    window.addEventListener('keydown', (e) => {
+      if (this.where !== 'town' || (e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= QUICK.length) this.openPlace(QUICK[n - 1].id);
+      else if (e.code === 'KeyM') this.openPlace('quick');
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.where === 'game' && this.solo && this.pub?.phase === 'wave' && !this.paused) this.setPause(true);
     });
@@ -302,6 +310,7 @@ class App {
         help: () => { this.openPlace('help'); },
         title: () => { this.saveTownPos(); this.title(); },
         interact: () => this.town?.interact(),
+        go: (id) => this.openPlace(id),
       });
     }
     this.townHud.refresh();
@@ -334,10 +343,10 @@ class App {
   }
 
   /** 进入建筑 / 和 NPC 说话：镇上的画面留在背后 */
-  openPlace(id: PlaceId | 'settings' | 'help', tab = 0) {
+  openPlace(id: PlaceId | 'settings' | 'help' | 'quick', tab = 0) {
     if (this.where !== 'town' && this.where !== 'place') return;
     this.where = 'place';
-    if (id !== 'settings' && id !== 'help') this.place = id;
+    if (id !== 'settings' && id !== 'help' && id !== 'quick') this.place = id;
     this.backdrop();
     this.townHud?.setSpot(null);
     this.screen.classList.remove('hidden');
@@ -357,6 +366,16 @@ class App {
         break;
       }
       case 'karp': karpDialog(this.screen, p, (bought) => { if (bought) changed(); back(); }); break;
+      case 'mom':
+        npcDialog(this.screen, '妈妈', `${this.name()}，出门冒险要注意安全哦。累了就回家，我会让${LINES[p.partner]?.name ?? '宝可梦'}好好休息的。`, [['知道了', back]]);
+        break;
+      case 'rival':
+        npcDialog(this.screen, '小茂的家', '小茂的姐姐：小茂说他要去对战场修行，成为最强的训练家。你要不要也去看看？', [
+          ['去对战场', () => this.pvpCenter(), 'gold'],
+          ['好的', back, 'ghost'],
+        ]);
+        break;
+      case 'quick': quickMenu(this.screen, (to) => { this.where = 'town'; this.openPlace(to); }, back); break;
       case 'sign':
         npcDialog(this.screen, '告示牌', '真新镇 —— 纯白的开始之镇。北边是 1 号道路，从那里出发冒险；宝可梦中心可以和朋友联机，对战场里可以和其他训练家对战。', [['好的', back]]);
         break;

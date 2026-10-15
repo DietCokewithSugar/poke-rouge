@@ -11,7 +11,7 @@ import { TRAINERS, TRAINER_LIST, trainerOf } from '../../shared/trainers';
 import { TYPE_NAME, type PType } from '../../shared/types';
 import type { DifficultyId } from '../../shared/difficulty';
 import { sfx } from '../audio';
-import type { Spot } from '../gfx/town';
+import type { PlaceId, Spot } from '../gfx/town';
 import { trainerFull, trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
 import { iconImg } from '../gfx/icons';
@@ -65,7 +65,7 @@ export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stat
 export function trainerCard(id: string, opts: { on?: boolean; locked?: boolean; onClick?: () => void; foot?: Node | string | null; compact?: boolean } = {}) {
   const t = TRAINERS[id];
   const el = h('button', { class: `tcard ${opts.on ? 'on' : ''} ${opts.locked ? 'locked' : ''} ${opts.compact ? 'compact' : ''}`, onclick: opts.onClick },
-    h('div', { class: 'tcard-sprite' }, trainerFull(id, opts.compact ? 2 : 3)),
+    h('div', { class: 'tcard-sprite' }, opts.compact ? trainerPortrait(id, 1) : trainerFull(id, 1)),
     h('div', { class: 'tcard-body' },
       h('div', { class: 'tcard-name' }, t.name, h('span', { class: 'tcard-title' }, t.title)),
       h('div', { class: 'tcard-bonus small' }, trainerBonus(id).map((s) => h('div', { class: /-\d/.test(s) ? 'neg' : 'pos' }, s))),
@@ -122,7 +122,7 @@ export function setupScreen(root: HTMLElement, p: Profile, onDone: (trainer: str
         h('div', { class: 'setup-col setup-name' },
           h('h3', null, '3. 你的名字'),
           input,
-          h('div', { class: 'setup-preview' }, trainerFull(trainer, 4), portraitSlot(L.forms[0].dex, 3, 'setup-mon')),
+          h('div', { class: 'setup-preview' }, trainerFull(trainer, 2), portraitSlot(L.forms[0].dex, 3, 'setup-mon')),
           h('button', { class: 'btn gold big go', 'data-key': 'y', onclick: done }, '出发！'),
         ),
       ),
@@ -310,7 +310,7 @@ export function routeScreen(root: HTMLElement, p: Profile, a: RouteActions) {
         iconBtn('back', '回到真新镇', a.back, { attrs: { 'data-back': '1' }, cls: 'ghost small', text: '回镇上' }),
       ),
       h('div', { class: 'route-team' },
-        h('div', { class: 'route-who' }, trainerFull(p.trainer, 3), h('div', null, h('b', null, p.name || TRAINERS[p.trainer].name), h('div', { class: 'small muted' }, TRAINERS[p.trainer].title), h('div', { class: 'small pos' }, trainerBonus(p.trainer).join(' · ')))),
+        h('div', { class: 'route-who' }, trainerFull(p.trainer, 1), h('div', null, h('b', null, p.name || TRAINERS[p.trainer].name), h('div', { class: 'small muted' }, TRAINERS[p.trainer].title), h('div', { class: 'small pos' }, trainerBonus(p.trainer).join(' · ')))),
         h('div', { class: 'route-mon' }, portraitSlot(L.forms[0].dex, 3, 'route-portrait'),
           h('div', null, h('b', null, L.name), h('div', null, ...L.forms[0].types.map(typeBadge)), h('div', { class: 'small muted' }, `技能栏 ${L.forms[0].slots} 个 · ${L.forms.map((f) => f.name).join(' → ')}`)),
           iconBtn('swap', '换伙伴', () => { sfx('click'); a.partner(); }, { cls: 'small', text: '换伙伴' })),
@@ -348,9 +348,31 @@ export function karpDialog(root: HTMLElement, p: Profile, done: (bought: boolean
   ]);
 }
 
+// ---------------------------------------------------------------- 快速前往
+
+/** 不用走到建筑门口也能直接打开的地方（数字键 1~5） */
+export const QUICK: { id: PlaceId; icon: string; name: string; hint: string }[] = [
+  { id: 'route', icon: 'sign', name: '冒险', hint: '1号道路 · 带着伙伴出发' },
+  { id: 'center', icon: 'cross', name: '联机', hint: '宝可梦中心 · 和朋友一起冒险' },
+  { id: 'battle', icon: 'sword', name: '对战', hint: '对战场 · 排位赛与练习赛' },
+  { id: 'lab', icon: 'flask', name: '研究所', hint: '大木研究所 · 研究、图鉴、成就' },
+  { id: 'home', icon: 'home', name: '我的家', hint: '换训练家、换伙伴、改名' },
+];
+
+/** 快速前往（手柄 Y / 键盘 M） */
+export function quickMenu(root: HTMLElement, go: (id: PlaceId) => void, back: () => void) {
+  mount(root, h('div', { class: 'box quick-menu' },
+    h('div', { class: 'panel-head' }, h('h2', null, '快速前往'), iconBtn('close', '关闭', back, { attrs: { 'data-back': '1' }, cls: 'ghost small' })),
+    h('div', { class: 'menu-list' }, QUICK.map((q, i) => h('button', { class: `menu-item ${i === 0 ? 'play' : ''}`, onclick: () => go(q.id) },
+      h('span', { class: 'mi-ico' }, uiIcon(q.icon, 3)),
+      h('span', { class: 'mi-text' }, `${i + 1}. ${q.name}`, h('small', null, q.hint)),
+    ))),
+  ), 'quick');
+}
+
 // ---------------------------------------------------------------- 镇上的 HUD
 
-export interface TownHudActions { card(): void; settings(): void; help(): void; title(): void; interact(): void }
+export interface TownHudActions { card(): void; settings(): void; help(): void; title(): void; interact(): void; go(id: PlaceId): void }
 
 const WHERE_NAME: Record<string, string> = { town: '在真新镇', menu: '在标题界面', room: '在联机房间', game: '冒险中', pvp: '对战中' };
 
@@ -379,6 +401,11 @@ export class TownHud {
       this.onlineList,
       this.dust,
       this.prompt,
+      h('div', { class: 'th-quick' }, QUICK.map((q, i) => {
+        const b = iconBtn(q.icon, `${q.name}（${i + 1}）：${q.hint}`, () => { sfx('click'); a.go(q.id); }, { cls: 'small th-btn', text: q.name });
+        b.appendChild(h('i', { class: 'th-num' }, String(i + 1)));
+        return b;
+      })),
     );
     parent.appendChild(this.root);
     this.refresh();
@@ -392,7 +419,7 @@ export class TownHud {
     const p = this.p;
     clear(this.card);
     this.card.append(
-      h('div', { class: 'th-trainer' }, trainerPortrait(p.trainer, 2)),
+      h('div', { class: 'th-trainer' }, trainerPortrait(p.trainer, 1)),
       h('div', { class: 'th-info' },
         h('div', { class: 'th-name' }, p.name || TRAINERS[p.trainer].name),
         h('div', { class: 'th-title small muted' }, TRAINERS[p.trainer].title),
