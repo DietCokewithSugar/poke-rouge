@@ -23,8 +23,8 @@ import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
 import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
 import {
-  addOwned, applyRun, autoAssistUnlocked, badgeMeta, buildMon, isUnlocked, loadProfile, monKey, ownsMon, partnerOf, pvpIdentity, releaseFromParty, saveProfile,
-  unlockedLines, winGym, type Mon, type PartyMon, type Profile, type Settings,
+  PARTY_BONUS_TIER, addOwned, applyRun, autoAssistUnlocked, badgeMeta, buildMon, isUnlocked, loadProfile, monKey, notePvpBest, ownsMon, partnerOf, partyMax, pvpIdentity,
+  releaseFromParty, saveProfile, unlockedLines, winGym, type Mon, type PartyMon, type Profile, type Settings,
 } from './save';
 import { $, clear, h, toast } from './ui/dom';
 import { Hud } from './ui/hud';
@@ -220,6 +220,7 @@ class App {
       ws.send({ t: 'stats' });
       if (this.rejoinPending) { this.rejoinPending = false; this.rejoin(); }
       this.presence();
+      this.reportProgress();
       if (this.where === 'browse') ws.send({ t: 'browse', on: true });
       this.browser?.setStats(this.stats, true);
       if (this.pvpUi) { this.pvpUi.setConnected(true); for (const mode of PVP_MODE_IDS) this.requestBoard(mode); }
@@ -239,7 +240,8 @@ class App {
           if (this.town) this.townHud?.setOnline(this.town.online(), this.stats?.online);
           return;
         }
-        if (m.t === 'pvpBoard') { this.pvpUi?.setBoard(m); return; }
+        if (m.t === 'pvpBoard') { this.notePvpBest(m.me?.best); this.pvpUi?.setBoard(m); return; }
+        if (m.t === 'rankBoard') { this.pvpUi?.setRank(m); return; }
         if (m.t === 'pvpQueued') { this.pvpUi?.setQueued(m); return; }
         if (m.t === 'pvpCancelled') { this.pvpUi?.setQueued(null); return; }
         if (m.t === 'start' && m.pvp && this.t !== ws) { ws.send({ t: 'leave' }); return; }
@@ -270,6 +272,24 @@ class App {
       window.setTimeout(() => this.ensureWs(), delay);
     };
     return ws;
+  }
+
+  /** 把冒险的最好成绩和徽章数报给服务器（排行榜用；还没有成绩时不报） */
+  private reportProgress() {
+    const ws = this.ws, p = this.profile;
+    const badges = badgeCount(p);
+    if (!ws?.connected || !p.setup || (!p.bestRun && !badges)) return;
+    const id = pvpIdentity(p);
+    if (p.bestRun) ws.send({ t: 'runReport', ...id, name: this.name(), run: p.bestRun });
+    if (badges) ws.send({ t: 'gymReport', ...id, name: this.name(), badges, dex: partnerDex(p), shiny: p.partnerShiny || undefined });
+  }
+
+  /** 对战场的最高分：第一次达到超级球级时背包扩展 */
+  private notePvpBest(best: number | undefined) {
+    if (notePvpBest(this.profile, best)) {
+      sfx('achieve');
+      toast(`对战场达到${PARTY_BONUS_TIER.name}！背包扩展到 ${partyMax(this.profile)} 格`, 'gold', 5000);
+    }
   }
 
   private setSession(s: RoomSession | null) {
@@ -642,6 +662,7 @@ class App {
       practice: (mode, team) => this.pvpPractice(mode, team),
       release: (uid) => releaseFromParty(this.profile, uid),
       board: (mode) => { saveProfile(this.profile); this.requestBoard(mode); },
+      rank: (kind) => { this.reportProgress(); this.ws?.send({ t: 'rankBoard', kind, ...pvpIdentity(this.profile) }); },
       partner: (mon) => { this.setPartner(buildMon(mon.build)); this.profile.pvpPick = mon.uid; saveProfile(this.profile); },
       adventure: () => { this.pvpUi = null; this.where = 'place'; this.route(); },
       back: () => { saveProfile(this.profile); this.pvpUi = null; this.backToTown(); },
@@ -736,6 +757,7 @@ class App {
     const mine = res.players.filter((x) => x.owner === me!.owner);
     const reward = winGym(p, { gym: g.id, underdog: isUnderdog(team.map((m) => m.build), g), auto: me!.bot, flawless: mine.every((x) => x.alive) });
     this.townHud?.refresh();
+    if (reward.badge) this.reportProgress();
     const ceremony = () => {
       if (!reward.badge) { back(); return; }
       void badgeCeremony({
@@ -795,6 +817,7 @@ class App {
   private async endPvp(res: PvpMatchResult, you: number, rating: PvpRatingChange | null) {
     const match = this.pvpMatch;
     this.pvpMatch = null;
+    this.notePvpBest(rating?.record.best);
     const me = res.players.find((p) => p.id === you);
     const outcome = !me || res.winner < 0 ? 'draw' : res.winner === me.team ? 'win' : 'loss';
     const team = (match?.uids ?? []).map((u) => this.profile.party.find((m) => m.uid === u)).filter((m): m is PartyMon => !!m);
@@ -1193,6 +1216,7 @@ class App {
     if (this.ending) return;
     this.ending = true;
     const reward = summary ? applyRun(this.profile, summary) : null;
+    this.reportProgress();
     setInputEnabled(false);
     sfx(victory ? 'clear' : 'down');
     const waves = summary?.wavesCleared ?? this.pub?.wave ?? 0;

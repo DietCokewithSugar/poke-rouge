@@ -283,6 +283,9 @@ export class Room {
       case 'pvpQueue':
       case 'pvpCancel':
       case 'pvpBoard':
+      case 'runReport':
+      case 'gymReport':
+      case 'rankBoard':
       case 'presence':
       case 'tpos':
         return;

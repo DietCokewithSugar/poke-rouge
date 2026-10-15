@@ -5,6 +5,7 @@ import type { RunSummary } from './meta';
 import type { Command, Ev, GameSim, MeState, PublicState } from './sim/game';
 import type { SavedBuild } from './pvp/build';
 import type { PvpMatchResult, PvpMode } from './pvp/sim';
+import type { RankKind, RankRow, RunRecord } from './ranks';
 import { formOf } from './pokemon';
 
 export const PROTOCOL_VERSION = 7;
@@ -84,6 +85,11 @@ export type C2S =
   | { t: 'tpos'; x: number; y: number; d: number; m: 0 | 1 }
   | { t: 'pvpCancel' }
   | { t: 'pvpBoard'; mode: PvpMode; pid?: string; secret?: string }
+  /** 上报自己冒险的最好成绩（排行榜用，服务器只留最好的一次） */
+  | { t: 'runReport'; pid: string; secret: string; name: string; run: RunRecord }
+  /** 上报道馆徽章数；dex / shiny 为跟随的伙伴（排行榜上显示） */
+  | { t: 'gymReport'; pid: string; secret: string; name: string; badges: number; dex: number; shiny?: boolean }
+  | { t: 'rankBoard'; kind: RankKind; pid?: string; secret?: string }
   | Command;
 
 export type S2C =
@@ -109,6 +115,8 @@ export type S2C =
   | { t: 'pvpQueued'; mode: PvpMode; wait: number; range: number; searching: number; botIn: number }
   | { t: 'pvpCancelled' }
   | { t: 'pvpBoard'; mode: PvpMode; rows: PvpBoardRow[]; me: PvpRecord | null; players: number; history: PvpHistory[] }
+  /** 冒险 / 道馆排行榜；me 为自己（不在前 50 名时也有） */
+  | { t: 'rankBoard'; kind: RankKind; rows: RankRow[]; me: RankRow | null; players: number }
   | { t: 'pvpEnd'; result: PvpMatchResult; you: number; rating: PvpRatingChange | null }
   | { t: 'town'; you: number; peers: TownPeer[] };
 

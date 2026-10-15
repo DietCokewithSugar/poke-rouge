@@ -211,6 +211,9 @@ wss.on('connection', (ws: WebSocket) => {
       return;
     }
     if (msg.t === 'pvpBoard') { sendJson(c, pvp.board(msg.mode, msg.pid, msg.secret)); return; }
+    if (msg.t === 'rankBoard') { sendJson(c, pvp.rankBoard(msg.kind, msg.pid, msg.secret)); return; }
+    if (msg.t === 'runReport') { pvp.reportRun(msg); return; }
+    if (msg.t === 'gymReport') { pvp.reportGym(msg); return; }
     if (msg.t === 'pvpCancel') { if (pvp.cancel(c)) sendJson(c, { t: 'pvpCancelled' }); return; }
     if (msg.t === 'pvpQueue') {
       if (c.room) return fail('请先离开当前房间');
