@@ -291,7 +291,7 @@ export class PvpScreen {
         if (!m) tip(el, () => h('div', { class: 'info small' }, '背包里不够三只时，AI 会借给你一只比队伍平均低 2 级的宝可梦'));
         return el;
       }),
-      M.team === 1 ? h('div', { class: 'small muted grow pvp-team-note' }, '团战每位训练家派出 1 只') : null,
+      M.team === 1 ? h('div', { class: 'small muted grow pvp-team-note' }, '团战每人派出 1 只') : null,
       autoBtn,
     );
 
@@ -604,7 +604,7 @@ export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: nu
       h('div', { class: 'r-col' }, hero, tiles),
       h('div', { class: 'r-col' }, section('两队剩余 HP', hpChart(res, myTeam))))
     : tab === 1
-      ? h('div', { class: 'r-full' }, section('计分板', scoreboard(res, you, myTeam, seats)))
+      ? h('div', { class: 'r-full' }, h('div', { class: 'r-section' }, scoreboard(res, you, myTeam, seats)))
       : h('div', { class: 'r-grid' },
         h('div', { class: 'r-col' }, section(multi ? '技能伤害' : '我的技能伤害', unitTabs, skillBars(shown))),
         h('div', { class: 'r-col' }, section('击倒记录', feedList(res, myTeam, feedPage, (n) => again(tab, n)))));

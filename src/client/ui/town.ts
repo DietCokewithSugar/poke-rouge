@@ -316,6 +316,7 @@ export function routeScreen(root: HTMLElement, p: Profile, a: RouteActions) {
           iconBtn('swap', '换伙伴', () => { sfx('click'); a.partner(); }, { cls: 'small', text: '换伙伴' })),
       ),
       difficultyPicker(p, diff, (d) => { diff = d; render(); }),
+      h('p', { class: 'small muted' }, '一路上会有野生宝可梦乱入，击败它们，也许它们会崇拜你、成为新的伙伴。'),
       h('div', { class: 'row between route-foot' },
         assistToggle(p, render),
         h('button', { class: 'btn gold big go', 'data-key': 'y', onclick: () => { p.lastDifficulty = diff; saveProfile(p); sfx('wave'); a.go(diff); } }, `出发！`),

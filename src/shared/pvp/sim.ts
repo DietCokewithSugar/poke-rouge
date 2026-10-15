@@ -22,8 +22,8 @@ export const PVP_MODE_IDS: PvpMode[] = ['1v1', '4v4'];
  */
 export interface PvpModeDef { id: PvpMode; name: string; desc: string; size: number; team: number; revive: boolean; w: number; h: number; dur: number; ringMin: number }
 export const PVP_MODES: Record<PvpMode, PvpModeDef> = {
-  '1v1': { id: '1v1', name: '单挑 1v1', desc: '三只宝可梦同时上场 · 60 秒', size: 1, team: 3, revive: false, w: 600, h: 440, dur: 60, ringMin: 90 },
-  '4v4': { id: '4v4', name: '团战 4v4', desc: '四人组队，每人一只 · 可救援 · 60 秒', size: 4, team: 1, revive: true, w: 704, h: 528, dur: 60, ringMin: 110 },
+  '1v1': { id: '1v1', name: '单挑 1v1', desc: '三只同时上场 · 60 秒', size: 1, team: 3, revive: false, w: 600, h: 440, dur: 60, ringMin: 90 },
+  '4v4': { id: '4v4', name: '团战 4v4', desc: '每人一只 · 可救援 · 60 秒', size: 4, team: 1, revive: true, w: 704, h: 528, dur: 60, ringMin: 110 },
 };
 
 export const PVP_COUNTDOWN = 3;
