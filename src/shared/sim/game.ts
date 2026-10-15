@@ -119,6 +119,8 @@ export class GameSim {
   time = 0;
   phase: SimPhase = 'inter';
   wave = 0;
+  /** 逃跑结算时已经完成的波次；-1 表示按正常胜负计算 */
+  private fledWaves = -1;
   waveT = 0;
   waveDur = 60;
   interT = 0;
@@ -1092,8 +1094,19 @@ export class GameSim {
     };
   }
 
+  /**
+   * 放弃这一局（逃跑）。进行中的波次不算完成，商店里已经打完的波次算完成。
+   * 之后阶段变为结束，但不是通关。
+   */
+  forfeit() {
+    if (this.phase === 'won' || this.phase === 'over') return;
+    this.fledWaves = this.phase === 'inter' ? this.wave : Math.max(0, this.wave - 1);
+    if (this.phase === 'wave') this.logWave();
+    this.phase = 'over';
+  }
+
   summary(p: SimPlayer): RunSummary {
-    const wavesCleared = this.phase === 'won' ? TOTAL_WAVES : Math.max(0, this.wave - 1);
+    const wavesCleared = this.phase === 'won' ? TOTAL_WAVES : this.fledWaves >= 0 ? this.fledWaves : Math.max(0, this.wave - 1);
     const L = LINES[p.line];
     const typeDmg: Record<string, number> = {};
     for (const [id, v] of Object.entries(p.stats.skillDmg)) {
