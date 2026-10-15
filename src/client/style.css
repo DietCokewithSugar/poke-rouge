@@ -1285,8 +1285,8 @@ body.pad .th-num, .th-quick .btn:not(:hover) .th-num { opacity: .8; }
 /* 对战开场：VS */
 .vs { position: fixed; inset: 0; overflow: hidden; cursor: pointer; background: repeating-linear-gradient(115deg, #0c1226 0 0.75rem, #111a36 0.75rem 1.5rem); }
 .vs-side { position: absolute; top: 0; bottom: 0; width: 56%; display: flex; align-items: center; gap: 1.5rem; padding: 0 6%; transition: transform .35s cubic-bezier(.2, .9, .3, 1.2); }
-.vs-side.left { left: 0; background: linear-gradient(115deg, #1c3f9a 0%, #2f66d0 70%, transparent 70.2%); transform: translateX(-100%); }
-.vs-side.right { right: 0; flex-direction: row-reverse; text-align: right; background: linear-gradient(115deg, transparent 29.8%, #c83b3b 30%, #8e1f2a 100%); transform: translateX(100%); }
+.vs-side.left { left: 0; background: linear-gradient(115deg, #1c3f9a 0%, #2f66d0 81%, #f4f8ff 81.2%, #f4f8ff 82%, transparent 82.2%); transform: translateX(-100%); }
+.vs-side.right { right: 0; flex-direction: row-reverse; text-align: right; background: linear-gradient(115deg, transparent 17.8%, #f4f8ff 18%, #f4f8ff 18.8%, #c83b3b 19%, #8e1f2a 100%); transform: translateX(100%); }
 .vs.in .vs-side { transform: none; }
 .vs.out { opacity: 0; transition: opacity .26s; }
 .vs-art .tart { width: calc(var(--pw) * .85); height: calc(var(--ph) * .85); filter: drop-shadow(0.25rem 0.25rem 0 rgba(0, 0, 0, .4)); }

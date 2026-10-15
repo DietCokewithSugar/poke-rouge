@@ -13,7 +13,12 @@ let enabled = true;
 export function setTransitions(on: boolean) { enabled = on; }
 
 const wait = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
-const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+/** 让刚插入的元素先按初始样式算一遍，否则紧接着加上的 in 不会有过渡（直接跳到结束的样子） */
+function start(el: HTMLElement) {
+  void el.getBoundingClientRect();
+  el.classList.add('in');
+}
 
 function layer(): HTMLElement {
   let el = document.getElementById('fx');
@@ -45,8 +50,7 @@ export async function transition(kind: Cover, swap: () => void, o: { hold?: numb
   const el = coverEl(kind);
   layer().appendChild(el);
   try {
-    await frame();
-    el.classList.add('in');
+    start(el);
     if (kind === 'battle') sfx('wave');
     await wait(DUR[kind][0]);
     try { swap(); } catch (e) { console.error(e); }
@@ -83,8 +87,7 @@ export async function vsSplash(left: VsSide, right: VsSide, title: string) {
   const skipped = new Promise<void>((r) => { skip = r; });
   el.addEventListener('pointerdown', () => skip());
   layer().appendChild(el);
-  await frame();
-  el.classList.add('in');
+  start(el);
   sfx('boss');
   await Promise.race([wait(1750), skipped]);
   el.classList.add('out');
@@ -94,12 +97,16 @@ export async function vsSplash(left: VsSide, right: VsSide, title: string) {
 
 // ---------------------------------------------------------------- 地名牌与大字
 
-/** 火红叶绿风格的地名牌：从左上角滑下来，停一会儿再收回去（不挡操作） */
+/** 火红叶绿风格的地名牌：从上面滑下来，停一会儿再收回去（不挡操作）；正在过场时等画面揭开再出来 */
 export function placeSign(text: string, sub = '') {
   if (!enabled) return;
+  if (busy) {
+    const t = window.setInterval(() => { if (!busy) { window.clearInterval(t); placeSign(text, sub); } }, 50);
+    return;
+  }
   const el = h('div', { class: 'place-sign' }, h('b', null, text), sub ? h('small', null, sub) : null);
   layer().appendChild(el);
-  requestAnimationFrame(() => el.classList.add('in'));
+  start(el);
   window.setTimeout(() => el.classList.remove('in'), 2200);
   window.setTimeout(() => el.remove(), 2700);
 }
@@ -109,8 +116,7 @@ export async function bigBanner(text: string, sub: string, tone: 'win' | 'lose' 
   if (!enabled) return;
   const el = h('div', { class: `big-banner ${tone}` }, h('b', null, text), sub ? h('small', null, sub) : null);
   layer().appendChild(el);
-  await frame();
-  el.classList.add('in');
+  start(el);
   await wait(tone === 'lose' ? 1500 : 1300);
   el.classList.add('out');
   await wait(300);
