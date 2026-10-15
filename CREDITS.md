@@ -51,7 +51,15 @@
 ## 界面图标（UI icons）
 
 齿轮、声音、奖杯、硬币、星星、王冠、好友、精灵球等界面图标取自
-[JPTER78/pokesurvivor](https://github.com/JPTER78/pokesurvivor) 的 `js/ui/icons.js`（MIT），其余图标与训练家、真新镇为本项目程序绘制。
+[JPTER78/pokesurvivor](https://github.com/JPTER78/pokesurvivor) 的 `js/ui/icons.js`（MIT），其余界面图标为本项目绘制。
+
+## 真新镇与训练家（Town & trainers）
+
+- 真新镇的图块（含从常磐市搬来的宝可梦中心与道馆）以及训练家、NPC 的行走图取自《宝可梦 火红 / 叶绿》，
+  由 [pret/pokefirered](https://github.com/pret/pokefirered) 反编译项目整理的原版素材导入（`tools/build-town.mjs`、`tools/import-trainers.mjs`）；
+  原版素材的权利属于 Nintendo / Creatures Inc. / GAME FREAK，本项目仅作非营利粉丝作品使用。
+- 训练家立绘来自 [PokéRogue](https://github.com/pagefaultgames/pokerogue-assets)（pagefaultgames/pokerogue-assets），
+  按 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 使用（源自官方作品的部分以原权利人为准）。
 
 ## 字体（Font）
 
