@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { PvpBoardRow, PvpHistory, PvpRatingChange, PvpRecord, S2C } from '../shared/protocol';
 import { PROTOCOL_VERSION } from '../shared/protocol';
+import { GYMS } from '../shared/gyms';
+import { cleanRun, compareRuns, type RankKind, type RankRow, type RunRecord } from '../shared/ranks';
 import { Rng } from '../shared/rng';
 import { cleanMeta, cleanName, type Conn } from '../shared/room';
 import { NPC_NAMES, buildDex, fillTeam, generateTeam, npcTrainer, teamLevel, teamPower, validateBuild, validateTeam, type SavedBuild } from '../shared/pvp/build';
@@ -23,7 +25,14 @@ export interface PvpClient {
 }
 
 interface ModeRec { rating: number; best: number; wins: number; losses: number; draws: number; streak: number; games: number; dex: number; shiny?: boolean }
-interface StoredPlayer { pid: string; hash: string; name: string; created: number; last: number; modes: Partial<Record<PvpMode, ModeRec>>; history: PvpHistory[] }
+/** 道馆：徽章数，at 为拿到最后一枚的时间 */
+interface GymRec { badges: number; at: number; dex: number; shiny?: boolean }
+interface StoredPlayer {
+  pid: string; hash: string; name: string; created: number; last: number; modes: Partial<Record<PvpMode, ModeRec>>; history: PvpHistory[];
+  /** 冒险的最好成绩与达成时间 */
+  run?: RunRecord & { at: number };
+  gym?: GymRec;
+}
 /** 玩家用过的队伍（AI 训练家会用它们补位）；power 为平均每只的强度 */
 interface Ghost { pid: string; name: string; team: SavedBuild[]; meta: Record<string, number>; trainer?: string; rating: number; power: number; at: number }
 interface Entry { c: PvpClient; pid: string; name: string; team: SavedBuild[]; own: SavedBuild[]; auto: boolean; meta: Record<string, number>; trainer: string; rating: number; power: number; mode: PvpMode; at: number }
@@ -44,6 +53,8 @@ export class PvpService {
   private lastSave = 0;
   private seq = 0;
   private boards = new Map<PvpMode, StoredPlayer[]>();
+  /** 冒险与道馆排行榜的排序缓存（数据变化时清空） */
+  private ranks = new Map<string, StoredPlayer[]>();
 
   constructor(private file: string, private botAfter: Record<PvpMode, number>) {
     this.load();
@@ -82,6 +93,7 @@ export class PvpService {
   private touch() {
     this.dirty = true;
     this.boards.clear();
+    this.ranks.clear();
   }
 
   // ------------------------------------------------------------ 身份与战绩
@@ -132,6 +144,72 @@ export class PvpService {
       };
     });
     return { t: 'pvpBoard', mode, rows, me: meP ? this.record(meP, mode) : null, players: list.length, history: meP ? meP.history.slice(0, 10) : [] };
+  }
+
+  // ------------------------------------------------------------ 冒险与道馆排行榜
+
+  /** 冒险结束后上报：只留最好的一次 */
+  reportRun(msg: { pid: unknown; secret: unknown; name: unknown; run: unknown }): string | null {
+    const run = cleanRun(msg.run);
+    if (!run) return '成绩数据无效';
+    const p = this.auth(msg.pid, msg.secret, String(msg.name ?? ''), true);
+    if (!p || typeof p === 'string') return p ?? '对战身份无效';
+    if (p.run && compareRuns(run, p.run) >= 0) return null;
+    p.run = { ...run, at: Date.now() };
+    p.last = Date.now();
+    this.touch();
+    return null;
+  }
+
+  /** 拿到新徽章后上报：徽章变多才更新时间 */
+  reportGym(msg: { pid: unknown; secret: unknown; name: unknown; badges: unknown; dex: unknown; shiny?: unknown }): string | null {
+    const badges = Number(msg.badges);
+    if (!Number.isInteger(badges) || badges < 1 || badges > GYMS.length) return '徽章数据无效';
+    const p = this.auth(msg.pid, msg.secret, String(msg.name ?? ''), true);
+    if (!p || typeof p === 'string') return p ?? '对战身份无效';
+    const dex = Number.isInteger(msg.dex) && (msg.dex as number) >= 1 && (msg.dex as number) <= 151 ? (msg.dex as number) : 25;
+    const shiny = msg.shiny === true || undefined;
+    if (p.gym && badges <= p.gym.badges) {
+      if (p.gym.dex !== dex || p.gym.shiny !== shiny) {
+        p.gym.dex = dex;
+        p.gym.shiny = shiny;
+        this.touch();
+      }
+      return null;
+    }
+    p.gym = { badges, at: Date.now(), dex, shiny };
+    p.last = Date.now();
+    this.touch();
+    return null;
+  }
+
+  private rankList(kind: RankKind) {
+    const key = `rank:${kind}`;
+    let list = this.ranks.get(key);
+    if (!list) {
+      list = kind === 'adventure'
+        ? [...this.players.values()].filter((p) => p.run).sort((a, b) => compareRuns(a.run!, b.run!) || a.run!.at - b.run!.at)
+        : [...this.players.values()].filter((p) => p.gym).sort((a, b) => b.gym!.badges - a.gym!.badges || a.gym!.at - b.gym!.at);
+      this.ranks.set(key, list);
+    }
+    return list;
+  }
+
+  rankBoard(kind: RankKind, pid?: unknown, secret?: unknown): Extract<S2C, { t: 'rankBoard' }> {
+    if (kind !== 'adventure' && kind !== 'gym') kind = 'adventure';
+    const list = this.rankList(kind);
+    const me = pid ? this.auth(pid, secret) : null;
+    const meP = me && typeof me !== 'string' ? me : null;
+    const row = (p: StoredPlayer, i: number): RankRow => {
+      if (kind === 'adventure') {
+        const { at: _at, ...run } = p.run!;
+        return { rank: i + 1, name: p.name, dex: run.dex, shiny: run.shiny, run, you: p === meP || undefined };
+      }
+      return { rank: i + 1, name: p.name, dex: p.gym!.dex, shiny: p.gym!.shiny, badges: p.gym!.badges, at: p.gym!.at, you: p === meP || undefined };
+    };
+    const rows = list.slice(0, 50).map(row);
+    const mi = meP ? list.indexOf(meP) : -1;
+    return { t: 'rankBoard', kind, rows, me: mi >= 0 ? row(meP!, mi) : null, players: list.length };
   }
 
   // ------------------------------------------------------------ 队列

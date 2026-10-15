@@ -11,7 +11,8 @@ import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
 import { trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
-import { buyUpgrade, isDifficultyUnlocked, refundUpgrades, saveProfile, type Profile } from '../save';
+import { buyUpgrade, defaultSettings, isDifficultyUnlocked, refundUpgrades, saveProfile, type Profile } from '../save';
+import { PAD_BTN, padState } from '../gamepad';
 import { clear, h, tip, toast } from './dom';
 import { UI_SCALES, confirmButton, iconBtn, pager } from './layout';
 import { STAT_LABEL_6, skillIcon, skillInfo, typeBadge } from './describe';
@@ -45,7 +46,8 @@ export function portraitSlot(dex: number, scale: number, cls = '', shiny = false
   return h('div', { class: `pslot ${cls}${shiny ? ' shiny' : ''}` }, Animator.portrait(dex, scale, shiny));
 }
 
-export function lineDetail(line: LineId, compact = false, shiny = false) {
+/** 进化路线：每个形态的小头像，中间写进化等级或进化石 */
+function evoChain(line: LineId, shiny: boolean) {
   const L = LINES[line];
   const evo = h('div', { class: 'evo-chain' });
   L.forms.forEach((f, i) => {
@@ -53,6 +55,59 @@ export function lineDetail(line: LineId, compact = false, shiny = false) {
     evo.appendChild(h('div', { class: 'evo-form' }, portraitSlot(f.dex, 1, 'tiny', shiny), h('div', { class: 'small' }, f.name)));
   });
   if (L.forms.length === 1) evo.appendChild(h('span', { class: 'muted small' }, `Lv${L.evoLevels.join(' / Lv')} 觉醒`));
+  return evo;
+}
+
+/**
+ * 宝可梦的简要资料（选伙伴时看的）：头像、属性、种族值、进化路线；
+ * 特性的说明、初始技能和升级领悟的技能放在「详细资料」里。
+ */
+export function lineSummary(line: LineId, shiny = false, onMore?: () => void, extra: Node | null = null) {
+  const L = LINES[line];
+  return h('div', { class: `line-detail summary${shiny ? ' shiny' : ''}` },
+    h('div', { class: 'ld-top' },
+      portraitSlot(L.forms[0].dex, 3, 'ld-portrait', shiny),
+      h('div', { class: 'ld-info' },
+        h('h2', null, shinyName(L.name, shiny)),
+        h('div', null, ...L.forms[0].types.map(typeBadge), shiny ? h('span', { class: 'shiny-tag' }, uiIcon('shiny', 1), '闪光 · 六项能力 +1%') : null),
+        h('div', { class: 'small ld-facts' }, `技能栏 ${L.forms[0].slots} 个 · ${TYPE_NAME[L.bonusType]}系技能 +${L.bonusPct}%`),
+        h('div', { class: 'small muted ld-facts' }, `特性：${L.passives.slice(1).map((x) => x.name).join('、') || '无'}`),
+      ),
+    ),
+    statBars(line, shiny),
+    evoChain(line, shiny),
+    extra,
+    onMore ? h('button', { class: 'btn small ghost ld-more', onclick: () => { sfx('click'); onMore(); } }, uiIcon('book', 2), ' 详细资料（特性、技能）') : null,
+  );
+}
+
+/** 背包里这只宝可梦的对战构筑（闪光的和普通的分开算） */
+export function buildsLine(party: { build: { line: LineId; shiny?: boolean; level: number } }[], line: LineId, shiny: boolean) {
+  const own = party.filter((m) => m.build.line === line && !!m.build.shiny === shiny);
+  return h('div', { class: `small ld-builds ${own.length ? 'ok' : 'muted'}` }, uiIcon('bag', 1), own.length
+    ? ` 背包里有它的对战构筑 ${own.length} 个（最高 Lv${Math.max(...own.map((m) => m.build.level))}），设为伙伴后它就是对战的队长`
+    : ' 背包里还没有它的对战构筑：带它冒险，结算时放进背包');
+}
+
+/** 详细资料：特性的说明、初始技能、升级领悟的技能 */
+export function lineDetailModal(line: LineId, shiny = false) {
+  const overlay = h('div', { class: 'modal' });
+  const close = () => overlay.remove();
+  overlay.appendChild(h('div', { class: 'box modal-box line-modal' },
+    h('div', { class: 'panel-head' },
+      h('h2', null, `${shinyName(LINES[line].name, shiny)} · 详细资料`),
+      iconBtn('close', '关闭', () => { sfx('click'); close(); }, { attrs: { 'data-back': '1' }, cls: 'ghost small' }),
+    ),
+    lineDetail(line, false, shiny),
+  ));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+export function lineDetail(line: LineId, compact = false, shiny = false) {
+  const L = LINES[line];
+  const evo = evoChain(line, shiny);
   const skillChip = (id: string, label: string) => {
     const el = h('span', { class: 'chip' }, skillIcon(id, 1, true), h('span', { class: 'chip-text' }, label));
     tip(el, () => skillInfo(id, 1, line));
@@ -171,7 +226,7 @@ export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: nu
 
 // ---------------------------------------------------------------- 宝可梦中心：联机房间列表
 
-export interface BrowseActions { create(isPublic: boolean): void; join(code: string): void; back(): void }
+export interface BrowseActions { create(isPublic: boolean): void; join(code: string): void; back(): void; rejoin(): void }
 
 const ROOMS_PER_PAGE = 4;
 
@@ -179,21 +234,29 @@ export class BrowseScreen {
   private list = h('div', { class: 'room-area' });
   private statsEl = h('div', { class: 'browse-stats' });
   private isPublic = true;
+  /** 每页几个房间：上面有「回到冒险」时少一个，界面高度不变 */
+  private per = ROOMS_PER_PAGE;
   private rooms: RoomInfo[] = [];
   private page = 0;
-  constructor(root: HTMLElement, private a: BrowseActions, connected: boolean) {
+  /** rejoinCode：有进行中的联机冒险（离开或断线了）时，最上面显示「回到冒险」 */
+  constructor(root: HTMLElement, private a: BrowseActions, connected: boolean, rejoinCode: string | null = null) {
     const code = h('input', { class: 'field code', maxlength: 5, inputmode: 'numeric', placeholder: '房间号' }) as HTMLInputElement;
     code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 5); });
     const join = () => { if (code.value.length !== 5) { toast('请输入 5 位房间号', 'error'); return; } sfx('click'); a.join(code.value); };
     code.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
     const pubBtn = this.pubButton();
+    if (rejoinCode) this.per = ROOMS_PER_PAGE - 1;
     mount(root, h('div', { class: 'box panel browse' },
       h('div', { class: 'panel-head' },
         h('div', { class: 'row' }, uiIcon('cross', 3), h('h2', null, '宝可梦中心 · 联机冒险'), this.statsEl),
         iconBtn('back', '回到真新镇', a.back, { attrs: { 'data-back': '1' }, cls: 'ghost small', text: '出门' }),
       ),
+      rejoinCode ? h('div', { class: 'browse-rejoin' },
+        h('div', null, h('b', null, `你在房间 ${rejoinCode} 的冒险还在继续`), h('div', { class: 'small muted' }, '离开期间 AI 一直在替你战斗，回去就能接着玩。')),
+        h('button', { class: 'btn gold', 'data-key': 'y', onclick: () => { sfx('click'); a.rejoin(); } }, '回到冒险'),
+      ) : null,
       h('div', { class: 'browse-actions' },
-        h('div', { class: 'row' }, h('button', { class: 'btn gold', 'data-key': 'y', onclick: () => { sfx('click'); a.create(this.isPublic); } }, uiIcon('plus', 2), ' 创建房间'), pubBtn),
+        h('div', { class: 'row' }, h('button', { class: `btn ${rejoinCode ? '' : 'gold'}`, 'data-key': rejoinCode ? undefined : 'y', onclick: () => { sfx('click'); a.create(this.isPublic); } }, uiIcon('plus', 2), ' 创建房间'), pubBtn),
         h('div', { class: 'row' }, code, iconBtn('next', '加入房间', join, { text: '加入' })),
       ),
       this.list,
@@ -229,7 +292,7 @@ export class BrowseScreen {
 
   private renderRooms() {
     clear(this.list);
-    const pg = pager(this.rooms, ROOMS_PER_PAGE, this.page, (r) => this.roomCard(r), {
+    const pg = pager(this.rooms, this.per, this.page, (r) => this.roomCard(r), {
       cls: 'room-list',
       empty: () => h('div', { class: 'muted' }, '还没有公开房间，创建一个等朋友加入吧！'),
       filler: () => h('div', { class: 'room-card filler' }),
@@ -320,13 +383,36 @@ export function achList(p: Profile, page: number, onPage: (n: number) => void) {
 
 // ---------------------------------------------------------------- 设置 / 说明
 
-type Seg<T> = [T, string];
-function segmented<T>(value: T, options: Seg<T>[], onPick: (v: T) => void) {
-  return h('div', { class: 'seg' }, options.map(([v, label]) => h('button', {
-    class: `seg-btn ${v === value ? 'on' : ''}`,
-    onclick: () => { sfx('click'); onPick(v); },
-  }, label)));
+/** 选项：值、名字，以及可选的第二行小字 */
+type Seg<T> = [T, string, string?];
+/** 单选按钮组：选中的一项前面打勾 */
+function segmented<T>(value: T, options: Seg<T>[], onPick: (v: T) => void, label = '') {
+  return h('div', { class: 'seg', role: 'radiogroup', 'aria-label': label }, options.map(([v, text, sub]) => h('button', {
+    class: `seg-btn ${v === value ? 'on' : ''} ${sub ? 'two' : ''}`, role: 'radio', 'aria-checked': v === value ? 'true' : 'false',
+    onclick: () => { if (v === value) return; sfx('click'); onPick(v); },
+  }, h('span', { class: 'seg-main' }, v === value ? uiIcon('check', 1) : null, text), sub ? h('small', null, sub) : null)));
 }
+
+/** 设置项旁边的说明图标：悬停或手柄选中时显示详细说明 */
+function infoTip(text: string) {
+  const el = h('span', { class: 'set-info', tabindex: 0, 'data-pad': '1', 'aria-label': text }, uiIcon('info', 1));
+  tip(el, () => h('div', { class: 'info small' }, text));
+  return el;
+}
+
+/** 开关：滑块 + 「开 / 关」文字 */
+function switchBtn(on: boolean, label: string, onChange: (v: boolean) => void) {
+  return h('button', {
+    class: `switch ${on ? 'on' : ''}`, role: 'switch', 'aria-checked': on ? 'true' : 'false', 'aria-label': label,
+    onclick: () => { sfx('click'); onChange(!on); },
+  }, h('span', { class: 'switch-track' }, h('span', { class: 'switch-knob' })), h('span', { class: 'switch-text' }, on ? '开' : '关'));
+}
+
+/** 手柄的按键（按下时对应的格子会亮起来） */
+const PAD_KEYS: [keyof typeof PAD_BTN, string, string, string][] = [
+  ['A', 'A', '✕', '确认'], ['B', 'B', '○', '返回'], ['X', 'X', '□', '刷新商店'], ['Y', 'Y', '△', '出发 / 自动战斗'],
+  ['LB', 'LB', 'L1', '翻页 / 切换标签'], ['LT', 'LT', 'L2', '撤销购买'], ['START', 'Start', 'Options', '暂停 / 菜单'], ['UP', '十字键', '十字键', '移动 / 选择'],
+];
 
 export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => void, onBack: () => void) {
   const s = p.settings;
@@ -337,33 +423,103 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
     onChange();
     if (rerender) render();
   };
-  const slider = (label: string, key: 'volume' | 'music', icon: string) => {
-    const inp = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: String(s[key]) }) as HTMLInputElement;
-    inp.addEventListener('input', () => set(key, Number(inp.value), false));
-    return h('label', { class: 'set-row' }, h('span', null, uiIcon(icon, 2), ` ${label}`), inp);
+  const note = (text: string) => h('div', { class: 'set-note' }, text);
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const volume = (label: string, key: 'volume' | 'music', icon: string) => {
+    const val = h('b', { class: 'set-val' }, pct(s[key]));
+    const inp = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: String(s[key]), 'aria-label': label, 'aria-valuetext': pct(s[key]) }) as HTMLInputElement;
+    inp.addEventListener('input', () => {
+      const v = Number(inp.value);
+      val.textContent = pct(v);
+      inp.setAttribute('aria-valuetext', pct(v));
+      set(key, v, false);
+    });
+    return h('label', { class: 'set-row' }, h('span', { class: 'set-label' }, uiIcon(icon, 2), label), h('div', { class: 'set-ctl' }, inp, val));
   };
-  const toggle = (label: string, key: 'damageNumbers' | 'gbFilter' | 'shake' | 'transitions', note = '') =>
-    h('div', { class: 'set-row' }, h('span', null, label, note ? h('small', { class: 'muted' }, ` ${note}`) : null), segmented(s[key], [[true, '开'], [false, '关']], (v) => set(key, v)));
+  const toggle = (label: string, key: 'damageNumbers' | 'gbFilter' | 'shake' | 'transitions', hint: string) =>
+    h('div', { class: 'set-row' }, h('div', { class: 'set-label' }, h('span', null, label), note(hint)), switchBtn(s[key], label, (v) => set(key, v)));
   const scaleIdx = Math.max(0, UI_SCALES.findIndex((v) => Math.abs(v - s.uiScale) < 0.001));
-  const scaleLabel = h('b', { class: 'set-val' }, `${Math.round(s.uiScale * 100)}%`);
-  const scale = h('input', { type: 'range', min: 0, max: UI_SCALES.length - 1, step: 1, value: String(scaleIdx) }) as HTMLInputElement;
+  const scaleVal = h('b', { class: 'set-val' }, pct(s.uiScale));
+  const scale = h('input', { type: 'range', min: 0, max: UI_SCALES.length - 1, step: 1, value: String(scaleIdx), 'aria-label': '界面缩放', 'aria-valuetext': pct(s.uiScale) }) as HTMLInputElement;
   // 拖动时只更新数字，松手后再缩放，避免界面在手指下面跳动
-  scale.addEventListener('input', () => { scaleLabel.textContent = `${Math.round(UI_SCALES[Number(scale.value)] * 100)}%`; });
+  scale.addEventListener('input', () => { scaleVal.textContent = pct(UI_SCALES[Number(scale.value)]); });
   scale.addEventListener('change', () => set('uiScale', UI_SCALES[Number(scale.value)]));
-  mount(root, h('div', { class: 'box panel-md settings' },
+  const section = (icon: string, title: string, ...rows: Node[]) => h('section', { class: 'set-section' }, h('h3', null, uiIcon(icon, 2), title), ...rows);
+
+  // 手柄：连接状态和按键测试，每帧读一次（离开设置界面就停）
+  const padStatus = h('div', { class: 'pad-status' });
+  const keys = PAD_KEYS.map(([k, xbox, ps, what]) => {
+    const glyph = h('b', { class: `pad-glyph k-${k.toLowerCase()}` }, xbox);
+    const el = h('div', { class: 'pad-key' }, glyph, h('span', null, what));
+    return { k, el, glyph, xbox, ps };
+  });
+  let lastPad: string | null = null;
+  const poll = () => {
+    if (!padStatus.isConnected) return;
+    requestAnimationFrame(poll);
+    const pad = padState();
+    const sig = pad ? `${pad.name}|${pad.ps}` : '';
+    if (sig !== lastPad) {
+      lastPad = sig;
+      clear(padStatus);
+      padStatus.className = `pad-status ${pad ? 'on' : ''}`;
+      padStatus.append(h('i', { class: 'pad-dot' }), pad
+        ? h('span', null, h('b', null, '手柄已连接'), ` · ${pad.name}`)
+        : h('span', null, h('b', null, '手柄未连接'), ' · 插上或用蓝牙连上手柄后按任意键'));
+      for (const x of keys) x.glyph.textContent = pad?.ps ? x.ps : x.xbox;
+    }
+    for (const x of keys) {
+      const i = PAD_BTN[x.k];
+      const down = !!pad && (x.k === 'UP'
+        ? [PAD_BTN.UP, PAD_BTN.DOWN, PAD_BTN.LEFT, PAD_BTN.RIGHT].some((b) => pad.pressed[b]) || Math.hypot(pad.stick[0], pad.stick[1]) > 0.5
+        : x.k === 'LB' ? pad.pressed[i] || pad.pressed[PAD_BTN.RB] : pad.pressed[i]);
+      x.el.classList.toggle('on', down);
+    }
+  };
+
+  mount(root, h('div', { class: 'box panel settings' },
     h('div', { class: 'panel-head' }, h('div', { class: 'row' }, uiIcon('gear', 3), h('h2', null, '设置')), iconBtn('back', '返回', onBack, { attrs: { 'data-back': '1' }, cls: 'ghost small', text: '返回' })),
-    h('div', { class: 'set-list' },
-      slider('音效音量', 'volume', 'sound'),
-      slider('音乐音量', 'music', 'sound'),
-      h('div', { class: 'set-row' }, h('span', null, '界面大小', h('small', { class: 'muted' }, ' 100% 时界面占画面的 90%')), h('div', { class: 'row' }, scale, scaleLabel)),
-      h('div', { class: 'set-row' }, h('span', null, '帧率', h('small', { class: 'muted' }, ' 卡顿时选 30；120 需要高刷新率屏幕')), segmented<Profile['settings']['fps']>(s.fps, [[30, '30 帧'], [60, '60 帧'], [120, '120 帧']], (v) => set('fps', v))),
-      h('div', { class: 'set-row' }, h('span', null, '画质', h('small', { class: 'muted' }, ' 流畅：高分屏上按一半分辨率渲染')), segmented<Profile['settings']['quality']>(s.quality, [['high', '高清'], ['smooth', '流畅']], (v) => set('quality', v))),
-      toggle('过场动画', 'transitions', '切换界面、对战开场的动画'),
-      toggle('显示伤害数字', 'damageNumbers'),
-      toggle('屏幕震动', 'shake'),
-      toggle('初代 GB 绿屏滤镜', 'gbFilter'),
+    h('div', { class: 'set-grid' },
+      h('div', { class: 'set-col' },
+        section('sound', '声音',
+          volume('音效音量', 'volume', 'sound'),
+          volume('音乐音量', 'music', 'music'),
+        ),
+        section('star', '游戏效果',
+          toggle('过场动画', 'transitions', '切换界面、出发冒险、对战开场时的动画'),
+          toggle('伤害数字', 'damageNumbers', '战斗中在敌人头上显示伤害'),
+          toggle('屏幕震动', 'shake', '爆炸和受伤时画面晃动'),
+          toggle('GB 绿屏滤镜', 'gbFilter', '把画面变成初代 Game Boy 的绿色'),
+        ),
+      ),
+      h('div', { class: 'set-col' },
+        section('full', '画面与性能',
+          h('div', { class: 'set-row' },
+            h('div', { class: 'set-label' }, h('span', null, '界面缩放', infoTip('100% 时最大的界面占满屏幕的九成。电脑上默认 90%，手机上默认 100%。')), note('数值越大，界面越大')),
+            h('div', { class: 'set-ctl' }, scale, scaleVal)),
+          h('div', { class: 'set-row' },
+            h('div', { class: 'set-label' }, h('span', null, '帧率', infoTip('120 帧适合 120Hz 以上的高刷新率屏幕，普通屏幕选了也只显示 60 帧；电脑性能不够时画面会掉帧，这时推荐 60 帧，还卡就选 30 帧。')), note('一般选 60；卡顿时选 30')),
+            segmented<Profile['settings']['fps']>(s.fps, [[30, '30 帧'], [60, '60 帧'], [120, '120 帧']], (v) => set('fps', v), '帧率')),
+          h('div', { class: 'set-row' },
+            h('div', { class: 'set-label' }, h('span', null, '画质', infoTip('高清按屏幕的原生分辨率渲染；流畅在高分屏上按一半的分辨率渲染，像素减少到四分之一，显卡负担更小、更省电。')), note('流畅更省电、更不容易卡')),
+            segmented<Profile['settings']['quality']>(s.quality, [['high', '高清', '原生分辨率'], ['smooth', '流畅', '降低分辨率']], (v) => set('quality', v), '画质')),
+        ),
+        section('pad', '手柄', padStatus, h('div', { class: 'pad-keys' }, keys.map((x) => x.el)), note('按一下手柄上的键，对应的格子会亮起来')),
+      ),
+    ),
+    h('div', { class: 'panel-foot' },
+      confirmButton('恢复默认设置', '再点一次确认恢复', 'btn small ghost', () => {
+        p.settings = defaultSettings();
+        saveProfile(p);
+        onChange();
+        sfx('click');
+        toast('已恢复默认设置');
+        render();
+      }, {}, 'undo'),
+      h('span', { class: 'set-note' }, '设置会自动保存'),
     ),
   ), 'settings');
+  poll();
 }
 
 const CREDIT_TABS: [string, () => Node][] = [
@@ -379,14 +535,16 @@ const CREDIT_TABS: [string, () => Node][] = [
     h('li', null, '难度分简单 / 普通 / 困难：通关上一档才能解锁下一档。'),
     h('li', null, '训练家各有加成：小智更容易让宝可梦崇拜、小霞擅长水系、火箭队赚得多还专门盯着闪光宝可梦，但宝可梦不太信任他们……其他训练家靠成就或星之沙解锁。'),
     h('li', null, '联机时倒下的队友身边会出现绿色救援圈，站进去就能把它救起来。首次通关后可以开启 AI 辅助战斗，由 AI 替你走位。'),
-    h('li', null, '冒险结束后可以把宝可梦放进背包，在对战场里排位：单挑是三只同时上场（你操作队长），团战四人各一只；每场 60 秒，也可以整场交给 AI。'),
+    h('li', null, '联机冒险中按 Esc 或右上角的按钮打开菜单（设置、离开房间）。离开或断线后由 AI 接手你的宝可梦，之后从真新镇或宝可梦中心回到房间，错过的结算也会补发。'),
+    h('li', null, '冒险结束后可以把宝可梦放进背包（12 格，对战场达到超级球级后再多 6 格），在对战场里排位：单挑是三只同时上场（你操作队长），团战四人各一只；每场 60 秒，也可以整场交给 AI。'),
+    h('li', null, '排行榜：单挑、团战、冒险（难度 → 波次 → 用时）、道馆（徽章数），每人只算最好的一次。'),
     h('li', null, '道馆：关都八个道馆按顺序挑战，先打道馆训练家再打馆主。每枚徽章永久提升一项能力和对应属性的技能伤害；打败小刚、娜姿还能解锁他们当你的训练家。'),
     h('li', null, '香水会吸引更多敌人（收获也更多），喷雾、玻璃哨和洁净之符能减少敌人；限持一个的道具拿到后不会再出现。'),
   )],
   ['操作', () => h('ul', { class: 'credit-list' },
-    h('li', null, '键盘：WASD / 方向键移动，空格 / 回车与建筑互动，镇上 1~6 直接打开各个地方、M 快速前往，战斗中 T 切换自动战斗，Esc / P 暂停（单人），商店里 Z 撤销上一次购买；引导里空格 / 回车下一步、Esc 跳过。'),
+    h('li', null, '键盘：WASD / 方向键移动，空格 / 回车与建筑互动，镇上 1~6 直接打开各个地方、M 快速前往，战斗中 T 切换自动战斗，Esc / P 暂停（联机时打开菜单），商店里 Z 撤销上一次购买；引导里空格 / 回车下一步、Esc 跳过。'),
     h('li', null, '手机：在屏幕任意位置拖动出现摇杆，点下方的提示进入建筑，右下角的按钮快速前往或切换自动战斗，需要横屏游玩。'),
-    h('li', null, '手柄（Xbox / PlayStation）：左摇杆或十字键移动与选择，A/× 确认与进入建筑，B/○ 返回，X/□ 刷新商店，Y/△ 出发（战斗中切换自动战斗、镇上快速前往），LB/RB 翻页，LT 撤销购买，Start 暂停。'),
+    h('li', null, '手柄（Xbox / PlayStation）：左摇杆或十字键移动与选择，A/× 确认与进入建筑，B/○ 返回，X/□ 刷新商店，Y/△ 出发（战斗中切换自动战斗、镇上快速前往），LB/RB 翻页，LT 撤销购买，Start 暂停（联机时打开菜单）。设置里能看到手柄有没有连上，按键时对应的格子会亮。'),
   )],
   ['致谢', () => h('div', { class: 'credit-list' },
     h('p', { class: 'small' }, '宝可梦像素精灵（包括闪光宝可梦的异色精灵图）：PMDCollab / SpriteCollab 的众多画师（CC BY-NC 4.0，非商业使用），通过 JPTER78/pokesurvivor 整理导入，完整名单见仓库 CREDITS.md。'),
@@ -413,13 +571,23 @@ export function creditsScreen(root: HTMLElement, onBack: () => void, tab = 0) {
   ), 'credits');
 }
 
-export function pauseScreen(root: HTMLElement, onResume: () => void, onSettings: () => void, onQuit: () => void) {
+/** 暂停（单人）/ 菜单（联机、对战：游戏不会暂停） */
+export interface PauseOpts {
+  menu?: boolean;
+  note?: string;
+  resume(): void;
+  settings(): void;
+  quit: { label: string; confirm: string; run(): void };
+}
+
+export function pauseScreen(root: HTMLElement, o: PauseOpts) {
   mount(root, h('div', { class: 'box pause' },
-    h('h2', null, uiIcon('pause', 3), ' 暂停'),
+    h('h2', null, uiIcon(o.menu ? 'menu' : 'pause', 3), o.menu ? ' 菜单' : ' 暂停'),
+    o.note ? h('p', { class: 'pause-note' }, o.note) : null,
     h('div', { class: 'menu-list' },
-      h('button', { class: 'menu-item play', 'data-key': 'start', onclick: onResume }, h('span', { class: 'mi-ico' }, uiIcon('play', 3)), h('span', { class: 'mi-text' }, '继续')),
-      h('button', { class: 'menu-item', onclick: onSettings }, h('span', { class: 'mi-ico' }, uiIcon('gear', 3)), h('span', { class: 'mi-text' }, '设置')),
-      confirmButton('放弃本局，回到真新镇', '再点一次确认放弃', 'menu-item', onQuit, {}, 'door'),
+      h('button', { class: 'menu-item play', 'data-key': 'start', 'data-back': '1', onclick: o.resume }, h('span', { class: 'mi-ico' }, uiIcon('play', 3)), h('span', { class: 'mi-text' }, '继续')),
+      h('button', { class: 'menu-item', onclick: o.settings }, h('span', { class: 'mi-ico' }, uiIcon('gear', 3)), h('span', { class: 'mi-text' }, '设置')),
+      confirmButton(o.quit.label, o.quit.confirm, 'menu-item', o.quit.run, {}, 'door'),
     ),
   ), 'pause');
 }

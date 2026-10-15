@@ -3,6 +3,8 @@ import { DIFFICULTIES, type DifficultyId } from '../shared/difficulty';
 import { GYM_BY_ID, badgeKey } from '../shared/gyms';
 import { LINES, LINE_IDS, STARTERS, isLine, type LineId } from '../shared/pokemon';
 import { buildPower, validateBuild, type SavedBuild } from '../shared/pvp/build';
+import { TIERS } from '../shared/pvp/rating';
+import { betterRun, cleanRun, type RunRecord } from '../shared/ranks';
 import type { PvpMode } from '../shared/pvp/sim';
 import { TRAINERS, TRAINER_IDS } from '../shared/trainers';
 import { defaultUiScale } from './ui/layout';
@@ -11,7 +13,7 @@ const KEY = 'poke-rouge-save-v1';
 
 export interface Settings {
   volume: number; music: number; damageNumbers: boolean; gbFilter: boolean; shake: boolean;
-  /** 界面大小：100% 时最大的界面占画面 90% */
+  /** 界面缩放：100% 时最大的界面占画面 90% */
   uiScale: number;
   fps: 30 | 60 | 120;
   /** 流畅：高分屏上按 1 倍像素渲染画面，减轻显卡负担 */
@@ -20,7 +22,24 @@ export interface Settings {
   transitions: boolean;
 }
 
-export const PARTY_MAX = 6;
+/** 背包：12 格；在对战场达到超级球级（任意模式的最高分）后再多 6 格 */
+export const PARTY_BASE = 12;
+export const PARTY_BONUS = 6;
+export const PARTY_BONUS_TIER = TIERS[1];
+export const PARTY_LIMIT = PARTY_BASE + PARTY_BONUS;
+
+export function partyMax(p: Profile): number {
+  return PARTY_BASE + (p.pvpBest >= PARTY_BONUS_TIER.min ? PARTY_BONUS : 0);
+}
+
+/** 记下对战场的最高分；返回这次是不是刚刚解锁了背包的额外格子 */
+export function notePvpBest(p: Profile, best: number | undefined): boolean {
+  if (!best || best <= p.pvpBest) return false;
+  const before = partyMax(p);
+  p.pvpBest = Math.round(best);
+  saveProfile(p);
+  return partyMax(p) > before;
+}
 
 /** 背包里的宝可梦：保存一局冒险结束时的构筑 */
 export interface PartyMon {
@@ -56,6 +75,10 @@ export interface Profile {
   party: PartyMon[];
   /** 对战身份：服务器用它记录积分 */
   pvpId: { pid: string; secret: string } | null;
+  /** 对战场的历史最高分（任意模式）：达到超级球级后背包多 6 格 */
+  pvpBest: number;
+  /** 冒险的最好成绩（报给服务器的冒险榜） */
+  bestRun: RunRecord | null;
   pvpMode: PvpMode;
   pvpPick: string;
   /** 单挑时和队长一起上场的两只（背包里的 uid）；null 表示自动选最强的 */
@@ -68,6 +91,8 @@ export interface Profile {
   badges: Record<string, number>;
   /** 打败过的道馆训练家（再来时直接挑战馆主） */
   gymJunior: Record<string, number>;
+  /** 每个道馆的挑战记录（道馆训练家和馆主都算） */
+  gymLog: Record<string, { tries: number; wins: number }>;
   /** 看过的新手引导 */
   guide: Record<string, number>;
   /** 上次在真新镇里站的位置 */
@@ -93,6 +118,8 @@ function fresh(): Profile {
     seenEnemies: [],
     party: [],
     pvpId: null,
+    pvpBest: 0,
+    bestRun: null,
     pvpMode: '1v1',
     pvpPick: '',
     pvpTeam: null,
@@ -100,9 +127,15 @@ function fresh(): Profile {
     autoAssist: false,
     badges: {},
     gymJunior: {},
+    gymLog: {},
     guide: {},
     townPos: null,
   };
+}
+
+/** 设置的默认值（「恢复默认设置」用） */
+export function defaultSettings(): Settings {
+  return fresh().settings;
 }
 
 /** 徽章：和研究所强化一起发给服务器（badge_<道馆> = 1） */
@@ -168,7 +201,7 @@ export function pvpIdentity(p: Profile) {
 
 /** 放进背包；满了返回 false（需要先放生） */
 export function addToParty(p: Profile, s: RunSummary): PartyMon | null {
-  if (!s.build || p.party.length >= PARTY_MAX || typeof validateBuild(s.build) === 'string') return null;
+  if (!s.build || p.party.length >= partyMax(p) || typeof validateBuild(s.build) === 'string') return null;
   const mon: PartyMon = {
     uid: randomId(10), build: s.build, savedAt: Date.now(),
     from: { difficulty: s.difficulty, wavesCleared: s.wavesCleared, victory: s.victory, players: s.players },
@@ -193,7 +226,7 @@ export function loadProfile(): Profile {
     if (!raw) return fresh();
     const p = JSON.parse(raw) as Partial<Profile> & { lastLine?: string };
     const f = fresh();
-    const party = Array.isArray(p.party) ? p.party.filter((m) => m && typeof validateBuild(m.build) !== 'string').slice(0, PARTY_MAX) : [];
+    const party = Array.isArray(p.party) ? p.party.filter((m) => m && typeof validateBuild(m.build) !== 'string').slice(0, PARTY_LIMIT) : [];
     const out: Profile = { ...f, ...p, party, stats: { ...f.stats, ...p.stats }, settings: { ...f.settings, ...p.settings } };
     // 旧存档：以前御三家一开始就能用，保留下来；需要重新走一遍开场选训练家
     if (!Array.isArray(p.owned)) out.owned = (p.stats?.runs ?? 0) > 0 ? [...STARTERS] : [];
@@ -206,6 +239,9 @@ export function loadProfile(): Profile {
     if (out.setup && !ownsMon(out, partnerOf(out))) { out.partner = unlockedLines(out)[0] ?? 'charmander'; out.partnerShiny = false; }
     out.stats.owned = unlockedLines(out).length;
     out.stats.shinies = out.shiny.length;
+    out.pvpBest = Number.isFinite(out.pvpBest) ? out.pvpBest : 0;
+    out.bestRun = cleanRun(out.bestRun);
+    if (!out.gymLog || typeof out.gymLog !== 'object') out.gymLog = {};
     return out;
   } catch {
     return fresh();
@@ -318,6 +354,8 @@ export function applyRun(p: Profile, r: RunSummary): RunReward {
   // 冒险中已经实时解锁过了；断线等情况下漏掉的在这里补上
   for (const id of r.recruits) if (!p.owned.includes(id)) addOwned(p, id, true);
   for (const id of r.shinyRecruits) if (!p.shiny.includes(id)) addOwned(p, id, true, true);
+  const run = cleanRun({ difficulty: r.difficulty, waves: r.wavesCleared, victory: r.victory, time: r.detail.time, dex: r.detail.dex, shiny: r.shiny, players: r.players });
+  p.bestRun = betterRun(p.bestRun, run);
   const got = evalAchievements(p, r);
   const dust = stardustFor(r) + got.dust;
   p.stardust += stardustFor(r);

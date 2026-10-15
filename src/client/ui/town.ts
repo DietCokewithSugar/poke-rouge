@@ -27,7 +27,7 @@ import type { OnlinePeer } from '../town';
 import { clear, h, tip, toast } from './dom';
 import { typeBadge } from './describe';
 import { iconBtn, pager } from './layout';
-import { achList, difficultyPicker, labGrid, lineDetail, mount, portraitSlot, tabs } from './screens';
+import { achList, buildsLine, difficultyPicker, labGrid, lineDetailModal, lineSummary, mount, portraitSlot, tabs } from './screens';
 
 export function partnerName(p: Profile) { return LINES[p.partner] ? shinyName(LINES[p.partner].name, p.partnerShiny) : '？？？'; }
 export function partnerDex(p: Profile) { return formOf(p.partner, 0).dex; }
@@ -65,7 +65,7 @@ export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stat
         h('span', { class: 'mi-text' }, p.setup ? '继续游戏' : '开始游戏',
           h('small', null, p.setup ? `${p.name || '训练家'} · ${TRAINERS[p.trainer]?.name ?? ''} · 伙伴 ${partnerName(p)} · 已有 ${owned} 种宝可梦` : '选择训练家与第一只宝可梦，从真新镇出发'))),
       h('button', { class: 'menu-item', onclick: () => { sfx('click'); a.settings(); } },
-        h('span', { class: 'mi-ico' }, uiIcon('gear', 3)), h('span', { class: 'mi-text' }, '设置', h('small', null, '音量、界面大小、帧率与画质'))),
+        h('span', { class: 'mi-ico' }, uiIcon('gear', 3)), h('span', { class: 'mi-text' }, '设置', h('small', null, '音量、界面缩放、帧率与画质、手柄'))),
       h('button', { class: 'menu-item', onclick: () => { sfx('click'); a.credits(); } },
         h('span', { class: 'mi-ico' }, uiIcon('book', 3)), h('span', { class: 'mi-text' }, '说明与致谢', h('small', null, '玩法、操作、素材来源'))),
       h('div', { class: 'small muted title-online', id: 'title-online' }, onlineText(stats)),
@@ -204,8 +204,8 @@ export function setupScreen(root: HTMLElement, p: Profile, onDone: (trainer: str
 
 const PICK_PER = 21;
 
-/** 宝可梦格子里显示哪些：全部（没有的显示剪影）/ 已拥有的 / 只看闪光的 */
-export type MonView = 'all' | 'owned' | 'shiny';
+/** 宝可梦格子里显示哪些：我的精灵（已拥有的）/ 只看闪光的 / 全部图鉴（没有的显示剪影） */
+export type MonView = 'owned' | 'shiny' | 'all';
 
 function viewList(p: Profile, view: MonView): Mon[] {
   return view === 'shiny' ? monList(p).filter((m) => m.shiny) : monList(p, view === 'all');
@@ -214,7 +214,9 @@ function viewList(p: Profile, view: MonView): Mon[] {
 /** 宝可梦格子（按图鉴顺序，分页；闪光的排在普通的后面，是单独的一格） */
 export function partnerGrid(p: Profile, sel: Mon | null, onPick: (m: Mon) => void, page: number, onPage: (n: number) => void, opts: { view?: MonView; taken?: Map<string, string> } = {}) {
   const me = partnerOf(p);
-  const pg = pager(viewList(p, opts.view ?? 'owned'), PICK_PER, page, (m) => {
+  const view = opts.view ?? 'owned';
+  const items = viewList(p, view);
+  const pg = pager(items, PICK_PER, page, (m) => {
     const L = LINES[m.line];
     const open = ownsMon(p, m);
     const taken = opts.taken?.get(monKey(m));
@@ -230,9 +232,26 @@ export function partnerGrid(p: Profile, sel: Mon | null, onPick: (m: Mon) => voi
     return el;
   }, {
     cls: 'pmon-grid', filler: () => h('div', { class: 'pmon filler' }), onPage,
-    label: `已拥有 ${unlockedLines(p).length} / ${LINE_IDS.length} 种${p.shiny.length ? ` · 闪光 ${p.shiny.length} 种` : ''}`,
+    label: view === 'all' ? `图鉴 · 已拥有 ${unlockedLines(p).length} / ${LINE_IDS.length} 种` : view === 'shiny' ? `闪光宝可梦 ${items.length} 只` : `我的精灵 ${items.length} 只`,
   });
   return h('div', { class: 'pmon-wrap' }, pg.list, pg.nav);
+}
+
+/** 浏览方式：我的精灵（平时选伙伴、找闪光）和全部图鉴（看收集进度） */
+function viewSwitch(p: Profile, view: MonView, onView: (v: MonView) => void) {
+  const mine = monList(p).length;
+  const btn = (v: MonView, label: string, sub: string) => h('button', {
+    class: `pmon-mode ${view === v || (v === 'owned' && view === 'shiny') ? 'on' : ''}`, 'aria-pressed': view === v ? 'true' : 'false',
+    onclick: () => { if (view === v) return; sfx('click'); onView(v); },
+  }, h('b', null, label), h('small', null, sub));
+  return h('div', { class: 'row tight pmon-views' },
+    btn('owned', '我的精灵', `${mine} 只`),
+    btn('all', '全部图鉴', `${unlockedLines(p).length} / ${LINE_IDS.length}`),
+    view !== 'all' && p.shiny.length ? h('button', {
+      class: `btn tiny pmon-shiny ${view === 'shiny' ? 'gold' : 'ghost'}`, 'aria-pressed': view === 'shiny' ? 'true' : 'false',
+      onclick: () => { sfx('click'); onView(view === 'shiny' ? 'owned' : 'shiny'); },
+    }, uiIcon('shiny', 1), ` 只看闪光 ${p.shiny.length}`) : null,
+  );
 }
 
 /** 选中的宝可梦在第几页 */
@@ -256,7 +275,8 @@ function lockedDetail(id: LineId) {
 export function partnerModal(p: Profile, onPick: (m: Mon) => void, opts: { taken?: Map<string, string> } = {}) {
   const overlay = h('div', { class: 'modal' });
   let sel: Mon = partnerOf(p);
-  let page = pageOf(p, 'owned', sel);
+  let view: MonView = 'owned';
+  let page = pageOf(p, view, sel);
   const close = () => overlay.remove();
   const render = () => {
     clear(overlay);
@@ -268,10 +288,13 @@ export function partnerModal(p: Profile, onPick: (m: Mon) => void, opts: { taken
         iconBtn('close', '关闭', () => { sfx('click'); close(); }, { attrs: { 'data-back': '1' }, cls: 'ghost small' }),
       ),
       h('div', { class: 'partner-body' },
-        partnerGrid(p, sel, (m) => { sel = m; render(); }, page, (n) => { page = n; render(); }, { view: 'owned', taken: opts.taken }),
+        h('div', { class: 'partner-left' },
+          viewSwitch(p, view, (v) => { view = v; page = 0; render(); }),
+          partnerGrid(p, sel, (m) => { sel = m; render(); }, page, (n) => { page = n; render(); }, { view, taken: opts.taken }),
+        ),
         h('div', { class: 'partner-side' },
-          open ? lineDetail(sel.line, true, sel.shiny) : lockedDetail(sel.line),
-          h('button', { class: 'btn gold', 'data-key': 'y', disabled: !open, onclick: () => { sfx('wave'); close(); onPick(sel); } }, sameMon(partnerOf(p), sel) ? `继续和${name}一起` : `就决定是你了，${name}！`),
+          open ? lineSummary(sel.line, sel.shiny, () => lineDetailModal(sel.line, sel.shiny)) : lockedDetail(sel.line),
+          h('button', { class: 'btn gold big', 'data-key': 'y', disabled: !open, onclick: () => { sfx('wave'); close(); onPick(sel); } }, sameMon(partnerOf(p), sel) ? `继续和${name}一起` : open ? `就决定是你了，${name}！` : '还没有成为伙伴'),
         ),
       ),
     ));
@@ -285,7 +308,7 @@ export function partnerModal(p: Profile, onPick: (m: Mon) => void, opts: { taken
 
 export interface HomeActions { back(): void; changed(): void }
 
-export function homeScreen(root: HTMLElement, p: Profile, a: HomeActions, tab = 0, state: { page: number; sel: Mon | null; view: MonView } = { page: -1, sel: null, view: 'all' }) {
+export function homeScreen(root: HTMLElement, p: Profile, a: HomeActions, tab = 0, state: { page: number; sel: Mon | null; view: MonView } = { page: -1, sel: null, view: 'owned' }) {
   const re = (t = tab) => homeScreen(root, p, a, t, state);
   if (!state.sel) state.sel = partnerOf(p);
   let body: Node;
@@ -316,28 +339,21 @@ export function homeScreen(root: HTMLElement, p: Profile, a: HomeActions, tab = 
       h('div', { class: 'home-name' }, h('label', null, uiIcon('pencil', 2), ' 训练家的名字'), input, h('div', { class: 'small muted' }, `星之沙 ${p.stardust}`)),
     );
   } else {
-    if (state.view === 'shiny' && !p.shiny.length) state.view = 'all';
+    if (state.view === 'shiny' && !p.shiny.length) state.view = 'owned';
     const sel = state.sel;
     if (state.page < 0) state.page = pageOf(p, state.view, sel);
     const open = ownsMon(p, sel);
     const cur = sameMon(partnerOf(p), sel);
     const name = monName(sel);
-    const views: [MonView, string][] = [['all', '全部'], ['owned', '已拥有'], ...(p.shiny.length ? [['shiny', `闪光 ${p.shiny.length}`] as [MonView, string]] : [])];
     body = h('div', { class: 'partner-body' },
       h('div', { class: 'partner-left' },
-        h('div', { class: 'row between' },
-          h('span', { class: 'small muted' }, uiIcon('pc', 2), ' 宝可梦存储系统'),
-          h('div', { class: 'row pmon-views' }, views.map(([v, label]) => h('button', {
-            class: `btn tiny ${state.view === v ? '' : 'ghost'}`,
-            onclick: () => { if (state.view === v) return; sfx('click'); state.view = v; state.page = 0; re(); },
-          }, v === 'shiny' ? uiIcon('shiny', 1) : null, label))),
-        ),
+        viewSwitch(p, state.view, (v) => { state.view = v; state.page = 0; re(); }),
         partnerGrid(p, sel, (m) => { state.sel = m; re(); }, state.page, (n) => { state.page = n; re(); }, { view: state.view }),
       ),
       h('div', { class: 'partner-side' },
-        open ? lineDetail(sel.line, true, sel.shiny) : lockedDetail(sel.line),
+        open ? lineSummary(sel.line, sel.shiny, () => lineDetailModal(sel.line, sel.shiny), buildsLine(p.party, sel.line, sel.shiny)) : lockedDetail(sel.line),
         h('button', {
-          class: 'btn gold', 'data-key': 'y', disabled: !open || cur,
+          class: 'btn gold big', 'data-key': 'y', disabled: !open || cur,
           onclick: () => { sfx('wave'); p.partner = sel.line; p.partnerShiny = sel.shiny; saveProfile(p); a.changed(); toast(`${name}现在跟着你了！`, 'gold'); re(); },
         }, cur ? `${name}正跟着你` : open ? `让${name}跟着我` : '还没有成为伙伴'),
       ),
@@ -489,7 +505,7 @@ export function quickMenu(root: HTMLElement, go: (id: PlaceId) => void, back: ()
 
 // ---------------------------------------------------------------- 镇上的 HUD
 
-export interface TownHudActions { card(): void; settings(): void; help(): void; title(): void; interact(): void; go(id: PlaceId, tab?: number): void }
+export interface TownHudActions { card(): void; settings(): void; help(): void; title(): void; interact(): void; go(id: PlaceId, tab?: number): void; rejoin(): void }
 
 const WHERE_NAME: Record<string, string> = { town: '在真新镇', menu: '在标题界面', room: '在联机房间', game: '冒险中', pvp: '对战中' };
 
@@ -501,6 +517,8 @@ export class TownHud {
   private prompt = h('button', { class: 'th-prompt box tight hidden' });
   private dust = h('div', { class: 'th-dust box tight' });
   private goal = h('button', { class: 'th-goal box tight' });
+  /** 进行中的联机冒险：离开或断线后从这里回去 */
+  private rejoinBtn = h('button', { class: 'th-rejoin box tight hidden' });
   private peers: OnlinePeer[] = [];
   private total = 1;
 
@@ -508,9 +526,10 @@ export class TownHud {
     this.card.addEventListener('click', () => { sfx('click'); a.card(); });
     this.prompt.addEventListener('click', () => a.interact());
     this.goal.addEventListener('click', () => { sfx('click'); a.go(nextGoal(this.p).place); });
+    this.rejoinBtn.addEventListener('click', () => a.rejoin());
     this.onlineBtn = iconBtn('friends', '在线玩家', () => { sfx('click'); this.onlineList.classList.toggle('hidden'); this.renderOnline(); }, { cls: 'small th-btn', text: '1' });
     this.root = h('div', { id: 'town-hud' },
-      h('div', { class: 'th-left' }, this.card, this.goal),
+      h('div', { class: 'th-left' }, this.card, this.goal, this.rejoinBtn),
       h('div', { class: 'th-top' },
         this.onlineBtn,
         iconBtn('gear', '设置', () => { sfx('click'); a.settings(); }, { cls: 'small th-btn' }),
@@ -561,6 +580,15 @@ export class TownHud {
     clear(this.goal);
     this.goal.append(h('span', { class: 'th-goal-tag' }, '目标'), uiIcon(g.icon, 1), h('span', { class: 'th-goal-text' }, g.text), h('span', { class: 'th-goal-go' }, '▶'));
     this.goal.title = `下一步：${g.text}（点一下直接前往）`;
+  }
+
+  /** 有进行中的联机冒险时显示「回到冒险」 */
+  setRejoin(s: { code: string } | null) {
+    this.rejoinBtn.classList.toggle('hidden', !s);
+    clear(this.rejoinBtn);
+    if (!s) return;
+    this.rejoinBtn.append(uiIcon('cross', 2), h('span', { class: 'th-rejoin-text' }, h('b', null, '回到联机冒险'), h('small', null, `房间 ${s.code} · AI 正在替你战斗`)), h('span', { class: 'th-goal-go' }, '▶'));
+    this.rejoinBtn.title = '回到离开或断线的那局联机冒险';
   }
 
   setOnline(peers: OnlinePeer[], total?: number) {

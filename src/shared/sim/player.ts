@@ -25,7 +25,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
   const metaMods: Partial<Mods> = { ...mb.mods };
   for (const [k, v] of Object.entries(T.mods)) metaMods[k as keyof Mods] = (metaMods[k as keyof Mods] ?? 0) + (v ?? 0);
   const p: SimPlayer = {
-    id, name, team: 0, bot: false, trainer: T.id, owned: new Set(o.owned ?? []), ownedShiny: new Set(o.ownedShiny ?? []),
+    id, name, team: 0, bot: false, away: false, trainer: T.id, owned: new Set(o.owned ?? []), ownedShiny: new Set(o.ownedShiny ?? []),
     line, shiny: !!o.shiny, stage: 0, level: 1, xp: 0, money: 30 + mb.startMoney,
     x: sim.w / 2, y: sim.h / 2, dir: 0, moving: false,
     hp: 1, alive: true, down: false, downT: 0, revive: 0,
@@ -42,7 +42,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     levelQueue: [], cards: null, cardRerolls: 0, crates: [], evoPrompt: false,
     shop: { offers: [], locked: [false, false, false, false], rerolls: 0, freeRerolls: 0 },
     undo: null,
-    ready: false, castFlag: 0, lastPosT: 0, moveBudget: 0,
+    ready: false, castFlag: 0, autoShopAt: -1, moveBudget: 0,
     stats: {
       kills: 0, damage: 0, superEff: 0, moneyEarned: 0, revives: 0, evolved: false, skillsFull: false, foreignSkill: false, bossKills: [], maxItems: 0,
       killsBy: {}, rankKills: { minion: 0, elite: 0, boss: 0 }, skillDmg: {}, taken: 0, healed: 0, crits: 0, dodges: 0, moneySpent: 0,

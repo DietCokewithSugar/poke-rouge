@@ -49,6 +49,8 @@ export interface SimPlayer {
   team: number;
   /** 由服务器控制走位的 AI 训练家 */
   bot: boolean;
+  /** 联机时离开了房间（断线或主动离开）：走位、商店都由 AI 代替，等他回来 */
+  away: boolean;
   /** 训练家（加成在 metaMods / trainerTypeMods 里） */
   trainer: string;
   /** 这位玩家已经拥有的宝可梦（进化线）：没有的才会崇拜他 */
@@ -102,7 +104,8 @@ export interface SimPlayer {
   undo: UndoBuy | null;
   ready: boolean;
   castFlag: number;
-  lastPosT: number;
+  /** 离开房间后，AI 上一次替他逛商店的时间（模拟时间） */
+  autoShopAt: number;
   /** 客户端上报位置时允许移动的距离额度（防加速） */
   moveBudget: number;
   stats: {

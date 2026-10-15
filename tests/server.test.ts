@@ -193,6 +193,27 @@ test('对战 1v1：真人匹配、结算积分、排行榜', async () => {
   a.ws.close(); b.ws.close();
 });
 
+test('冒险榜与道馆榜：上报最好成绩后能在排行榜看到自己', async () => {
+  const a = new Client();
+  await a.open();
+  const A = ident('r');
+  a.send({ t: 'runReport', ...A, name: '小赤', run: { difficulty: 'normal', waves: 20, victory: true, time: 1500, dex: 6, players: 2 } });
+  a.send({ t: 'gymReport', ...A, name: '小赤', badges: 2, dex: 6 });
+  a.send({ t: 'rankBoard', kind: 'adventure', ...A });
+  const adv = await a.wait('rankBoard');
+  assert.equal(adv.kind, 'adventure');
+  assert.equal(adv.me?.rank, 1);
+  assert.equal(adv.rows[0].you, true);
+  assert.deepEqual(adv.rows[0].run, { difficulty: 'normal', waves: 20, victory: true, time: 1500, dex: 6, players: 2 });
+  a.send({ t: 'rankBoard', kind: 'gym' });
+  const gym = await a.wait('rankBoard');
+  assert.equal(gym.kind, 'gym');
+  assert.equal(gym.rows[0].name, '小赤');
+  assert.equal(gym.rows[0].badges, 2);
+  assert.equal(gym.me, null, '没带身份时不返回自己的名次');
+  a.ws.close();
+});
+
 test('对战 4v4：等不到人时 AI 补位，可以取消匹配', async () => {
   const c = new Client(), d = new Client();
   await Promise.all([c.open(), d.open()]);

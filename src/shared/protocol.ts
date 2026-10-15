@@ -5,6 +5,7 @@ import type { RunSummary } from './meta';
 import type { Command, Ev, GameSim, MeState, PublicState } from './sim/game';
 import type { SavedBuild } from './pvp/build';
 import type { PvpMatchResult, PvpMode } from './pvp/sim';
+import type { RankKind, RankRow, RunRecord } from './ranks';
 import { formOf } from './pokemon';
 
 export const PROTOCOL_VERSION = 7;
@@ -56,6 +57,8 @@ export interface JoinIdentity { trainer?: string; line?: LineId; shiny?: boolean
 export type C2S =
   | ({ t: 'create'; name: string; meta: Record<string, number>; v: number; public?: boolean } & JoinIdentity)
   | ({ t: 'join'; code: string; name: string; meta: Record<string, number>; v: number } & JoinIdentity)
+  /** 回到正在进行的联机冒险（离开或断线后，AI 一直在替你战斗）；token 是加入房间时服务器给的 */
+  | { t: 'rejoin'; code: string; token: string; v: number }
   | { t: 'pick'; line: LineId; shiny?: boolean }
   | { t: 'ready'; on: boolean }
   | { t: 'start' }
@@ -65,7 +68,7 @@ export type C2S =
   | { t: 'visibility'; public: boolean }
   | { t: 'browse'; on: boolean }
   | { t: 'stats' }
-  | { t: 'debug'; cmd: 'down' | 'endWave' | 'xp' | 'shiny' }
+  | { t: 'debug'; cmd: 'down' | 'downAll' | 'endWave' | 'xp' | 'shiny' }
   /** k：客户端收到的最新快照编号（顺便确认收到，服务器据此估计网络排队） */
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number; k?: number }
   | { t: 'ack'; k: number }
@@ -82,10 +85,18 @@ export type C2S =
   | { t: 'tpos'; x: number; y: number; d: number; m: 0 | 1 }
   | { t: 'pvpCancel' }
   | { t: 'pvpBoard'; mode: PvpMode; pid?: string; secret?: string }
+  /** 上报自己冒险的最好成绩（排行榜用，服务器只留最好的一次） */
+  | { t: 'runReport'; pid: string; secret: string; name: string; run: RunRecord }
+  /** 上报道馆徽章数；dex / shiny 为跟随的伙伴（排行榜上显示） */
+  | { t: 'gymReport'; pid: string; secret: string; name: string; badges: number; dex: number; shiny?: boolean }
+  | { t: 'rankBoard'; kind: RankKind; pid?: string; secret?: string }
   | Command;
 
 export type S2C =
-  | { t: 'joined'; code: string; you: number; solo: boolean }
+  /** token：离开或断线后用来回到这局冒险 */
+  | { t: 'joined'; code: string; you: number; solo: boolean; token?: string }
+  /** 回不去了（这局已经结束、房间不在了） */
+  | { t: 'rejoinFail'; msg: string }
   | { t: 'error'; msg: string; fatal?: boolean }
   | { t: 'lobby'; code: string; players: LobbyPlayer[]; inGame: boolean; difficulty: DifficultyId; public: boolean }
   | { t: 'rooms'; stats: ServerStats; rooms: RoomInfo[] }
@@ -104,6 +115,8 @@ export type S2C =
   | { t: 'pvpQueued'; mode: PvpMode; wait: number; range: number; searching: number; botIn: number }
   | { t: 'pvpCancelled' }
   | { t: 'pvpBoard'; mode: PvpMode; rows: PvpBoardRow[]; me: PvpRecord | null; players: number; history: PvpHistory[] }
+  /** 冒险 / 道馆排行榜；me 为自己（不在前 50 名时也有） */
+  | { t: 'rankBoard'; kind: RankKind; rows: RankRow[]; me: RankRow | null; players: number }
   | { t: 'pvpEnd'; result: PvpMatchResult; you: number; rating: PvpRatingChange | null }
   | { t: 'town'; you: number; peers: TownPeer[] };
 

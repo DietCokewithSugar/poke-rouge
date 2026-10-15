@@ -177,6 +177,19 @@ export const UI_ICONS: Record<string, Def> = {
   robot: { pal: { s: '#b9d4f0', b: '#2a6fb0', w: '#e6f4ff', y: '#ffd23f', d: '#7f93c0' }, rows: [
     '....kyyk....', '.....kk.....', '..kkkkkkkk..', '.kssssssssk.', '.ksbbssbbsk.', 'kksbwssbwskk',
     'kksssssssskk', '.ksskkkkssk.', '.kssssssssk.', '..kkkkkkkk..', '....kddk....', '..kkkkkkkk..'] },
+  // 设置界面：音乐（和音效的喇叭区分开）、手柄、菜单、说明
+  music: { pal: { w: '#e8eef8' }, rows: [
+    '......kk....', '......kwk...', '......kwwk..', '......kwkwk.', '......kwk.k.', '......kwk...',
+    '......kwk...', '..kkkkkwk...', '.kwwwwwwk...', '.kwwwwwwk...', '..kwwwwk....', '...kkkk.....'] },
+  pad: { pal: { s: '#b9cbf0', d: '#3a4566', r: '#ff5f6d', b: '#4fb4ff', g: '#5fe08a', y: '#ffd23f' }, rows: [
+    '............', '............', '.kkkkkkkkkk.', 'kssssssssssk', 'ksssdssssrsk', 'ksdddsssbsgk',
+    'ksssdssssysk', 'kssssssssssk', 'ksskkkkkkssk', 'kkk......kkk', '............', '............'] },
+  menu: { pal: { w: '#e8eef8' }, rows: [
+    '............', '.kkkkkkkkkk.', '.kwwwwwwwwk.', '.kkkkkkkkkk.', '............', '.kkkkkkkkkk.',
+    '.kwwwwwwwwk.', '.kkkkkkkkkk.', '............', '.kkkkkkkkkk.', '.kwwwwwwwwk.', '.kkkkkkkkkk.'] },
+  info: { pal: { b: '#4fb4ff', w: '#f4f8ff' }, rows: [
+    '....kkkk....', '..kkbbbbkk..', '.kbbbwwbbbk.', '.kbbbwwbbbk.', 'kbbbbbbbbbbk', 'kbbbwwwbbbbk',
+    'kbbbbwwbbbbk', 'kbbbbwwbbbbk', '.kbbbwwbbbk.', '.kbbwwwwbbk.', '..kkbbbbkk..', '....kkkk....'] },
   plus: { pal: { g: '#5fe08a' }, rows: [
     '............', '....kkkk....', '....kggk....', '....kggk....', '.kkkkggkkkk.', '.kggggggggk.',
     '.kggggggggk.', '.kkkkggkkkk.', '....kggk....', '....kggk....', '....kkkk....', '............'] },

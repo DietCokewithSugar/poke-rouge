@@ -13,7 +13,7 @@ import { iconImg } from '../gfx/icons';
 import { uiIcon } from '../gfx/uiicons';
 import { validateBuild } from '../../shared/pvp/build';
 import { sfx } from '../audio';
-import { PARTY_MAX, addToParty, releaseFromParty, type Profile, type RunReward } from '../save';
+import { PARTY_BONUS_TIER, PARTY_LIMIT, addToParty, partyMax, releaseFromParty, type Profile, type RunReward } from '../save';
 import { h, tip, toast } from './dom';
 import { itemInfo, skillIcon, skillInfo, typeBadge } from './describe';
 import { releaseModal } from './pvp';
@@ -140,19 +140,20 @@ function waveTable(s: RunSummary, page: number, onPage: (n: number) => void) {
 /** 结算后把这只宝可梦放进背包（满了要先放生一只） */
 function storeButton(p: Profile, s: RunSummary, state: { stored: boolean }) {
   const form = s.detail.form;
-  const btn = h('button', { class: 'btn store', disabled: state.stored }, state.stored ? '已放入背包 ✓' : `放入背包（${p.party.length} / ${PARTY_MAX}）`) as HTMLButtonElement;
+  const max = partyMax(p);
+  const btn = h('button', { class: 'btn store', disabled: state.stored }, state.stored ? '已放入背包 ✓' : `放入背包（${p.party.length} / ${max}）`) as HTMLButtonElement;
   const done = () => {
     state.stored = true;
     btn.disabled = true;
     btn.textContent = '已放入背包 ✓';
     sfx('buy');
-    toast(`${form} Lv${s.level} 已放入背包，可以在「宝可梦对战」里使用`, 'gold', 3200);
+    toast(`${form} Lv${s.level} 已放入背包，可以在对战场和道馆里使用`, 'gold', 3200);
   };
   btn.addEventListener('click', () => {
     if (btn.disabled) return;
     if (addToParty(p, s)) { done(); return; }
     sfx('click');
-    releaseModal(p.party, s.build ?? null, (uid) => {
+    releaseModal(p.party, max, s.build ?? null, (uid) => {
       releaseFromParty(p, uid);
       if (addToParty(p, s)) done();
     }, () => btn.focus());
@@ -160,7 +161,7 @@ function storeButton(p: Profile, s: RunSummary, state: { stored: boolean }) {
   tip(btn, () => h('div', { class: 'info' },
     h('b', null, '放入背包'),
     h('div', { class: 'small' }, '保留这一局的等级、形态、技能（含等级）、道具和升级强化。'),
-    h('div', { class: 'small' }, `可以用来和其他玩家对战（排位赛），最多保存 ${PARTY_MAX} 只。`),
+    h('div', { class: 'small' }, `可以用来对战和挑战道馆，最多保存 ${max} 只${max < PARTY_LIMIT ? `（对战场达到${PARTY_BONUS_TIER.name}后可以保存 ${PARTY_LIMIT} 只）` : ''}。`),
   ));
   return btn;
 }
