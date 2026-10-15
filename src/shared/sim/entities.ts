@@ -53,7 +53,11 @@ export interface SimPlayer {
   trainer: string;
   /** 这位玩家已经拥有的宝可梦（进化线）：没有的才会崇拜他 */
   owned: Set<string>;
+  /** 已经拥有的闪光宝可梦（进化线），和普通的分开算 */
+  ownedShiny: Set<string>;
   line: LineId;
+  /** 闪光宝可梦：六项能力各 +1% */
+  shiny: boolean;
   stage: number;
   level: number;
   xp: number;
@@ -117,6 +121,8 @@ export interface SimPlayer {
     deaths: number;
     /** 本局结交的伙伴（进化线） */
     recruits: string[];
+    /** 本局结交的闪光宝可梦（进化线） */
+    shinyRecruits: string[];
   };
 }
 
@@ -148,6 +154,8 @@ export interface Enemy {
   lastHit: number;
   age: number;
   dead?: boolean;
+  /** 闪光宝可梦：能力 +1%，打倒后一定会崇拜还没有它的训练家 */
+  shiny?: boolean;
   /** 可被同一环绕弹体再次命中的时间 */
   orbitHit?: Map<number, number>;
   /** 对战：这个目标代表的玩家（伤害会转给该玩家） */

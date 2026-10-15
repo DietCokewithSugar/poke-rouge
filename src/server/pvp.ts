@@ -22,7 +22,7 @@ export interface PvpClient {
   send(msg: S2C): void;
 }
 
-interface ModeRec { rating: number; best: number; wins: number; losses: number; draws: number; streak: number; games: number; dex: number }
+interface ModeRec { rating: number; best: number; wins: number; losses: number; draws: number; streak: number; games: number; dex: number; shiny?: boolean }
 interface StoredPlayer { pid: string; hash: string; name: string; created: number; last: number; modes: Partial<Record<PvpMode, ModeRec>>; history: PvpHistory[] }
 /** 玩家用过的队伍（AI 训练家会用它们补位）；power 为平均每只的强度 */
 interface Ghost { pid: string; name: string; team: SavedBuild[]; meta: Record<string, number>; trainer?: string; rating: number; power: number; at: number }
@@ -126,7 +126,10 @@ export class PvpService {
     const meP = me && typeof me !== 'string' ? me : null;
     const rows: PvpBoardRow[] = list.slice(0, 50).map((p, i) => {
       const r = p.modes[mode]!;
-      return { rank: i + 1, name: p.name, rating: Math.round(r.rating), wins: r.wins, losses: r.losses, draws: r.draws, streak: r.streak, dex: r.dex, you: p === meP || undefined };
+      return {
+        rank: i + 1, name: p.name, rating: Math.round(r.rating), wins: r.wins, losses: r.losses, draws: r.draws, streak: r.streak, dex: r.dex,
+        shiny: r.shiny || undefined, you: p === meP || undefined,
+      };
     });
     return { t: 'pvpBoard', mode, rows, me: meP ? this.record(meP, mode) : null, players: list.length, history: meP ? meP.history.slice(0, 10) : [] };
   }
@@ -275,9 +278,10 @@ export class PvpService {
       else if (score === 0) { r.losses++; r.streak = r.streak < 0 ? r.streak - 1 : -1; }
       else { r.draws++; r.streak = 0; }
       r.dex = buildDex(s.builds[0]);
+      r.shiny = s.builds[0].shiny || undefined;
       p.last = at;
       const opp = room.seats.filter((x) => x.team !== s.team).map((x) => x.name).join('、');
-      p.history.unshift({ at, mode, result: score === 1 ? 'win' : score === 0 ? 'loss' : 'draw', delta, dex: r.dex, opp });
+      p.history.unshift({ at, mode, result: score === 1 ? 'win' : score === 0 ? 'loss' : 'draw', delta, dex: r.dex, shiny: r.shiny, opp });
       p.history.length = Math.min(p.history.length, 12);
       for (const g of this.ghosts) if (g.pid === p.pid) g.rating = r.rating;
       this.touch();

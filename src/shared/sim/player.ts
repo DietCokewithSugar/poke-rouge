@@ -15,14 +15,18 @@ export function xpToNext(level: number): number {
   return (level + 3) * (level + 3);
 }
 
-export function createPlayer(sim: GameSim, id: number, name: string, line: LineId, meta: Record<string, number>, trainer = '', owned: Iterable<string> = []): SimPlayer {
+/** 玩家的身份：训练家、已经拥有的宝可梦（普通的和闪光的分开）、带来的是不是闪光宝可梦 */
+export interface PlayerIdent { trainer?: string; owned?: Iterable<string>; ownedShiny?: Iterable<string>; shiny?: boolean }
+
+export function createPlayer(sim: GameSim, id: number, name: string, line: LineId, meta: Record<string, number>, o: PlayerIdent = {}): SimPlayer {
   const mb = metaBonus(meta);
   const L = LINES[line];
-  const T = trainerOf(trainer);
+  const T = trainerOf(o.trainer);
   const metaMods: Partial<Mods> = { ...mb.mods };
   for (const [k, v] of Object.entries(T.mods)) metaMods[k as keyof Mods] = (metaMods[k as keyof Mods] ?? 0) + (v ?? 0);
   const p: SimPlayer = {
-    id, name, team: 0, bot: false, trainer: T.id, owned: new Set(owned), line, stage: 0, level: 1, xp: 0, money: 30 + mb.startMoney,
+    id, name, team: 0, bot: false, trainer: T.id, owned: new Set(o.owned ?? []), ownedShiny: new Set(o.ownedShiny ?? []),
+    line, shiny: !!o.shiny, stage: 0, level: 1, xp: 0, money: 30 + mb.startMoney,
     x: sim.w / 2, y: sim.h / 2, dir: 0, moving: false,
     hp: 1, alive: true, down: false, downT: 0, revive: 0,
     skills: L.start.map((id, i) => ({ id, lv: 1, cd: 0.5 + i * 0.2 })),
@@ -42,7 +46,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     stats: {
       kills: 0, damage: 0, superEff: 0, moneyEarned: 0, revives: 0, evolved: false, skillsFull: false, foreignSkill: false, bossKills: [], maxItems: 0,
       killsBy: {}, rankKills: { minion: 0, elite: 0, boss: 0 }, skillDmg: {}, taken: 0, healed: 0, crits: 0, dodges: 0, moneySpent: 0,
-      forms: [formOf(line, 0).dex], waves: [], mark: { kills: 0, damage: 0, taken: 0 }, kos: 0, deaths: 0, recruits: [],
+      forms: [formOf(line, 0).dex], waves: [], mark: { kills: 0, damage: 0, taken: 0 }, kos: 0, deaths: 0, recruits: [], shinyRecruits: [],
     },
   };
   recompute(p);
@@ -52,7 +56,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
 
 /** 按背包里保存的构筑创建玩家（对战用）。大木研究所的强化照常生效。 */
 export function createPlayerFromBuild(sim: GameSim, id: number, name: string, b: SavedBuild, meta: Record<string, number>, trainer = ''): SimPlayer {
-  const p = createPlayer(sim, id, name, b.line, meta, trainer);
+  const p = createPlayer(sim, id, name, b.line, meta, { trainer, shiny: !!b.shiny });
   p.stage = b.stage;
   p.level = b.level;
   p.items = Object.fromEntries(b.items.filter(([it, n]) => ITEMS[it] && n > 0));
@@ -95,7 +99,7 @@ export function recompute(p: SimPlayer) {
   if (p.buffT > 0) { m.haste += p.buff.haste; m.spePct += p.buff.spe; }
   m.maxHp += p.level - 1;
   const prevMax = p.d.maxHp;
-  p.d = derive(form.base, m);
+  p.d = derive(form.base, m, p.shiny);
   p.typeMods = tm;
   p.slots = Math.max(1, form.slots + m.slots + (L.awakenSlot && aw >= L.awakenSlot ? 1 : 0));
   if (p.d.maxHp > prevMax && p.alive && !p.down) p.hp = Math.min(p.d.maxHp, p.hp + (p.d.maxHp - prevMax));

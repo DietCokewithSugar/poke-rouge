@@ -6,6 +6,7 @@ import { LINES, LINE_IDS, LINE_OF_DEX, formOf, isFinal, type LineId } from '../p
 import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
+import { SHINY_STAT, shinyRate } from '../shiny';
 import { SKILLS, skillLevelCd } from '../skills';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
@@ -34,6 +35,10 @@ export interface PlayerInit {
   trainer?: string;
   /** 已经拥有的宝可梦（进化线）：击败没有的宝可梦时才会崇拜 */
   owned?: string[];
+  /** 已经拥有的闪光宝可梦（进化线） */
+  ownedShiny?: string[];
+  /** 带来的伙伴是闪光宝可梦 */
+  shiny?: boolean;
 }
 
 /** 击败后崇拜你的基础几率：乱入的野生宝可梦最高，普通小怪很低，首领不会崇拜 */
@@ -65,6 +70,7 @@ export interface MeState {
   maxHp: number;
   speed: number;
   down: boolean;
+  shiny: boolean;
   slots: number;
   skills: { id: string; lv: number; cd: number; max: number }[];
   items: [string, number][];
@@ -96,7 +102,7 @@ export interface PublicState {
   biome: number;
   interLeft: number;
   boss: { name: string; hp: number; max: number } | null;
-  players: { id: number; name: string; trainer: string; line: LineId; dex: number; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean }[];
+  players: { id: number; name: string; trainer: string; line: LineId; dex: number; shiny?: boolean; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean }[];
   /** 对战模式的额外信息 */
   pvp?: PvpPublic;
 }
@@ -105,6 +111,10 @@ export class GameSim {
   w = ARENA_W;
   h = ARENA_H;
   rng: Rng;
+  /** 闪光判定单独用一个随机数：不打乱同一个种子下其它随机事件的顺序 */
+  private shinyRng: Rng;
+  /** 调试：接下来出现的 N 只宝可梦一定是闪光的 */
+  forceShiny = 0;
   time = 0;
   phase: SimPhase = 'inter';
   wave = 0;
@@ -145,8 +155,9 @@ export class GameSim {
 
   constructor(inits: PlayerInit[], seed: number, difficulty: DifficultyId = 'easy', start = true) {
     this.rng = new Rng(seed);
+    this.shinyRng = new Rng(seed ^ 0x5a17c0de);
     this.diff = difficultyOf(difficulty);
-    for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta, i.trainer, i.owned));
+    for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta, i));
     this.startPlayers = inits.length;
     if (start) this.startWave();
   }
@@ -227,12 +238,27 @@ export class GameSim {
       ai: { state: 0, t: 0, cd: this.rng.range(0.6, 1.8), cd2: this.rng.range(1.5, 3), tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
       dir: Math.PI / 2, hidden: false, lastHit: -1, age: 0,
     };
+    if (this.forceShiny > 0 || this.shinyRng.chance(this.shinyRate())) {
+      this.forceShiny = Math.max(0, this.forceShiny - 1);
+      e.shiny = true;
+      e.hp = e.maxHp = Math.round(hp * SHINY_STAT);
+      e.dmg *= SHINY_STAT;
+      e.speed *= SHINY_STAT;
+      this.emit(['shiny', e.id, e.kind, Math.round(x), Math.round(y)]);
+    }
     this.enemies.push(e);
     if (def.rank === 'boss') {
       this.boss = e;
       this.emit(['boss', e.id, def.name]);
     }
     return e;
+  }
+
+  /** 每只宝可梦出现时是闪光宝可梦的几率：联机时按全队最高的闪光加成算 */
+  shinyRate() {
+    let bonus = 0;
+    for (const p of this.players) bonus = Math.max(bonus, p.d.shiny);
+    return shinyRate(bonus);
   }
 
   killEnemy(e: Enemy, killer: SimPlayer | null, silent = false) {
@@ -260,30 +286,48 @@ export class GameSim {
       this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)) * cm);
       return;
     }
-    this.dropCandy(e.x, e.y, e.def.candy * cm);
+    this.dropCandy(e.x, e.y, e.def.candy * cm * (e.shiny ? 3 : 1));
     const luck = 1 + Math.max(0, this.players.reduce((a, p) => a + p.d.luck, 0) / Math.max(1, this.players.length)) / 100;
     if (e.def.rank !== 'minion' || this.rng.chance(0.004 * luck)) this.dropPickup('ball', e.x + this.rng.range(-8, 8), e.y + this.rng.range(-8, 8), 1);
     if (e.def.id === 'chansey' || this.rng.chance(0.012 * luck)) this.dropPickup('berry', e.x + this.rng.range(-6, 6), e.y + this.rng.range(-6, 6), 1);
   }
 
+  /** 击败者想要的话给击败者，否则给附近想要的队友 */
+  private recruitTarget(e: Enemy, killer: SimPlayer, want: (p: SimPlayer) => boolean): SimPlayer | null {
+    if (want(killer)) return killer;
+    let p: SimPlayer | null = null;
+    let bd = Infinity;
+    for (const q of this.players) {
+      if (!want(q) || !this.isAlly(killer, q)) continue;
+      const d = (q.x - e.x) ** 2 + (q.y - e.y) ** 2;
+      if (d < bd) { bd = d; p = q; }
+    }
+    return p;
+  }
+
   /**
    * 崇拜（参考宝可梦不可思议的迷宫的"想成为伙伴"）：击败野生宝可梦时，有几率让它崇拜你，
    * 解锁这一整条进化线。击败者已经有了的话，让给附近还没有的队友。
+   * 闪光宝可梦一定会崇拜还没有这只闪光宝可梦的训练家（首领和不会崇拜的宝可梦，要先拥有普通的才行）；
+   * 大家都有了，就和普通的野生宝可梦一样判定。
    */
   private rollRecruit(e: Enemy, killer: SimPlayer) {
     const line = LINE_OF_DEX[e.def.dex];
     const L = line ? LINES[line] : null;
-    if (!L || L.unlock.recruit <= 0 || e.def.rank === 'boss') return;
-    const want = (p: SimPlayer) => !p.owned.has(line);
-    let p: SimPlayer | null = want(killer) ? killer : null;
-    if (!p) {
-      let bd = Infinity;
-      for (const q of this.players) {
-        if (!want(q) || !this.isAlly(killer, q)) continue;
-        const d = (q.x - e.x) ** 2 + (q.y - e.y) ** 2;
-        if (d < bd) { bd = d; p = q; }
+    if (!L) return;
+    const open = L.unlock.recruit > 0 && e.def.rank !== 'boss';
+    if (e.shiny) {
+      const q = this.recruitTarget(e, killer, (p) => !p.ownedShiny.has(line) && (open || p.owned.has(line)));
+      if (q) {
+        q.ownedShiny.add(line);
+        q.stats.shinyRecruits.push(line);
+        this.emit(['recruit', q.id, e.def.dex, line, Math.round(e.x), Math.round(e.y), 1]);
+        this.dirty.add(q.id);
+        return;
       }
     }
+    if (!open) return;
+    const p = this.recruitTarget(e, killer, (q) => !q.owned.has(line));
     if (!p) return;
     const B = RECRUIT_BASE;
     const base = e.def.wild ? B.wild : e.def.ai === 'flee' ? B.treasure : e.def.rank === 'elite' ? B.elite : B.minion;
@@ -428,7 +472,10 @@ export class GameSim {
   private endWave() {
     this.logWave();
     const victory = this.wave >= TOTAL_WAVES;
-    for (const e of this.enemies) this.emit(['die', e.id, Math.round(e.x), Math.round(e.y), e.kind]);
+    for (const e of this.enemies) {
+      this.emit(['die', e.id, Math.round(e.x), Math.round(e.y), e.kind]);
+      if (e.shiny && !e.dead && e !== this.boss) this.emit(['msg', `闪光的${e.def.name}逃走了……`]);
+    }
     if (this.boss && !this.boss.dead) this.emit(['msg', `${this.boss.def.name}逃走了……`]);
     this.enemies = [];
     this.projs = [];
@@ -966,7 +1013,7 @@ export class GameSim {
     return {
       id: p.id, line: p.line, stage: p.stage, dex: form.dex, form: form.name, level: p.level,
       xp: Math.floor(p.xp), xpNext: xpToNext(p.level), money: Math.floor(p.money),
-      hp: Math.ceil(p.hp), maxHp: p.d.maxHp, speed: this.moveSpeed(p), down: p.down,
+      hp: Math.ceil(p.hp), maxHp: p.d.maxHp, speed: this.moveSpeed(p), down: p.down, shiny: p.shiny,
       slots: p.slots,
       // max 是实际的冷却时间（技能等级与技能急速都算进去），界面按它画冷却进度
       // 没有目标时技能每 0.1 秒重试一次，这种状态当作已经就绪，免得冷却图标一闪一闪
@@ -982,6 +1029,8 @@ export class GameSim {
         moveSpeed: Math.round(this.moveSpeed(p)),
         enemies: Math.round(p.d.enemies),
         recruit: Math.round((p.d.recruitMult - 1) * 100),
+        // 全队的闪光几率（1/N 的 N）
+        shiny: Math.round(1 / this.shinyRate()),
       },
       cards: p.cards,
       cardRerollCost: cardRerollCost(this, p),
@@ -1013,7 +1062,7 @@ export class GameSim {
       interLeft: this.players.length > 1 ? Math.max(0, Math.round(INTERMISSION_TIMEOUT - this.interT)) : -1,
       boss: this.boss && !this.boss.dead ? { name: this.boss.def.name, hp: Math.max(0, Math.round(this.boss.hp)), max: this.boss.maxHp } : null,
       players: this.players.map((p) => ({
-        id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level,
+        id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, shiny: p.shiny || undefined, level: p.level,
         hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills, bot: p.bot || undefined,
       })),
     };
@@ -1029,6 +1078,7 @@ export class GameSim {
     }
     return {
       line: p.line,
+      shiny: p.shiny,
       trainer: p.trainer,
       difficulty: this.diff.id,
       neverEvolved: L.forms.length > 1 && p.stage === 0,
@@ -1049,6 +1099,7 @@ export class GameSim {
       bossKills: p.stats.bossKills,
       damage: Math.round(p.stats.damage),
       recruits: p.stats.recruits.slice(),
+      shinyRecruits: p.stats.shinyRecruits.slice(),
       typeDmg,
       detail: {
         time: Math.round(this.time),

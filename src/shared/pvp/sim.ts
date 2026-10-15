@@ -62,7 +62,7 @@ export interface PvpPublic {
 
 export interface PvpPlayerResult {
   id: number; name: string; team: number; bot: boolean; trainer: string; owner: number; helper: boolean;
-  line: SavedBuild['line']; dex: number; form: string; level: number;
+  line: SavedBuild['line']; dex: number; shiny?: boolean; form: string; level: number;
   damage: number; taken: number; healed: number; kos: number; deaths: number; revives: number; crits: number; dodges: number; superEff: number;
   hp: number; maxHp: number; alive: boolean;
   skillDmg: [string, number][];
@@ -577,7 +577,7 @@ export class PvpSim extends GameSim {
       players: this.players.map((p) => {
         const form = formOf(p.line, p.stage);
         return {
-          id: p.id, name: p.name, team: p.team, bot: p.bot, trainer: p.trainer, line: p.line, dex: form.dex, form: form.name, level: p.level,
+          id: p.id, name: p.name, team: p.team, bot: p.bot, trainer: p.trainer, line: p.line, dex: form.dex, shiny: p.shiny || undefined, form: form.name, level: p.level,
           ...this.ownerOf(p.id),
           damage: Math.round(p.stats.damage), taken: Math.round(p.stats.taken), healed: Math.round(p.stats.healed),
           kos: p.stats.kos, deaths: p.stats.deaths, revives: p.stats.revives, crits: p.stats.crits, dodges: p.stats.dodges, superEff: p.stats.superEff,

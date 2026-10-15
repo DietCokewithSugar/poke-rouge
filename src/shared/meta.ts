@@ -33,6 +33,7 @@ export const META_UPGRADES: MetaUpgrade[] = [
   { id: 'money', name: '零花钱', desc: '开局金钱 +10', max: 5, base: 25, per: {}, startMoney: 10, icon: 'coin' },
   { id: 'reroll', name: '商店会员卡', desc: '每波商店免费刷新 +1 次', max: 2, base: 80, per: { rerolls: 1 }, icon: 'card' },
   { id: 'recruit', name: '友情缎带', desc: '野生宝可梦的崇拜几率 +10%', max: 5, base: 35, per: { recruit: 10 }, icon: 'bow' },
+  { id: 'shiny', name: '闪光研究', desc: '闪光宝可梦出现的几率 +60%', max: 5, base: 40, per: { shiny: 60 }, icon: 'shiny' },
 ];
 
 export function metaCost(u: MetaUpgrade, lv: number): number {
@@ -69,6 +70,8 @@ export function metaBonus(levels: Record<string, number> | undefined): MetaBonus
 /** 一局结束后服务器发给每位玩家的战绩，用于成就判定与星之沙结算。 */
 export interface RunSummary {
   line: LineId;
+  /** 这一局用的是闪光宝可梦 */
+  shiny: boolean;
   trainer: string;
   difficulty: DifficultyId;
   /** 有进化型的精灵全程没有进化 */
@@ -91,6 +94,8 @@ export interface RunSummary {
   damage: number;
   /** 本局结交的伙伴（进化线 id） */
   recruits: string[];
+  /** 本局结交的闪光宝可梦（进化线 id） */
+  shinyRecruits: string[];
   /** 各属性技能造成的伤害 */
   typeDmg: Record<string, number>;
   /** 结算界面的详细统计 */
@@ -132,6 +137,8 @@ export interface LifetimeStats {
   owned: number;
   /** 拿到的道馆徽章数 */
   badges: number;
+  /** 拥有的闪光宝可梦种类（进化线） */
+  shinies: number;
 }
 
 /** 击败道馆馆主时的情况（判定道馆成就用） */
@@ -162,9 +169,9 @@ export interface AchievementDef {
 
 /** 不在冒险结算时判定成就（例如赢了道馆之后）用的空战绩：只有累计统计和道馆成就可能达成 */
 export const NO_RUN: RunSummary = {
-  line: 'charmander', trainer: '', difficulty: 'easy', neverEvolved: false, wavesCleared: 0, victory: false, kills: 0, level: 0, stage: 0,
+  line: 'charmander', shiny: false, trainer: '', difficulty: 'easy', neverEvolved: false, wavesCleared: 0, victory: false, kills: 0, level: 0, stage: 0,
   finalForm: false, evolved: false, skillsFull: false, foreignSkill: false, items: 0, moneyEarned: 0, superEff: 0, players: 0, revives: 0,
-  bossKills: [], damage: 0, recruits: [], typeDmg: {},
+  bossKills: [], damage: 0, recruits: [], shinyRecruits: [], typeDmg: {},
   detail: { time: 0, dex: 0, form: '', kills: { minion: 0, elite: 0, boss: 0 }, topKills: [], damageTaken: 0, healed: 0, crits: 0, dodges: 0, moneySpent: 0, skillDmg: [], skills: [], items: [], waves: [], forms: [] },
 };
 
@@ -216,12 +223,17 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'gym_underdog', name: '以弱胜强', desc: '用平均等级比馆主低 3 级以上的队伍击败道馆馆主', reward: 80, check: (_r, _s, g) => !!g?.underdog },
   { id: 'gym_auto', name: '斗蛐蛐大师', desc: '开着自动战斗击败道馆馆主', reward: 40, check: (_r, _s, g) => !!g?.auto },
   { id: 'gym_flawless', name: '一只都没少', desc: '自己的三只宝可梦都没有退场，击败道馆馆主', reward: 80, check: (_r, _s, g) => !!g?.flawless },
+  // 闪光宝可梦
+  { id: 'shiny_1', name: '闪闪发光', desc: '得到第一只闪光宝可梦', reward: 60, check: (_r, s) => s.shinies >= 1 },
+  { id: 'shiny_5', name: '闪光收藏家', desc: '拥有 5 种闪光宝可梦', reward: 150, check: (_r, s) => s.shinies >= 5 },
+  { id: 'shiny_15', name: '异色猎人', desc: '拥有 15 种闪光宝可梦', reward: 400, check: (_r, s) => s.shinies >= 15 },
+  { id: 'shiny_partner', name: '闪耀登场', desc: '带着闪光宝可梦完成第 10 波', reward: 80, check: (r) => r.shiny && r.wavesCleared >= 10 },
 ];
 
 export const ACHIEVEMENT_BY_ID: Record<string, AchievementDef> = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a]));
 
 export function stardustFor(r: RunSummary): number {
-  let s = r.wavesCleared * 12 + Math.floor(r.kills / 20) + r.recruits.length * 15;
+  let s = r.wavesCleared * 12 + Math.floor(r.kills / 20) + r.recruits.length * 15 + r.shinyRecruits.length * 30;
   if (r.bossKills.includes('snorlax')) s += 40;
   if (r.bossKills.includes('mew')) s += 120;
   if (r.victory) s += 150;

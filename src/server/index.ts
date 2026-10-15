@@ -101,7 +101,7 @@ function newCode(): string {
   throw new Error('no room code available');
 }
 
-interface Presence { name: string; trainer: string; dex: number; town: boolean; busy: boolean; x: number; y: number; d: number; m: 0 | 1 }
+interface Presence { name: string; trainer: string; dex: number; shiny: boolean; town: boolean; busy: boolean; x: number; y: number; d: number; m: 0 | 1 }
 
 interface Client {
   ws: WebSocket; room: Room | null; id: number; alive: boolean; budget: number; browsing: boolean; lastStats: string;
@@ -183,7 +183,10 @@ wss.on('connection', (ws: WebSocket) => {
     if (msg.t === 'presence') {
       const prev = c.presence;
       const dex = Number.isInteger(msg.dex) && msg.dex >= 1 && msg.dex <= 151 ? msg.dex : 25;
-      c.presence = { name: cleanName(msg.name), trainer: trainerOf(msg.trainer).id, dex, town: !!msg.town, busy: !!msg.busy, x: prev?.x ?? -1, y: prev?.y ?? -1, d: prev?.d ?? 0, m: 0 };
+      c.presence = {
+        name: cleanName(msg.name), trainer: trainerOf(msg.trainer).id, dex, shiny: msg.shiny === 1, town: !!msg.town, busy: !!msg.busy,
+        x: prev?.x ?? -1, y: prev?.y ?? -1, d: prev?.d ?? 0, m: 0,
+      };
       if (c.presence.town) c.lastTown = '';
       return;
     }
@@ -280,7 +283,9 @@ setInterval(() => {
     if (!p || c.ws.readyState !== c.ws.OPEN) continue;
     const w = whereOf(c);
     if (w === 'town') inTown.push(c);
-    if (peers.length < TOWN_MAX || w !== 'town') peers.push({ id: c.uid, name: p.name, trainer: p.trainer, dex: p.dex, x: p.x, y: p.y, d: p.d, m: p.m, w: TOWN_WHERE.indexOf(w) });
+    if (peers.length < TOWN_MAX || w !== 'town') {
+      peers.push({ id: c.uid, name: p.name, trainer: p.trainer, dex: p.dex, ...(p.shiny ? { s: 1 as const } : {}), x: p.x, y: p.y, d: p.d, m: p.m, w: TOWN_WHERE.indexOf(w) });
+    }
   }
   if (!inTown.length) return;
   const list = JSON.stringify(peers.slice(0, TOWN_MAX * 2));

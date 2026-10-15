@@ -16,6 +16,8 @@ export interface SavedBuild {
   skills: { id: string; lv: number }[];
   items: [string, number][];
   levelMods: Partial<Record<keyof Mods, number>>;
+  /** 闪光宝可梦（和普通的是两只，分别培养） */
+  shiny?: boolean;
 }
 
 /** 升级卡每级的数值（与 sim/player.ts 的升级卡一致），用来校验构筑是否合理 */
@@ -71,7 +73,7 @@ export function validateBuild(raw: unknown): SavedBuild | string {
     if (per === undefined || typeof v !== 'number' || v < 0 || v > per * 4 * Math.max(0, level - 1)) return '强化数值不合法';
     if (v > 0) levelMods[k as keyof Mods] = v;
   }
-  return { line, stage: b.stage, level, skills, items, levelMods };
+  return { line, stage: b.stage, level, skills, items, levelMods, ...(b.shiny === true ? { shiny: true } : {}) };
 }
 
 /** 校验出战队伍：1 ~ max 只，同一个构筑不能上场两次 */
@@ -126,6 +128,7 @@ export function buildOf(p: SimPlayer): SavedBuild {
     skills: p.skills.map((s) => ({ id: s.id, lv: s.lv })),
     items: Object.entries(p.items).filter(([, n]) => n > 0),
     levelMods,
+    ...(p.shiny ? { shiny: true } : {}),
   };
 }
 
