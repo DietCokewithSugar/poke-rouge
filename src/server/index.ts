@@ -42,7 +42,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
     const body = url.pathname === '/api/rooms' ? { stats: stats(), rooms: publicRooms() }
       : url.pathname === '/api/pvp/leaderboard' ? (({ rows, players, mode }) => ({ mode, players, rows }))(pvp.board((url.searchParams.get('mode') ?? '1v1') as PvpMode))
-      : { ok: true, ...stats() };
+      : { ok: true, ...stats(), perf: perfStats() };
     res.end(JSON.stringify(body));
     return;
   }
@@ -63,7 +63,28 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(file).pipe(res);
 });
 
-const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024, perMessageDeflate: false });
+/**
+ * 开启 permessage-deflate：JSON 状态与事件里大量重复的字段名压缩后只剩很小一部分，
+ * 跨境线路带宽紧张、丢包时能明显减少排队。窗口取小一些，控制每条连接的内存。
+ */
+const wss = new WebSocketServer({
+  noServer: true,
+  maxPayload: 8 * 1024,
+  perMessageDeflate: {
+    zlibDeflateOptions: { level: 3, memLevel: 7 },
+    serverMaxWindowBits: 13,
+    clientMaxWindowBits: 13,
+    threshold: 200,
+    concurrencyLimit: 8,
+  },
+});
+
+/** 可丢弃的数据（快照、纯视觉事件）在待发送超过这个量时直接跳过：对实时游戏来说过时的画面没有意义，只会越积越多 */
+const DROP_BYTES = Number(process.env.NET_DROP_BYTES || 32 * 1024);
+
+/** 服务器性能统计：每秒更新一次，/api/stats 里可以看到，用来判断卡顿来自服务器还是网络 */
+const perf = { tickAvgMs: 0, tickMaxMs: 0, loopLagMs: 0, outKBps: 0, dropped: 0 };
+let tickSum = 0, tickN = 0, tickMax = 0, outBytes = 0, dropped = 0, lagMax = 0;
 
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url || '/', 'http://x');
@@ -81,7 +102,7 @@ function newCode(): string {
 
 interface Client {
   ws: WebSocket; room: Room | null; id: number; alive: boolean; budget: number; browsing: boolean; lastStats: string;
-  conn: { send(data: string | ArrayBuffer): void };
+  conn: { send(data: string | ArrayBuffer, droppable?: boolean): void; buffered(): number };
   pvp: PvpRoom | null; pvpId: number;
   send(msg: S2C): void;
 }
@@ -92,6 +113,10 @@ function stats(): ServerStats {
   for (const r of rooms.values()) if (r.inGame) playing += r.members.size;
   const pv = pvp.stats();
   return { online: clients.size, playing: playing + pv.playing, rooms: rooms.size, pvpQueue: pv.queue, pvpPlaying: pv.playing };
+}
+
+function perfStats() {
+  return { ...perf, memMB: Math.round(process.memoryUsage().rss / 1048576), uptimeSec: Math.round(process.uptime()) };
 }
 
 function publicRooms(): RoomInfo[] {
@@ -108,12 +133,15 @@ function sendJson(c: Client, msg: S2C) {
 
 wss.on('connection', (ws: WebSocket) => {
   const conn = {
-    send(data: string | ArrayBuffer) {
+    send(data: string | ArrayBuffer, droppable = false) {
       if (ws.readyState !== ws.OPEN) return;
-      // 网络太慢时丢弃快照（下一帧会带上最新状态），避免积压
-      if (typeof data !== 'string' && ws.bufferedAmount > 512 * 1024) return;
-      ws.send(data);
+      // 网络慢的时候跳过快照（下一帧会带上最新状态），避免积压出几秒钟的延迟
+      if (droppable && ws.bufferedAmount > DROP_BYTES) { dropped++; return; }
+      const size = typeof data === 'string' ? data.length : data.byteLength;
+      outBytes += size;
+      ws.send(data, { compress: size > 200 });
     },
+    buffered: () => ws.bufferedAmount,
   };
   const c: Client = {
     ws, room: null, id: 0, alive: true, budget: 200, browsing: false, lastStats: '', conn, pvp: null, pvpId: 0,
@@ -222,12 +250,15 @@ let acc = 0;
 const STEP = 1000 / TICK_RATE;
 setInterval(() => {
   const now = performance.now();
+  // 事件循环延迟：定时器本该每 STEP/2 触发一次，晚到的部分说明服务器忙不过来
+  lagMax = Math.max(lagMax, now - last - STEP / 2);
   acc += now - last;
   last = now;
   let steps = 0;
   while (acc >= STEP && steps < 4) {
     acc -= STEP;
     steps++;
+    const t0 = performance.now();
     for (const room of rooms.values()) {
       try { room.update(); } catch (err) {
         console.error(`房间 ${room.code} 出错`, err);
@@ -242,9 +273,21 @@ setInterval(() => {
         for (const s of room.seats) s.conn?.send(JSON.stringify({ t: 'error', msg: '对战出错了，本场不计分', fatal: true } satisfies S2C));
       }
     }
+    const dt = performance.now() - t0;
+    tickSum += dt; tickN++; tickMax = Math.max(tickMax, dt);
   }
   if (acc > STEP * 4) acc = 0;
 }, STEP / 2);
+
+// 每秒汇总一次性能数据
+setInterval(() => {
+  perf.tickAvgMs = tickN ? Math.round((tickSum / tickN) * 100) / 100 : 0;
+  perf.tickMaxMs = Math.round(tickMax * 100) / 100;
+  perf.loopLagMs = Math.round(lagMax * 10) / 10;
+  perf.outKBps = Math.round(outBytes / 102.4) / 10;
+  perf.dropped = dropped;
+  tickSum = 0; tickN = 0; tickMax = 0; outBytes = 0; dropped = 0; lagMax = 0;
+}, 1000);
 
 // 对战匹配
 setInterval(() => pvp.tick(), 500);

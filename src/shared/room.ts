@@ -1,11 +1,10 @@
 import { LINES, LINE_IDS, formOf, type LineId } from './pokemon';
 import { DIFFICULTY_IDS, type DifficultyId } from './difficulty';
 import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
+import { PeerSync, cullEvents, type Conn } from './netsync';
 import { GameSim, TICK_RATE } from './sim/game';
 
-export interface Conn {
-  send(data: string | ArrayBuffer): void;
-}
+export type { Conn } from './netsync';
 
 interface Member {
   conn: Conn;
@@ -14,6 +13,7 @@ interface Member {
   line: LineId | null;
   ready: boolean;
   joinedAt: number;
+  sync: PeerSync;
 }
 
 const SNAPSHOT_EVERY = 2;
@@ -76,7 +76,7 @@ export class Room {
     if (this.sim) return '该房间正在游戏中，请等待本局结束';
     let id = 1;
     while (this.members.has(id)) id++;
-    this.members.set(id, { conn, name: cleanName(name), meta: cleanMeta(meta), line: null, ready: false, joinedAt: ++this.joinSeq });
+    this.members.set(id, { conn, name: cleanName(name), meta: cleanMeta(meta), line: null, ready: false, joinedAt: ++this.joinSeq, sync: new PeerSync() });
     this.send(conn, { t: 'joined', code: this.code, you: id, solo: this.solo });
     this.sendLobby();
     return id;
@@ -173,6 +173,13 @@ export class Room {
         return;
       case 'pos':
         if (this.sim && !this.paused) this.sim.setPlayerPos(id, +msg.x, +msg.y, !!msg.m, +msg.d);
+        if (msg.k !== undefined) m.sync.ack(+msg.k, performance.now());
+        return;
+      case 'ack':
+        m.sync.ack(+msg.k, performance.now());
+        return;
+      case 'view':
+        m.sync.setView(+msg.w, +msg.h);
         return;
       case 'create':
       case 'join':
@@ -208,6 +215,7 @@ export class Room {
     this.broadcast({ t: 'start', w: this.sim.w, h: this.sim.h, players: inits.map((i) => ({ id: i.id, name: i.name, line: i.line })) });
     this.broadcast({ t: 'ev', e: this.sim.flushEvents() });
     this.sendPublic();
+    for (const m of this.members.values()) m.sync.reset();
     for (const p of this.sim.players) this.sim.dirty.add(p.id);
     this.flushPrivate();
   }
@@ -218,23 +226,47 @@ export class Room {
     if (!sim || this.paused) return;
     sim.step(1 / TICK_RATE);
     this.tick++;
-    if (this.tick % SNAPSHOT_EVERY === 0 || sim.phase !== this.lastPhase) {
-      const snap = encodeSnapshot(sim, this.tick);
-      for (const m of this.members.values()) m.conn.send(snap);
+    const phaseChanged = sim.phase !== this.lastPhase;
+    if (this.tick % SNAPSHOT_EVERY === 0 || phaseChanged) {
       const ev = sim.flushEvents();
-      if (ev.length) this.broadcast({ t: 'ev', e: ev });
+      if (this.solo) {
+        const snap = encodeSnapshot(sim, this.tick);
+        for (const m of this.members.values()) {
+          m.conn.send(snap);
+          if (ev.length) m.conn.send(JSON.stringify({ t: 'ev', e: ev } satisfies S2C));
+        }
+      } else {
+        for (const [id, m] of this.members) this.sendFrame(sim, id, m, ev, phaseChanged);
+      }
     }
     if (sim.phase !== this.lastPhase || this.tick % STATE_EVERY === 0) {
+      const force = sim.phase !== this.lastPhase;
       this.lastPhase = sim.phase;
-      this.sendPublic();
+      this.sendPublic(force);
     }
     if (sim.phase === 'wave' && this.tick % STATE_EVERY === 3) for (const p of sim.players) sim.dirty.add(p.id);
     this.flushPrivate();
     if (sim.phase === 'over' || sim.phase === 'won') this.endGame();
   }
 
-  private sendPublic() {
-    if (this.sim) this.broadcast({ t: 'st', s: this.sim.publicState() });
+  /** 联机：按这位玩家的视野裁剪快照与特效；网络拥堵时降低快照频率、只发关键事件 */
+  private sendFrame(sim: GameSim, id: number, m: Member, ev: ReturnType<GameSim['flushEvents']>, force: boolean) {
+    const box = m.sync.box(sim.players.find((p) => p.id === id));
+    const now = performance.now();
+    const level = m.sync.congestion(now, m.conn.buffered?.() ?? 0);
+    if (force || m.sync.shouldSend(this.tick, level)) {
+      m.conn.send(encodeSnapshot(sim, this.tick, box), !force);
+      m.sync.markSent(this.tick, now);
+    }
+    const list = cullEvents(ev, box, level > 0);
+    if (list.length) m.conn.send(JSON.stringify({ t: 'ev', e: list } satisfies S2C));
+  }
+
+  /** force：阶段变化等必须马上发的情况；平时堵塞的连接只发三分之一 */
+  private sendPublic(force = true) {
+    if (!this.sim) return;
+    const msg = JSON.stringify({ t: 'st', s: this.sim.publicState() } satisfies S2C);
+    for (const m of this.members.values()) if (force || m.sync.level < 2 || this.tick % (STATE_EVERY * 3) === 0) m.conn.send(msg);
   }
 
   private flushPrivate() {
@@ -243,7 +275,9 @@ export class Room {
     for (const id of sim.dirty) {
       const p = sim.players.find((q) => q.id === id);
       const m = this.members.get(id);
-      if (p && m) this.send(m.conn, { t: 'me', s: sim.privateState(p) });
+      if (!p || !m) continue;
+      const msg = m.sync.privateMsg(sim, p);
+      if (msg) m.conn.send(msg);
     }
     sim.dirty.clear();
   }

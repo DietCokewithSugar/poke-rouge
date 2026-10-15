@@ -145,9 +145,9 @@ const LIST: ItemDef[] = [
   I({ id: 'everstone', name: '不变之石', tier: 2, price: 36, special: 'everstone', max: 1, icon: 'everstone', group: 'held', desc: '携带后不会再进化；尚未进化到最终形态时，全伤害 +10%、经验 +15%。' }),
 
   // ======================= 三阶 =======================
-  I({ id: 'choice_band', name: '讲究头带', tier: 3, price: 95, mods: { atkPct: 30, slots: -1 }, max: 1, icon: 'headband_gold', group: 'held', desc: '技能栏 -1。' }),
-  I({ id: 'choice_specs', name: '讲究眼镜', tier: 3, price: 95, mods: { spaPct: 30, slots: -1 }, max: 1, icon: 'cspecs', group: 'held', desc: '技能栏 -1。' }),
-  I({ id: 'choice_scarf', name: '讲究围巾', tier: 3, price: 90, mods: { spePct: 30, haste: 15, slots: -1 }, max: 1, icon: 'scarf_blue', group: 'held', desc: '技能栏 -1。' }),
+  I({ id: 'choice_band', name: '讲究头带', tier: 3, price: 95, mods: { atkPct: 30, slots: -1 }, max: 1, icon: 'headband_gold', group: 'held', desc: '讲究系道具：专注于少数招式，属性大幅提升。' }),
+  I({ id: 'choice_specs', name: '讲究眼镜', tier: 3, price: 95, mods: { spaPct: 30, slots: -1 }, max: 1, icon: 'cspecs', group: 'held', desc: '讲究系道具：专注于少数招式，属性大幅提升。' }),
+  I({ id: 'choice_scarf', name: '讲究围巾', tier: 3, price: 90, mods: { spePct: 30, haste: 15, slots: -1 }, max: 1, icon: 'scarf_blue', group: 'held', desc: '讲究系道具：专注于少数招式，属性大幅提升。' }),
   I({ id: 'life_orb', name: '生命宝珠', tier: 3, price: 100, mods: { dmg: 20, maxHp: -6 }, icon: 'orb', group: 'held' }),
   I({ id: 'expert_belt', name: '达人带', tier: 3, price: 90, mods: { superEff: 40, dmg: 4 }, icon: 'belt_blue', group: 'held', desc: '效果拔群时伤害更高。' }),
   I({ id: 'weakness_policy', name: '弱点保险', tier: 3, price: 92, mods: { atkPct: 10, spaPct: 10, defPct: -6, spdPct: -6 }, icon: 'policy', group: 'held' }),

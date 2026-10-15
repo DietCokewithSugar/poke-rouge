@@ -76,6 +76,9 @@ class App {
   where: 'menu' | 'browse' | 'lobby' | 'game' | 'results' | 'pvp' = 'menu';
   private menu = new MenuScene(this.canvas, () => this.profile.settings);
   private pvpUi: PvpScreen | null = null;
+  /** 联机延迟（往返，毫秒） */
+  private rtt = 0;
+  private pingTimer = 0;
   /** 正在排队或进行中的对战 */
   private pvpMatch: PvpMatch | null = null;
 
@@ -105,10 +108,11 @@ class App {
     portrait.addEventListener('change', onOrient);
     $('#rotate-fs').addEventListener('click', () => mobileFullscreen());
     this.menu.start();
+    // 先读地址栏参数：标题界面会把 ?room= 邀请参数清掉
+    const params = new URLSearchParams(location.search);
     this.ensureWs();
     this.title();
     void preload(ALL_DEX);
-    const params = new URLSearchParams(location.search);
     if (params.has('debug')) Object.assign(window, { __send: (m: C2S) => this.send(m), __icons: { iconUrl, ITEMS, skillIconUrl, SKILLS }, __app: this });
     const room = params.get('room');
     if (room && /^\d{5}$/.test(room)) this.joinRoom(room);
@@ -308,6 +312,7 @@ class App {
         else if (this.ws?.connected) { this.pvpUi?.setWaiting(); this.pvpQueue(match.mode, again); }
       },
       back: () => this.pvpCenter(),
+      home: () => this.title(),
     });
   }
 
@@ -409,10 +414,23 @@ class App {
       case 'ev': this.view?.onEvents(m.e); break;
       case 'st': this.onPublic(m.s); break;
       case 'me': this.onMe(m.s); break;
+      case 'md':
+        if (this.me) {
+          const d = m.s;
+          Object.assign(this.me, { hp: d.hp, maxHp: d.maxHp, xp: d.xp, money: d.money, down: d.down, speed: d.speed });
+          this.me.skills.forEach((sk, i) => { sk.cd = d.cds[i] ?? sk.cd; });
+          this.onMe(this.me);
+        }
+        break;
       case 'cmdErr': toast(m.msg, 'error'); sfx('error'); break;
       case 'paused': this.paused = m.on; this.renderPause(); break;
       case 'end': this.endGame(m.victory, m.summary, m.board); break;
-      case 'pong': case 'left': case 'rooms': case 'stats': case 'pvpBoard': case 'pvpQueued': case 'pvpCancelled': break;
+      case 'pong':
+        if (this.t !== this.ws) break;
+        this.rtt = this.rtt ? this.rtt * 0.6 + (performance.now() - m.at) * 0.4 : performance.now() - m.at;
+        this.hud?.setNet(this.rtt, this.view?.interpMs ?? 0);
+        break;
+      case 'left': case 'rooms': case 'stats': case 'pvpBoard': case 'pvpQueued': case 'pvpCancelled': break;
     }
   }
 
@@ -448,7 +466,15 @@ class App {
       },
     });
     for (const p of players) this.view.names.set(p.id, p.name);
-    this.view.send = (x, y, moving, dir) => this.send({ t: 'pos', x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, m: moving ? 1 : 0, d: Math.round(dir * 100) / 100 });
+    this.view.onView = (w, h) => this.send({ t: 'view', w, h });
+    this.view.resize();
+    this.rtt = 0;
+    if (this.t === this.ws) {
+      this.send({ t: 'ping', at: performance.now() });
+      this.pingTimer = window.setInterval(() => this.send({ t: 'ping', at: performance.now() }), 2000);
+    }
+    this.view.send = (x, y, moving, dir) => this.send({ t: 'pos', x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, m: moving ? 1 : 0, d: Math.round(dir * 100) / 100, k: this.view?.lastTick });
+    this.view.sendAck = (k) => { if (this.t === this.ws) this.send({ t: 'ack', k }); };
     this.view.canMove = () => !this.paused && !(this.inter?.visible ?? false);
     if (pvpSeats) {
       if (this.pvpMatch) this.pvpMatch.seats = pvpSeats;
@@ -520,10 +546,11 @@ class App {
     resultsScreen(this.screen, victory, summary, reward, board, this.you, () => {
       if (this.solo) { this.close(); this.select(); }
       else this.showLobby();
-    }, this.solo ? '再来一局' : '返回房间', this.profile);
+    }, this.solo ? '再来一局' : '返回房间', this.profile, () => { this.close(); this.title(); });
   }
 
   private leaveGame() {
+    window.clearInterval(this.pingTimer);
     this.view?.destroy();
     this.view = null;
     this.hud?.destroy();
