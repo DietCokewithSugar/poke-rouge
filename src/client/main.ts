@@ -23,8 +23,8 @@ import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
 import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
 import {
-  PARTY_BONUS_TIER, addOwned, applyRun, autoAssistUnlocked, badgeMeta, buildMon, isUnlocked, loadProfile, monKey, notePvpBest, ownsMon, partnerOf, partyMax, pvpIdentity,
-  releaseFromParty, saveProfile, unlockedLines, watchProfile, winGym, type Mon, type PartyMon, type Profile, type Settings,
+  PARTY_BONUS_TIER, addOwned, applyRun, autoAssistUnlocked, buildMon, isUnlocked, loadProfile, monKey, notePvpBest, ownsMon, partnerOf, partyMax, pvpIdentity,
+  releaseFromParty, runMeta, saveProfile, unlockedLines, watchProfile, winGym, type Mon, type PartyMon, type Profile, type Settings,
 } from './save';
 import { Cloud } from './cloud';
 import { accountScreen, conflictScreen } from './ui/account';
@@ -1008,7 +1008,7 @@ class App {
   }
 
   /** 研究所强化 + 道馆徽章：开局时加到宝可梦身上（服务器端同样计算） */
-  private meta() { return { ...this.profile.upgrades, ...badgeMeta(this.profile) }; }
+  private meta() { return runMeta(this.profile); }
   private name() { return this.profile.name || TRAINERS[this.profile.trainer]?.name || '训练家'; }
   /** 加入房间时带上的身份 */
   private ident() {

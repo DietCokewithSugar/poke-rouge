@@ -11,14 +11,12 @@ import { shinyName } from '../../shared/shiny';
 import { buildPower, type SavedBuild } from '../../shared/pvp/build';
 import { START_RATING, tierOf } from '../../shared/pvp/rating';
 import { PVP_MODES, PVP_MODE_IDS, RING_END, RING_START, type PvpMatchResult, type PvpMode, type PvpPlayerResult } from '../../shared/pvp/sim';
-import type { GameSim } from '../../shared/sim/game';
-import { createPlayerFromBuild } from '../../shared/sim/player';
 import { SKILLS, TIER_COLOR } from '../../shared/skills';
 import { TYPE_COLOR } from '../../shared/types';
 import { sfx } from '../audio';
 import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
-import { PARTY_BONUS_TIER, PARTY_LIMIT, partyMax, pvpTeamOf, saveProfile, type PartyMon, type Profile } from '../save';
+import { PARTY_BONUS_TIER, PARTY_LIMIT, partyMax, partyStats, pvpTeamOf, saveProfile, type PartyMon, type Profile } from '../save';
 import { clear, h, tip } from './dom';
 import { itemInfo, skillIcon, skillInfo, typeBadge } from './describe';
 import { mount, portraitSlot, tabs } from './screens';
@@ -34,12 +32,6 @@ function formName(b: SavedBuild) { return shinyName(formOf(b.line, b.stage).name
 function originText(m: PartyMon) {
   const D = DIFFICULTIES[m.from.difficulty];
   return `${D.name} · ${m.from.victory ? '通关' : `第 ${m.from.wavesCleared + 1} 波`}${m.from.players > 1 ? ' · 联机' : ''}`;
-}
-
-/** 构筑按当前的大木研究所强化计算出的数值 */
-export function buildStats(b: SavedBuild, meta: Record<string, number>) {
-  const p = createPlayerFromBuild({ w: 0, h: 0 } as unknown as GameSim, 0, '', b, meta);
-  return p;
 }
 
 function tierBadge(rating: number, big = false) {
@@ -66,9 +58,9 @@ export function monCard(m: PartyMon, opts: { selected?: boolean; onClick?: () =>
   );
 }
 
-export function buildDetail(b: SavedBuild, meta: Record<string, number>, page = 0, onPage: (n: number) => void = () => {}) {
-  const p = buildStats(b, meta);
-  const d = p.d;
+/** owner：构筑的主人，属性按他开局时的加成（研究所强化、徽章、训练家）计算 */
+export function buildDetail(b: SavedBuild, owner: Profile, page = 0, onPage: (n: number) => void = () => {}) {
+  const d = partyStats(owner, b).d;
   const stat = (label: string, v: string | number) => h('div', { class: 'bd-stat' }, h('span', null, label), h('b', null, v));
   const items = b.items.filter(([id]) => ITEMS[id]).sort((x, y) => ITEMS[y[0]].tier - ITEMS[x[0]].tier || y[1] - x[1]);
   return h('div', { class: 'build-detail' },
@@ -454,7 +446,7 @@ export class PvpScreen {
           confirmButton('放生', '再点一次', 'btn tiny ghost danger', () => { this.a.release(focus.uid); this.focus = null; this.itemPage = 0; this.render(); }, { disabled: busy, title: '放生后无法找回' }),
         ),
       ),
-      buildDetail(focus.build, p.upgrades, this.itemPage, (n) => { this.itemPage = n; this.render(); }),
+      buildDetail(focus.build, p, this.itemPage, (n) => { this.itemPage = n; this.render(); }),
     ) : null;
     return h('div', { class: 'pvp-party-tab' },
       h('div', { class: 'pvp-party-left' },
