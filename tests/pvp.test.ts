@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
+import { PvpService } from '../src/server/pvp';
 import { buildOf, fillTeam, generateBuild, generateTeam, validateBuild, validateTeam, type SavedBuild } from '../src/shared/pvp/build';
 import { eloDelta, tierOf } from '../src/shared/pvp/rating';
 import { PvpRoom, type PvpSeat } from '../src/shared/pvp/room';
@@ -206,6 +210,16 @@ test('自动走位：开启后服务器替玩家走位，忽略客户端上报�
   const x1 = a.x;
   for (let i = 0; i < 10; i++) { sim.setPlayerPos(1, a.x + 3, a.y, true, 0); sim.step(1 / 30); }
   assert.ok(a.x > x1, '切回手动后按上报的位置移动');
+});
+
+test('服务器：旧版本保存的 AI 构筑（每个只有一只）读进来后变成队伍', () => {
+  const file = path.join(os.tmpdir(), `pvp-old-${process.pid}.json`);
+  const old = generateBuild(new Rng(1), 10);
+  fs.writeFileSync(file, JSON.stringify({ v: 1, players: [], ghosts: [{ pid: 'p1', name: '旧', build: old, meta: {}, rating: 1000, power: 100, at: 0 }, { pid: 'p2', name: '坏', build: { line: 'nope' }, meta: {}, rating: 1000, power: 1, at: 0 }] }));
+  const s = new PvpService(file, { '1v1': 12, '4v4': 18 });
+  fs.rmSync(file);
+  assert.equal(s.ghosts.length, 1, '不合法的构筑被丢掉');
+  assert.deepEqual(s.ghosts[0].team, [old]);
 });
 
 test('积分：赢了加分输了扣分，段位随分数提升', () => {
