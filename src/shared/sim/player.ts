@@ -29,7 +29,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     items: {},
     levelMods: emptyMods(),
     metaMods,
-    trainerTypeMods: { ...(T.typeMods ?? {}) },
+    trainerTypeMods: addTypeMods({ ...(T.typeMods ?? {}) }, mb.typeMods),
     typeMods: {},
     d: derive(formOf(line, 0).base, emptyMods()),
     slots: formOf(line, 0).slots,
