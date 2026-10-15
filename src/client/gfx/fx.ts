@@ -85,7 +85,7 @@ export function drawZone(ctx: CanvasRenderingContext2D, fx: string, x: number, y
       const a = t * 1.2 + i * 0.9;
       const rr = r * (0.3 + 0.55 * ((i * 37) % 10) / 10);
       const yy = y + Math.sin(a) * rr * 0.6 - ((t * 14 + i * 5) % 12);
-      drawShape(ctx, fx === 'e_cloud' ? 'cloud' : 'bubble', v.pal, x + Math.cos(a) * rr, yy, { frame: i, alpha: 0.85 });
+      drawShape(ctx, v.zone ?? (fx === 'e_cloud' ? 'cloud' : 'bubble'), v.pal, x + Math.cos(a) * rr, yy, { frame: i, alpha: 0.85 });
     }
   }
   ctx.globalAlpha = 1;

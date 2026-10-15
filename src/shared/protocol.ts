@@ -70,7 +70,7 @@ export type C2S =
   | { t: 'ping'; at: number }
   | { t: 'pvpQueue'; mode: PvpMode; build: SavedBuild; name: string; meta: Record<string, number>; v: number; pid: string; secret: string; trainer?: string }
   /** 在线身份：名字、训练家、跟随的宝可梦，以及是不是在真新镇里 */
-  | { t: 'presence'; name: string; trainer: string; dex: number; town: boolean }
+  | { t: 'presence'; name: string; trainer: string; dex: number; town: boolean; busy?: 1 }
   /** 真新镇里的位置 */
   | { t: 'tpos'; x: number; y: number; d: number; m: 0 | 1 }
   | { t: 'pvpCancel' }

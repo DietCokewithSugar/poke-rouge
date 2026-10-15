@@ -761,6 +761,8 @@ const ICONS: Record<string, [string, Pal]> = {
   charm: ['gem', ['#a02060', '#e04898', '#f8a0d0']],
   stone: ['gem', ['#606870', '#9098a0', '#d0d8e0']],
   tstone: ['gem', ['#40a020', '#90d030', '#f8f070']],
+  wstone: ['gem', ['#1848a8', '#3890f0', '#b8e8ff']],
+  fstone: ['gem', ['#a82010', '#f06020', '#ffd070']],
   eviolite: ['gem', ['#6830a0', '#a060d8', '#e0b8f8']],
   keystone: ['gem', ['#3070b0', '#80b8e8', '#f0f8ff']],
   souldew: ['gem', ['#2050c0', '#e04080', '#f8c0e0']],

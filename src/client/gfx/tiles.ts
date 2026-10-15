@@ -157,9 +157,9 @@ export function arenaCanvas(biome: number, w: number, h: number): HTMLCanvasElem
   return c;
 }
 
-type Px = (x: number, y: number, c: string, w?: number, h?: number) => void;
+export type Px = (x: number, y: number, c: string, w?: number, h?: number) => void;
 
-function tallGrass(px: Px, x: number, y: number, col: string[]) {
+export function tallGrass(px: Px, x: number, y: number, col: string[]) {
   px(x, y, col[0], 16, 16);
   for (let r = 0; r < 4; r++) {
     for (let c = 0; c < 4; c++) {
@@ -173,7 +173,7 @@ function tallGrass(px: Px, x: number, y: number, col: string[]) {
   }
 }
 
-function boulder(px: Px, x: number, y: number, c: string[]) {
+export function boulder(px: Px, x: number, y: number, c: string[]) {
   px(x + 3, y + 2, c[0], 10, 10);
   px(x + 2, y + 4, c[0], 12, 7);
   px(x + 4, y + 3, c[1], 8, 7);
@@ -182,7 +182,7 @@ function boulder(px: Px, x: number, y: number, c: string[]) {
   px(x + 4, y + 12, 'rgba(0,0,0,.25)', 9, 2);
 }
 
-function tree(px: Px, x: number, y: number, leaf: string[], trunk: string) {
+export function tree(px: Px, x: number, y: number, leaf: string[], trunk: string) {
   // 32×32 的初代风格圆形树
   px(x + 13, y + 24, trunk, 6, 7);
   px(x + 12, y + 30, 'rgba(0,0,0,.3)', 9, 2);

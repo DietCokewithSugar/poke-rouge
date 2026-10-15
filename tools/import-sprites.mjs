@@ -14,13 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 
-const DEX = [
-  // 玩家精灵
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 25, 26, 150,
-  // 敌人
-  10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 41, 42, 43, 44, 46, 47,
-  52, 56, 57, 64, 66, 67, 74, 75, 81, 82, 92, 93, 94, 95, 100, 101, 109, 110, 113, 143, 151,
-];
+/** 初代 151 只全部导入：都可以成为伙伴，也都会作为野生宝可梦出现 */
+const DEX = Array.from({ length: 151 }, (_, i) => i + 1);
 const ANIMS = ['Idle', 'Walk', 'Attack', 'Shoot', 'Hurt', 'Faint'];
 
 const src = process.argv[2];

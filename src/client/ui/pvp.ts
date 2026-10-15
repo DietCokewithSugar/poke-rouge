@@ -19,7 +19,8 @@ import { PARTY_MAX, type PartyMon, type Profile } from '../save';
 import { h, tip } from './dom';
 import { itemInfo, skillIcon, skillInfo, typeBadge } from './describe';
 import { mount, portraitSlot, tabs } from './screens';
-import { confirmButton, pager } from './layout';
+import { confirmButton, iconBtn, pager } from './layout';
+import { uiIcon } from '../gfx/uiicons';
 
 const TEAM_COLOR = ['#5aa0ff', '#ff6a6a'];
 const fmt = (n: number) => (n >= 100000 ? `${(n / 10000).toFixed(1)} 万` : Math.round(n).toLocaleString('zh-CN'));
@@ -119,6 +120,8 @@ export interface PvpActions {
   practice(mode: PvpMode, mon: PartyMon): void;
   release(uid: string): void;
   board(mode: PvpMode): void;
+  /** 选了背包里的另一只：它变成跟随的伙伴 */
+  partner(mon: PartyMon): void;
   adventure(): void;
   back(): void;
 }
@@ -165,8 +168,10 @@ export class PvpScreen {
 
   get isQueued() { return !!this.queued || this.waiting; }
 
+  /** 出战的是跟随的伙伴：背包里同一条进化线的构筑（优先上次选的，其次最强的） */
   private selected(): PartyMon | null {
-    return this.p.party.find((m) => m.uid === this.p.pvpPick) ?? this.p.party[0] ?? null;
+    const own = this.p.party.filter((m) => m.build.line === this.p.partner);
+    return own.find((m) => m.uid === this.p.pvpPick) ?? own.sort((a, b) => buildPower(b.build) - buildPower(a.build))[0] ?? null;
   }
 
   render() {
@@ -178,13 +183,17 @@ export class PvpScreen {
     const party = h('div', { class: 'pvp-col pvp-party' },
       h('h3', null, `背包 ${p.party.length} / ${PARTY_MAX}`),
       p.party.length ? h('div', { class: 'party-grid' },
-        p.party.map((m) => monCard(m, { selected: m === sel, onClick: busy ? undefined : () => { sfx('click'); p.pvpPick = m.uid; this.itemPage = 0; this.render(); } })),
+        p.party.map((m) => monCard(m, { selected: m === sel, onClick: busy ? undefined : () => { sfx('click'); p.pvpPick = m.uid; this.itemPage = 0; this.a.partner(m); this.render(); } })),
         Array.from({ length: PARTY_MAX - p.party.length }, () => h('div', { class: 'mon-card empty' }, h('span', { class: 'muted small' }, '空位'))),
       ) : h('div', { class: 'party-empty' },
         h('p', null, '背包里还没有宝可梦。'),
         h('p', { class: 'small muted' }, '完成一局冒险（无论通关与否），在结算界面点「放入背包」，就能用它来对战。等级、技能、道具和升级强化都会保留。'),
         h('button', { class: 'btn gold', onclick: () => { sfx('click'); this.a.adventure(); } }, '去冒险'),
       ),
+      !sel && p.party.length ? h('div', { class: 'pvp-detail pvp-nobuild' },
+        h('b', null, `跟随你的${LINES[p.partner]?.name ?? '伙伴'}还没有对战构筑`),
+        h('p', { class: 'small muted' }, '带它完成一次冒险，在结算时放入背包；或者点上面背包里的宝可梦，让它成为跟随的伙伴出战。'),
+      ) : null,
       sel ? h('div', { class: 'pvp-detail' },
         h('div', { class: 'row between' },
           h('div', { class: 'pvp-detail-title' }, h('b', null, `${formName(sel.build)} Lv${sel.build.level}`), h('span', { class: 'small muted' }, ` ${originText(sel)} · 含研究所强化`)),
@@ -240,7 +249,7 @@ export class PvpScreen {
       action = h('button', {
         class: 'btn gold big go pvp-go', 'data-key': 'y', disabled: !sel,
         onclick: () => { if (!sel) return; sfx('click'); this.waiting = true; this.render(); this.a.queue(mode, sel); },
-      }, '开始匹配', h('small', null, sel ? `${formName(sel.build)} Lv${sel.build.level} · ${PVP_MODES[mode].name}` : '先选择一只宝可梦'));
+      }, '开始匹配', h('small', null, sel ? `${formName(sel.build)} Lv${sel.build.level} · ${PVP_MODES[mode].name}` : '跟随的伙伴还没有对战构筑'));
     }
 
     const history = this.boards[mode]?.history ?? [];
@@ -291,8 +300,8 @@ export class PvpScreen {
 
     mount(this.root, h('div', { class: 'box panel pvp' },
       h('div', { class: 'panel-head' },
-        h('div', { class: 'row' }, h('h2', null, '宝可梦对战'), h('span', { class: 'sub small' }, '用背包里的宝可梦和其他训练家一决高下 · 数值受大木研究所强化影响')),
-        h('button', { class: 'btn small ghost', 'data-back': '1', onclick: () => { if (busy) this.a.cancel(); this.a.back(); } }, '返回'),
+        h('div', { class: 'row' }, uiIcon('sword', 3), h('h2', null, '对战场'), h('span', { class: 'sub small' }, '跟随的伙伴出战 · 数值受大木研究所与训练家加成影响')),
+        iconBtn('back', '回到真新镇', () => { if (busy) this.a.cancel(); this.a.back(); }, { attrs: { 'data-back': '1' }, cls: 'ghost small', text: '出门' }),
       ),
       h('div', { class: 'pvp-grid' }, party, arena, boardEl),
     ), 'pvp');

@@ -101,7 +101,7 @@ function newCode(): string {
   throw new Error('no room code available');
 }
 
-interface Presence { name: string; trainer: string; dex: number; town: boolean; x: number; y: number; d: number; m: 0 | 1 }
+interface Presence { name: string; trainer: string; dex: number; town: boolean; busy: boolean; x: number; y: number; d: number; m: 0 | 1 }
 
 interface Client {
   ws: WebSocket; room: Room | null; id: number; alive: boolean; budget: number; browsing: boolean; lastStats: string;
@@ -183,7 +183,7 @@ wss.on('connection', (ws: WebSocket) => {
     if (msg.t === 'presence') {
       const prev = c.presence;
       const dex = Number.isInteger(msg.dex) && msg.dex >= 1 && msg.dex <= 151 ? msg.dex : 25;
-      c.presence = { name: cleanName(msg.name), trainer: trainerOf(msg.trainer).id, dex, town: !!msg.town, x: prev?.x ?? -1, y: prev?.y ?? -1, d: prev?.d ?? 0, m: 0 };
+      c.presence = { name: cleanName(msg.name), trainer: trainerOf(msg.trainer).id, dex, town: !!msg.town, busy: !!msg.busy, x: prev?.x ?? -1, y: prev?.y ?? -1, d: prev?.d ?? 0, m: 0 };
       if (c.presence.town) c.lastTown = '';
       return;
     }
@@ -267,6 +267,7 @@ function whereOf(c: Client): TownWhere {
   if (c.pvp && !c.pvp.ended) return 'pvp';
   if (c.room?.inGame) return 'game';
   if (c.room) return 'room';
+  if (c.presence?.busy) return 'game';
   return c.presence?.town ? 'town' : 'menu';
 }
 

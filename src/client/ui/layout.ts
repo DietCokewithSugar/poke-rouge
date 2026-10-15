@@ -4,6 +4,7 @@
  * 界面不滚动、不随内容改变高度；放不下的列表用分页。
  */
 import { sfx } from '../audio';
+import { uiIcon } from '../gfx/uiicons';
 import { h } from './dom';
 
 /** 最大的界面尺寸（rem） */
@@ -59,30 +60,42 @@ export function pager<T>(items: T[], per: number, page: number, render: (t: T, i
   }
   const go = (p: number) => { if (p < 0 || p >= pages || p === cur) return; sfx('click'); opts.onPage(p); };
   const nav = h('div', { class: `pager-nav ${pages > 1 ? '' : 'single'}` },
-    h('button', { class: 'btn tiny ghost', 'data-key': keys?.[0], disabled: cur <= 0, onclick: () => go(cur - 1) }, '◀'),
+    h('button', { class: 'btn tiny ghost', 'data-key': keys?.[0], disabled: cur <= 0, title: '上一页', onclick: () => go(cur - 1) }, '◀'),
     h('span', { class: 'small muted pager-label' }, opts.label ? `${opts.label} · ` : '', `${cur + 1} / ${pages}`),
-    h('button', { class: 'btn tiny ghost', 'data-key': keys?.[1], disabled: cur >= pages - 1, onclick: () => go(cur + 1) }, '▶'),
+    h('button', { class: 'btn tiny ghost', 'data-key': keys?.[1], disabled: cur >= pages - 1, title: '下一页', onclick: () => go(cur + 1) }, '▶'),
   );
   return { list, nav, page: cur, pages };
 }
 
+/**
+ * 像素图标按钮：默认只有图标（label 作为悬停提示与读屏文字）；text 为 true 或字符串时图标后面再跟一段文字。
+ */
+export function iconBtn(icon: string, label: string, onclick: () => void, o: { cls?: string; text?: boolean | string; attrs?: Record<string, unknown> } = {}) {
+  const text = o.text === true ? label : o.text || '';
+  return h('button', { class: `btn ${text ? 'with-ico' : 'icon'} ${o.cls ?? ''}`, title: label, 'aria-label': label, onclick, ...o.attrs },
+    uiIcon(icon, 2), text ? h('span', null, text) : null) as HTMLButtonElement;
+}
+
 /** 需要确认的按钮：第一次点击变成「再点一次确认」，3 秒内再点才执行（手柄也能操作，不弹浏览器对话框） */
-export function confirmButton(label: string, confirmLabel: string, cls: string, onConfirm: () => void, attrs: Record<string, unknown> = {}) {
+export function confirmButton(label: string, confirmLabel: string, cls: string, onConfirm: () => void, attrs: Record<string, unknown> = {}, icon?: string) {
   let armed = 0;
-  const btn = h('button', { class: cls, ...attrs }, label) as HTMLButtonElement;
+  const text = h('span', { class: icon && cls.includes('menu-item') ? 'mi-text' : '' }, label);
+  const btn = h('button', { class: `${cls} ${icon && !cls.includes('menu-item') ? 'with-ico' : ''}`, title: label, ...attrs },
+    icon ? (cls.includes('menu-item') ? h('span', { class: 'mi-ico' }, uiIcon(icon, 3)) : uiIcon(icon, 2)) : null, text) as HTMLButtonElement;
+  const set = (t: string) => { text.textContent = t; };
   btn.addEventListener('click', () => {
     if (armed) {
       window.clearTimeout(armed);
       armed = 0;
-      btn.textContent = label;
+      set(label);
       btn.classList.remove('armed');
       onConfirm();
       return;
     }
     sfx('click');
-    btn.textContent = confirmLabel;
+    set(confirmLabel);
     btn.classList.add('armed');
-    armed = window.setTimeout(() => { armed = 0; btn.textContent = label; btn.classList.remove('armed'); }, 3000);
+    armed = window.setTimeout(() => { armed = 0; set(label); btn.classList.remove('armed'); }, 3000);
   });
   return btn;
 }

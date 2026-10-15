@@ -975,3 +975,183 @@ body.pad .pager-nav [data-key]::after, body.pad .tab-nav[data-key]::after { top:
 .skill-forget .swap-card.new { flex: none; padding: 0.75rem; }
 .swap-foot { flex: none; display: flex; justify-content: flex-end; gap: 0.5rem; }
 .swap-go { min-width: 17rem; }
+
+/* ================================================================
+ * 第 8 轮：真新镇、训练家、伙伴、图鉴、像素图标按钮
+ * ================================================================ */
+img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex: none; vertical-align: -0.2em; }
+.btn.icon { padding: 0.3125rem; line-height: 0; display: inline-flex; align-items: center; justify-content: center; }
+.btn.icon.small { padding: 0.1875rem; }
+.btn.with-ico { display: inline-flex; align-items: center; gap: 0.375rem; }
+.btn.with-ico.small { gap: 0.25rem; padding-left: 0.375rem; }
+.tfull, .tportrait { image-rendering: pixelated; width: var(--pw); height: var(--ph); flex: none; }
+.silhouette .portrait, .pslot.silhouette .portrait { filter: brightness(0) opacity(.55); }
+
+/* 标题菜单：图标 + 文字 */
+.menu-item { display: flex; align-items: center; gap: 0.625rem; }
+.mi-ico { flex: none; display: flex; width: 2.25rem; justify-content: center; }
+.mi-text { display: grid; min-width: 0; }
+.title-menu { gap: 0.375rem; }
+.title-wrap .title-menu .menu-item { padding: 0.375rem 0.625rem 0.375rem 1.875rem; }
+.title-online { text-align: center; margin-top: 0.25rem; }
+.box.pause h2 { display: flex; align-items: center; gap: 0.5rem; }
+
+/* 训练家卡片 */
+.tcard {
+  appearance: none; cursor: pointer; position: relative; min-width: 0; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; gap: 0.25rem; padding: 0.5rem; border-radius: 0.5rem;
+  background: rgba(0, 0, 0, .22); border: 0.125rem solid rgba(255, 255, 255, .15); text-shadow: 0.125rem 0.125rem 0 var(--shadow);
+}
+.tcard:hover { background: rgba(255, 255, 255, .08); }
+.tcard.on { border-color: var(--gold); background: rgba(255, 210, 63, .12); }
+.tcard.locked .tfull { filter: brightness(0) opacity(.5); }
+.tcard.locked .tcard-name { color: var(--muted); }
+.tcard-sprite { flex: none; display: flex; align-items: flex-end; justify-content: center; }
+.tcard-body { min-width: 0; display: grid; gap: 0.0625rem; text-align: center; }
+.tcard-name { font-size: 1.0625rem; white-space: nowrap; }
+.tcard-title { font-size: 0.75rem; color: var(--muted); margin-left: 0.375rem; }
+.tcard-bonus { line-height: 1.2; }
+.tcard-bonus div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcard.compact { flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.25rem 0.5rem; }
+.tcard.compact .tcard-body { text-align: left; }
+.tcard.compact .tcard-name { font-size: 0.9375rem; }
+.tcard-foot { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 0.25rem; }
+.tcard-foot img.ico { width: 0.75rem; height: 0.75rem; }
+
+/* 开场 */
+.setup-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 0.875rem; }
+.setup-col { min-height: 0; display: flex; flex-direction: column; gap: 0.5rem; background: rgba(0, 0, 0, .15); border-radius: 0.5rem; padding: 0.5rem 0.75rem; }
+.setup-col h3 { margin: 0; }
+.setup-trainers { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 0.5rem; }
+.setup-starters { flex: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; height: 9.5rem; }
+.scard {
+  appearance: none; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.125rem; min-width: 0;
+  border-radius: 0.5rem; background: rgba(0, 0, 0, .22); border: 0.125rem solid rgba(255, 255, 255, .15); text-shadow: 0.125rem 0.125rem 0 var(--shadow);
+}
+.scard:hover { background: rgba(255, 255, 255, .08); }
+.scard.on { border-color: var(--gold); background: rgba(255, 210, 63, .12); }
+.scard-portrait { width: 5rem; height: 5rem; }
+.scard-name { font-size: 1rem; }
+.setup-flavor { flex: 1; min-height: 0; overflow: hidden; color: #e0e8ff; }
+.setup-name .field { flex: none; }
+.setup-preview { flex: 1; min-height: 0; display: flex; align-items: flex-end; justify-content: center; gap: 0.5rem; padding-bottom: 0.5rem; }
+.setup-mon { width: 6rem; height: 6rem; }
+.setup-name .go { flex: none; width: 100%; }
+
+/* 宝可梦格子（伙伴 / 存储系统） */
+.partner-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 24rem; gap: 0.75rem; }
+.partner-left { display: flex; flex-direction: column; gap: 0.375rem; min-height: 0; }
+.partner-left .row.between { flex: none; }
+.pmon-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.pmon-grid { flex: 1; min-height: 0; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 0.375rem; }
+.pmon {
+  appearance: none; cursor: pointer; position: relative; min-height: 0; min-width: 0; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.0625rem; padding: 0.25rem;
+  border-radius: 0.5rem; background: rgba(0, 0, 0, .22); border: 0.125rem solid rgba(255, 255, 255, .12); text-shadow: 1px 1px 0 #000;
+}
+.pmon:hover { background: rgba(255, 255, 255, .08); }
+.pmon.on { border-color: var(--gold); background: rgba(255, 210, 63, .12); }
+.pmon.partner { box-shadow: inset 0 0 0 1px var(--green); }
+.pmon.locked .portrait { filter: brightness(0) opacity(.5); }
+.pmon.filler { visibility: hidden; }
+.pmon-portrait { width: 3rem; height: 3rem; }
+.pmon-name { font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.pmon.locked .pmon-name { color: var(--muted); }
+.pmon-tag { position: absolute; top: 0.125rem; right: 0.125rem; font-size: 0.625rem; font-style: normal; background: var(--green); color: #063; padding: 0 0.1875rem; border-radius: 0.1875rem; text-shadow: none; white-space: nowrap; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.partner-side { display: flex; flex-direction: column; gap: 0.5rem; min-height: 0; }
+.partner-side .line-detail { flex: 1; }
+.partner-side > .btn { flex: none; }
+.line-detail.compact { grid-template-rows: minmax(5.5rem, auto) auto auto auto auto 1fr; }
+.line-detail.compact .ld-info { gap: 0; }
+.line-detail.compact .flavor { -webkit-line-clamp: 2; line-height: 1.25; }
+.line-detail.compact .ld-portrait { width: 5rem !important; height: 5rem; }
+.line-detail.compact .chips { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.line-detail.compact .statbars { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.125rem 0.5rem; }
+.line-detail.compact .statbar { grid-template-columns: 2rem 1.75rem 1fr; gap: 0.25rem; font-size: 0.8125rem; }
+.locked-detail { display: flex !important; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 0.25rem; }
+.locked-detail .ld-portrait { width: 6rem !important; height: 6rem; }
+.partner-modal { width: 58rem; height: 32rem; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.875rem 1.125rem; }
+
+/* 我的家 */
+.home-trainers { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 15rem; gap: 0.75rem; }
+.home-tgrid { min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); gap: 0.375rem; }
+.home-name { display: flex; flex-direction: column; gap: 0.375rem; background: rgba(0, 0, 0, .15); border-radius: 0.5rem; padding: 0.625rem; }
+.home-name label { display: flex; align-items: center; gap: 0.25rem; }
+
+/* 大木研究所：研究 / 图鉴 / 成就 */
+.lab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.375rem; }
+.lab-body .lab-grid { grid-template-rows: repeat(8, minmax(0, 1fr)); }
+.lab-body-text { flex: 1; min-width: 0; display: grid; }
+.lab-item img.uico { width: 2.25rem; height: 2.25rem; }
+.dex-wrap, .ach-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.dex-grid { flex: 1; min-height: 0; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); gap: 0.375rem; }
+.dex-cell { position: relative; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0, 0, 0, .22); border-radius: 0.5rem; }
+.dex-cell.locked .portrait { filter: brightness(0) opacity(.45); }
+.dex-cell.locked .dex-name { color: var(--muted); }
+.dex-no { position: absolute; top: 0.125rem; left: 0.3125rem; font-size: 0.625rem; color: var(--muted); }
+.dex-portrait { width: 3.25rem; height: 3.25rem; }
+.dex-name { font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.ach-name { display: flex; align-items: center; gap: 0.125rem; }
+.lab .panel-head .money img.ico { width: 1.5rem; height: 1.5rem; }
+
+/* 1 号道路 */
+.route { gap: 0.625rem; }
+.route-team { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 0.75rem; }
+.route-who, .route-mon { display: flex; gap: 0.625rem; align-items: center; background: rgba(0, 0, 0, .2); border-radius: 0.5rem; padding: 0.5rem 0.625rem; min-width: 0; height: 8.5rem; }
+.route-who > div, .route-mon > div { min-width: 0; display: grid; gap: 0.125rem; }
+.route-mon > .btn { margin-left: auto; flex: none; }
+.route-portrait { width: 6rem; height: 6rem; }
+.route .diff-row { margin: 0; }
+.route .row.end { margin-top: auto; }
+
+/* NPC 对话：屏幕下方的对话框 */
+.scr[data-screen="dialog"] { align-items: flex-end; padding-bottom: 2.5rem; background: transparent; }
+.box.dialog { width: 46rem; padding: 0.875rem 1.25rem; }
+.dialog-who { color: var(--gold); font-size: 0.9375rem; }
+.dialog-text { font-size: 1.0625rem; line-height: 1.65; min-height: 3.5rem; margin: 0.25rem 0; }
+.box.dialog .row.end { margin-top: 0.25rem; }
+
+/* 真新镇 HUD */
+#town-hud { position: fixed; inset: 0; pointer-events: none; z-index: 11; }
+#town-hud > * { pointer-events: auto; }
+.th-card { position: absolute; left: 0.625rem; top: 0.625rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; appearance: none; text-align: left; color: inherit; font: inherit; min-width: 15rem; }
+.th-card:hover { filter: brightness(1.1); }
+.th-trainer { width: 2.25rem; display: flex; justify-content: center; }
+.th-info { display: grid; min-width: 0; flex: 1; }
+.th-name { font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th-title, .th-partner { white-space: nowrap; }
+.th-mon-portrait { width: 3rem; height: 3rem; }
+.th-top { position: absolute; right: 0.625rem; top: 0.625rem; display: flex; gap: 0.375rem; }
+.th-btn { background: linear-gradient(180deg, #3d67c0, #26468f); }
+.th-online { position: absolute; right: 0.625rem; top: 3.25rem; width: 18rem; display: grid; gap: 0.25rem; }
+.th-online-head { color: var(--gold); font-size: 0.9375rem; }
+.th-peer { display: flex; align-items: center; gap: 0.375rem; }
+.th-peer-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.875rem; }
+.th-dust { position: absolute; left: 0.625rem; bottom: 0.625rem; display: flex; gap: 0.875rem; align-items: center; font-size: 0.875rem; }
+.th-dust span { display: inline-flex; align-items: center; gap: 0.25rem; }
+.th-dust img.ico { width: 0.75rem; height: 0.75rem; }
+.th-prompt { position: absolute; left: 50%; bottom: 1.25rem; transform: translateX(-50%); display: flex; align-items: center; gap: 0.5rem; cursor: pointer; appearance: none; color: inherit; font: inherit; padding: 0.375rem 0.875rem; white-space: nowrap; }
+.th-key { display: inline-flex; min-width: 1.5rem; height: 1.5rem; padding: 0 0.25rem; align-items: center; justify-content: center; border-radius: 0.75rem; background: #3cb371; color: #fff; font-size: 0.75rem; text-shadow: none; }
+.th-key::after { content: '空格'; }
+body.pad .th-key::after { content: var(--g-a); }
+@media (pointer: coarse) { .th-key::after { content: '点我'; } }
+
+/* 战斗 HUD：训练家 + 宝可梦 */
+.hud-trainer { width: 2rem; display: flex; justify-content: center; align-items: center; }
+.hud-pause.icon { padding: 0.3125rem; }
+
+/* 大厅：训练家 + 伙伴 */
+.slot-team { flex: none; position: relative; }
+.slot-trainer { position: absolute; left: -0.125rem; bottom: -0.125rem; width: 1.25rem !important; height: 1.33rem !important; background: rgba(16, 24, 48, .75); border-radius: 0.25rem; }
+.lobby .slot-body > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lobby-right .row.between { flex: none; }
+.room-mon .tportrait.tiny, .th-peer .tportrait.tiny { width: 1rem; height: 1.0625rem; }
+
+/* 结算：新伙伴 */
+.r-recruits { display: grid; gap: 0.25rem; }
+.r-recruit-list { display: flex; gap: 0.375rem; flex-wrap: wrap; max-height: 3.75rem; overflow: hidden; }
+.r-recruit { display: flex; align-items: center; gap: 0.25rem; background: rgba(255, 138, 216, .15); border: 1px solid rgba(255, 138, 216, .5); border-radius: 0.375rem; padding: 0 0.375rem 0 0; }
+
+/* 对战场：伙伴还没有构筑 */
+.pvp-nobuild { padding: 0.5rem 0.625rem; background: rgba(0, 0, 0, .2); border-radius: 0.5rem; }
+.pvp-nobuild p { margin: 0.25rem 0 0; }

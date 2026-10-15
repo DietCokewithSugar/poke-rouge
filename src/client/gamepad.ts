@@ -13,7 +13,11 @@
 import { setPadVector } from './input';
 import { toast } from './ui/dom';
 
-export interface PadHooks { pause(): void }
+export interface PadHooks {
+  pause(): void;
+  /** 没有界面打开时按 A：在真新镇里和建筑 / NPC 互动 */
+  action?(): void;
+}
 
 const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, START: 9, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 } as const;
 const DEAD = 0.28;
@@ -101,6 +105,7 @@ function poll(now: number) {
     }
   } else {
     setFocus(null);
+    if (down(BTN.A)) hooks.action?.();
     if (down(BTN.START)) {
       const hud = document.getElementById('hud');
       if (!(hud && clickKey(hud, 'start'))) hooks.pause();
