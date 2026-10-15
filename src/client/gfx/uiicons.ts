@@ -1,5 +1,5 @@
 /**
- * 界面图标（12×12 像素）：齿轮、声音、奖杯、硬币、星星、王冠、好友、精灵球等取自
+ * 界面图标（12×12 像素）：齿轮、声音、奖杯、硬币、星星、闪光标记、王冠、好友、精灵球等取自
  * JPTER78/pokesurvivor 的 js/ui/icons.js（MIT 许可），返回、关闭、刷新、锁、撤销、暂停、门、
  * 复制、房子、问号、背包、电脑等是按同样的画风新画的。
  *   k 描边，其余字母按各自的调色板上色，. 透明
@@ -44,6 +44,10 @@ export const UI_ICONS: Record<string, Def> = {
     'kyyyoyyoyyok', 'kyyyyooyyyok', '.kyyyyyyyok.', '.kooyyyyook.', '..kkooookk..', '....kkkk....'] },
   star: { pal: { y: '#ffd23f', o: '#c08a10', w: '#fff4b0' }, rows: [
     '.....kk.....', '.....kk.....', '....kwyk....', '....kyyk....', 'kkkkwyyykkkk', 'kwyyyyyyyyok',
+    '.kyyyyyyyok.', '..kyyyyyyk..', '..kyyyoyyk..', '.kyok..koyk.', '.kok....kok.', '.kk......kk.'] },
+  // 闪光宝可梦的标记：原作能力页上的红色星星，带一点闪光
+  shiny: { pal: { y: '#ff4d5e', w: '#ffd0d6', o: '#b8283a', x: '#fff6b0' }, rows: [
+    '.....kk...x.', '.....kk..xxx', '....kwyk..x.', '....kyyk....', 'kkkkwyyykkkk', 'kwyyyyyyyyok',
     '.kyyyyyyyok.', '..kyyyyyyk..', '..kyyyoyyk..', '.kyok..koyk.', '.kok....kok.', '.kk......kk.'] },
   crown: { pal: { y: '#ffd23f', o: '#c08a10', r: '#ff5f6d' }, rows: [
     '............', '............', 'k....k....k.', 'kk..kyk..kk.', 'kyk.kyk.kyk.', 'kyykyyykyyk.',

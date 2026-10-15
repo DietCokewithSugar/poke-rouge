@@ -5,6 +5,7 @@ import { ACHIEVEMENTS, type RunSummary } from '../../shared/meta';
 import { TRAINERS } from '../../shared/trainers';
 import { LINES } from '../../shared/pokemon';
 import type { BoardEntry } from '../../shared/protocol';
+import { shinyName } from '../../shared/shiny';
 import { SKILLS, TIER_COLOR } from '../../shared/skills';
 import { TYPE_COLOR } from '../../shared/types';
 import { TOTAL_WAVES, WAVES } from '../../shared/waves';
@@ -185,12 +186,12 @@ export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary
     const kills = d.kills.minion + d.kills.elite + d.kills.boss;
     const evoPath = h('div', { class: 'r-evo' }, d.forms.map((dex, i) => [
       i ? h('span', { class: 'evo-arrow' }, '→') : null,
-      portraitSlot(dex, 1, 'tiny'),
+      portraitSlot(dex, 1, 'tiny', s.shiny),
     ]));
     const hero = h('div', { class: 'r-hero' },
-      portraitSlot(d.dex, 3, 'r-hero-portrait'),
+      portraitSlot(d.dex, 3, 'r-hero-portrait', s.shiny),
       h('div', null,
-        h('div', { class: 'big' }, `${d.form}  Lv${s.level}`),
+        h('div', { class: 'big' }, `${shinyName(d.form, s.shiny)}  Lv${s.level}`),
         h('div', null, ...L.forms.find((f) => f.dex === d.dex)!.types.map(typeBadge)),
         h('div', { class: 'small', style: `color:${D.color}` }, `${D.name}模式${s.players > 1 ? ` · ${s.players} 人联机` : ' · 单人'}`),
         d.forms.length > 1 ? evoPath : h('div', { class: 'muted small' }, L.forms.length > 1 ? '全程没有进化' : ''),
@@ -218,14 +219,17 @@ export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary
       }, { cls: 'r-achs', filler: () => h('div', { class: 'r-ach filler' }), onPage: (n) => { state.achs = n; render(); }, keys: null, label: `达成 ${reward.newAchievements.length} 个新成就` });
       achs = h('div', { class: 'r-paged' }, pg.list, pg.nav);
     }
-    const recruits = reward?.recruits ?? s.recruits ?? [];
+    // 闪光的排在前面
+    const shinies = reward?.shinyRecruits ?? s.shinyRecruits ?? [];
+    const recruits = [...shinies.map((line) => ({ line, shiny: true })), ...(reward?.recruits ?? s.recruits ?? []).map((line) => ({ line, shiny: false }))];
     const rewards = h('div', { class: 'r-reward' },
       h('div', { class: 'reward' }, iconImg('stardust', 3), reward ? `获得星之沙 +${reward.stardust}` : '没有获得星之沙'),
       recruits.length ? h('div', { class: 'r-recruits' },
-        h('span', { class: 'small gold' }, uiIcon('heart', 1), ` 结交了 ${recruits.length} 位新伙伴`),
-        h('div', { class: 'r-recruit-list' }, recruits.slice(0, 8).map((l) => {
-          const el = h('div', { class: 'r-recruit' }, portraitSlot(LINES[l].forms[0].dex, 1, 'tiny'), h('span', { class: 'small' }, LINES[l].name));
-          tip(el, () => `${LINES[l].name}崇拜了你，回到真新镇可以在「我的家」让它跟着你`);
+        h('span', { class: 'small gold' }, uiIcon(shinies.length ? 'shiny' : 'heart', 1), ` 结交了 ${recruits.length} 位新伙伴${shinies.length ? `（其中闪光 ${shinies.length} 位）` : ''}`),
+        h('div', { class: 'r-recruit-list' }, recruits.slice(0, 8).map((m) => {
+          const name = shinyName(LINES[m.line].name, m.shiny);
+          const el = h('div', { class: `r-recruit${m.shiny ? ' shiny' : ''}` }, portraitSlot(LINES[m.line].forms[0].dex, 1, 'tiny', m.shiny), h('span', { class: 'small' }, name));
+          tip(el, () => `${name}崇拜了你，回到真新镇可以在「我的家」让它跟着你${m.shiny ? '（闪光宝可梦六项能力各 +1%）' : ''}`);
           return el;
         })),
       ) : null,
@@ -235,7 +239,7 @@ export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary
       h('tr', null, h('th', null, '训练家'), h('th', null, '宝可梦'), h('th', null, '等级'), h('th', null, '击败'), h('th', null, '伤害'), h('th', null, '承伤'), h('th', null, '救援')),
       board.map((b) => h('tr', { class: b.id === you ? 'me' : '' },
         h('td', null, b.name),
-        h('td', { class: 'board-mon' }, portraitSlot(b.dex, 1, 'tiny'), LINES[b.line].forms.find((f) => f.dex === b.dex)?.name ?? LINES[b.line].name),
+        h('td', { class: 'board-mon' }, portraitSlot(b.dex, 1, 'tiny', b.shiny), shinyName(LINES[b.line].forms.find((f) => f.dex === b.dex)?.name ?? LINES[b.line].name, b.shiny)),
         h('td', null, b.level), h('td', null, b.kills), h('td', null, fmtNum(b.damage)), h('td', null, fmtNum(b.taken)), h('td', null, b.revives))),
     ) : null;
     const names = ['概览', '技能与道具', boardEl ? '击败与队伍' : '击败与波次'];

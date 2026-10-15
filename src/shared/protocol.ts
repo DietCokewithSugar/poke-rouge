@@ -7,19 +7,19 @@ import type { SavedBuild } from './pvp/build';
 import type { PvpMatchResult, PvpMode } from './pvp/sim';
 import { formOf } from './pokemon';
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 export const MAX_PLAYERS = 4;
 
 // ---------------------------------------------------------------- 对战
 
 export interface PvpRecord { mode: PvpMode; rating: number; best: number; wins: number; losses: number; draws: number; streak: number; games: number; rank: number }
-export interface PvpBoardRow { rank: number; name: string; rating: number; wins: number; losses: number; draws: number; streak: number; dex: number; you?: boolean }
-export interface PvpHistory { at: number; mode: PvpMode; result: 'win' | 'loss' | 'draw'; delta: number; dex: number; opp: string }
+export interface PvpBoardRow { rank: number; name: string; rating: number; wins: number; losses: number; draws: number; streak: number; dex: number; shiny?: boolean; you?: boolean }
+export interface PvpHistory { at: number; mode: PvpMode; result: 'win' | 'loss' | 'draw'; delta: number; dex: number; shiny?: boolean; opp: string }
 export interface PvpRatingChange { mode: PvpMode; before: number; after: number; delta: number; record: PvpRecord }
 /** 场上的一只宝可梦：owner 是派出它的训练家（座位），helper 为训练家派出的第二、三只（AI 操作） */
-export interface PvpSeatInfo { id: number; name: string; team: number; bot: boolean; rating: number; trainer: string; line: LineId; dex: number; level: number; owner: number; helper: boolean }
+export interface PvpSeatInfo { id: number; name: string; team: number; bot: boolean; rating: number; trainer: string; line: LineId; dex: number; shiny?: boolean; level: number; owner: number; helper: boolean }
 
-export interface LobbyPlayer { id: number; name: string; trainer: string; line: LineId | null; ready: boolean; host: boolean }
+export interface LobbyPlayer { id: number; name: string; trainer: string; line: LineId | null; shiny?: boolean; ready: boolean; host: boolean }
 
 // ---------------------------------------------------------------- 真新镇
 
@@ -27,14 +27,14 @@ export interface LobbyPlayer { id: number; name: string; trainer: string; line: 
 export const TOWN_WHERE = ['town', 'menu', 'room', 'game', 'pvp'] as const;
 export type TownWhere = (typeof TOWN_WHERE)[number];
 
-/** 真新镇里的其他玩家：w 为 TOWN_WHERE 的序号，不在镇上的玩家只出现在在线列表里 */
-export interface TownPeer { id: number; name: string; trainer: string; dex: number; x: number; y: number; d: number; m: 0 | 1; w: number }
+/** 真新镇里的其他玩家：w 为 TOWN_WHERE 的序号，s 为跟随的是闪光宝可梦；不在镇上的玩家只出现在在线列表里 */
+export interface TownPeer { id: number; name: string; trainer: string; dex: number; s?: 1; x: number; y: number; d: number; m: 0 | 1; w: number }
 
 /** 匹配大厅里展示的房间信息 */
 export interface RoomInfo {
   code: string;
   host: string;
-  players: { name: string; trainer: string; line: LineId | null }[];
+  players: { name: string; trainer: string; line: LineId | null; shiny?: boolean }[];
   max: number;
   inGame: boolean;
   wave: number;
@@ -45,15 +45,18 @@ export interface ServerStats { online: number; playing: number; rooms: number; p
 
 export interface MeDyn { hp: number; maxHp: number; xp: number; money: number; down: boolean; speed: number; cds: number[] }
 
-export interface BoardEntry { id: number; name: string; trainer: string; line: LineId; dex: number; level: number; kills: number; damage: number; taken: number; revives: number }
+/** 开局时的玩家列表 */
+export interface StartPlayer { id: number; name: string; trainer: string; line: LineId; shiny?: boolean }
 
-/** 加入房间时带上的身份：训练家、跟随的宝可梦与已经拥有的宝可梦 */
-export interface JoinIdentity { trainer?: string; line?: LineId; owned?: string[] }
+export interface BoardEntry { id: number; name: string; trainer: string; line: LineId; dex: number; shiny?: boolean; level: number; kills: number; damage: number; taken: number; revives: number }
+
+/** 加入房间时带上的身份：训练家、跟随的宝可梦（shiny：闪光的）与已经拥有的宝可梦（普通的和闪光的分开） */
+export interface JoinIdentity { trainer?: string; line?: LineId; shiny?: boolean; owned?: string[]; ownedShiny?: string[] }
 
 export type C2S =
   | ({ t: 'create'; name: string; meta: Record<string, number>; v: number; public?: boolean } & JoinIdentity)
   | ({ t: 'join'; code: string; name: string; meta: Record<string, number>; v: number } & JoinIdentity)
-  | { t: 'pick'; line: LineId }
+  | { t: 'pick'; line: LineId; shiny?: boolean }
   | { t: 'ready'; on: boolean }
   | { t: 'start' }
   | { t: 'leave' }
@@ -62,7 +65,7 @@ export type C2S =
   | { t: 'visibility'; public: boolean }
   | { t: 'browse'; on: boolean }
   | { t: 'stats' }
-  | { t: 'debug'; cmd: 'down' | 'endWave' | 'xp' }
+  | { t: 'debug'; cmd: 'down' | 'endWave' | 'xp' | 'shiny' }
   /** k：客户端收到的最新快照编号（顺便确认收到，服务器据此估计网络排队） */
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number; k?: number }
   | { t: 'ack'; k: number }
@@ -73,8 +76,8 @@ export type C2S =
   | { t: 'pvpQueue'; mode: PvpMode; team: SavedBuild[]; name: string; meta: Record<string, number>; v: number; pid: string; secret: string; trainer?: string; auto?: boolean }
   /** 自动战斗：AI 替你走位（冒险需要先通关一次，对战随时可以切换） */
   | { t: 'auto'; on: boolean }
-  /** 在线身份：名字、训练家、跟随的宝可梦，以及是不是在真新镇里 */
-  | { t: 'presence'; name: string; trainer: string; dex: number; town: boolean; busy?: 1 }
+  /** 在线身份：名字、训练家、跟随的宝可梦（shiny：闪光的），以及是不是在真新镇里 */
+  | { t: 'presence'; name: string; trainer: string; dex: number; shiny?: 1; town: boolean; busy?: 1 }
   /** 真新镇里的位置 */
   | { t: 'tpos'; x: number; y: number; d: number; m: 0 | 1 }
   | { t: 'pvpCancel' }
@@ -88,7 +91,7 @@ export type S2C =
   | { t: 'rooms'; stats: ServerStats; rooms: RoomInfo[] }
   | { t: 'stats'; stats: ServerStats }
   | { t: 'left' }
-  | { t: 'start'; w: number; h: number; players: { id: number; name: string; trainer: string; line: LineId }[]; pvp?: { mode: PvpMode; seats: PvpSeatInfo[] } }
+  | { t: 'start'; w: number; h: number; players: StartPlayer[]; pvp?: { mode: PvpMode; seats: PvpSeatInfo[] } }
   | { t: 'ev'; e: Ev[] }
   | { t: 'st'; s: PublicState }
   | { t: 'me'; s: MeState }
@@ -127,7 +130,8 @@ export const inBox = (b: ViewBox | null | undefined, x: number, y: number, pad =
 
 export function encodeSnapshot(sim: GameSim, tick: number, box?: ViewBox | null): ArrayBuffer {
   const ps = sim.players;
-  const es = sim.enemies.filter((e) => !e.dead && inBox(box, e.x, e.y, e.r));
+  // 闪光宝可梦在视野外也发：画面边上要指出它在哪；它们是不是闪光的由 'shiny' 事件告诉客户端（敌人的标志位已经用完了）
+  const es = sim.enemies.filter((e) => !e.dead && (e.shiny || inBox(box, e.x, e.y, e.r)));
   const pAll = box ? sim.projs.filter((p) => inBox(box, p.x, p.y, 8)) : sim.projs;
   const prs = pAll.length > 700 ? pAll.slice(-700) : pAll;
   const zs = box ? sim.zones.filter((z) => inBox(box, z.x, z.y, z.r)) : sim.zones;
@@ -152,6 +156,7 @@ export function encodeSnapshot(sim: GameSim, tick: number, box?: ViewBox | null)
     if (p.slowT > 0) f |= 32;
     // 由服务器操作走位（AI）：客户端跟随服务器位置，不再上报
     if (p.bot) f |= 64;
+    if (p.shiny) f |= 128;
     v.setUint8(o, p.id); o += 1;
     v.setInt16(o, q(p.x), true); o += 2;
     v.setInt16(o, q(p.y), true); o += 2;

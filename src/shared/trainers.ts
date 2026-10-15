@@ -30,8 +30,8 @@ export const TRAINER_LIST: TrainerDef[] = [
     mods: { dmg: 6, crit: 3, xp: 6 }, unlock: { ach: 'beat_snorlax' },
   }),
   T({
-    id: 'rocket', name: '火箭队', title: '坏事干尽', desc: '火箭队的成员，为了钱什么都做得出来，宝可梦不太信任他们。',
-    mods: { money: 20, discount: 5, recruit: -20 }, unlock: { cost: 600 },
+    id: 'rocket', name: '火箭队', title: '坏事干尽', desc: '火箭队的成员，为了钱什么都做得出来，专门盯着稀有的闪光宝可梦，宝可梦不太信任他们。',
+    mods: { money: 20, discount: 5, recruit: -20, shiny: 100 }, unlock: { cost: 600 },
   }),
   T({
     id: 'giovanni', name: '坂木老大', title: '火箭队首领', desc: '常磐道馆的神秘馆主，火箭队的首领。',

@@ -77,13 +77,16 @@ export class PvpRoom {
     return this.sim.players.map((p) => {
       const { owner, helper } = this.sim.ownerOf(p.id);
       const s = this.seats.find((x) => x.id === owner)!;
-      return { id: p.id, name: s.name, team: p.team, bot: s.bot, rating: Math.round(s.rating), trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level, owner, helper };
+      return {
+        id: p.id, name: s.name, team: p.team, bot: s.bot, rating: Math.round(s.rating), trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex,
+        shiny: p.shiny || undefined, level: p.level, owner, helper,
+      };
     });
   }
 
   begin() {
     const sim = this.sim;
-    const players = sim.players.map((p) => ({ id: p.id, name: p.name, trainer: p.trainer, line: p.line }));
+    const players = sim.players.map((p) => ({ id: p.id, name: p.name, trainer: p.trainer, line: p.line, shiny: p.shiny || undefined }));
     const seats = this.seatInfo();
     for (const s of this.humans()) {
       this.send(s.conn!, { t: 'joined', code: this.code, you: s.unit!, solo: false });

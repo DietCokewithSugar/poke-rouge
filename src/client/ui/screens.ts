@@ -2,8 +2,9 @@ import { ACHIEVEMENTS, META_UPGRADES, metaCost } from '../../shared/meta';
 import { LINES, STONE_NAME, type LineId } from '../../shared/pokemon';
 import { DIFFICULTIES, DIFFICULTY_IDS, type DifficultyId } from '../../shared/difficulty';
 import type { LobbyPlayer, RoomInfo, ServerStats } from '../../shared/protocol';
+import { SHINY_STAT, shinyName, shinyOdds } from '../../shared/shiny';
 import { SKILLS } from '../../shared/skills';
-import { TRAINERS } from '../../shared/trainers';
+import { TRAINERS, trainerOf } from '../../shared/trainers';
 import { TYPE_NAME } from '../../shared/types';
 import { sfx } from '../audio';
 import { iconImg } from '../gfx/icons';
@@ -29,26 +30,27 @@ export function mount(root: HTMLElement, el: HTMLElement, key: string) {
 
 // ---------------------------------------------------------------- 宝可梦详情
 
-function statBars(line: LineId) {
+/** 种族值条：闪光宝可梦六项能力各 +1%（显示一位小数） */
+function statBars(line: LineId, shiny = false) {
   const b = LINES[line].forms[0].base;
-  const vals = [b.hp, b.atk, b.def, b.spa, b.spd, b.spe];
+  const vals = [b.hp, b.atk, b.def, b.spa, b.spd, b.spe].map((v) => (shiny ? v * SHINY_STAT : v));
   return h('div', { class: 'statbars' }, vals.map((v, i) => h('div', { class: 'statbar' },
-    h('span', null, STAT_LABEL_6[i]), h('b', null, v),
+    h('span', null, STAT_LABEL_6[i]), h('b', { class: shiny ? 'shiny-stat' : '' }, shiny ? v.toFixed(1) : v),
     h('div', { class: 'sb' }, h('div', { class: 'sb-fill', style: `width:${Math.min(100, (v / 160) * 100)}%;background:${v >= 100 ? '#5fe08a' : v >= 60 ? '#ffd23f' : '#ff8c5a'}` })),
   )));
 }
 
-/** 固定大小的头像框：不同宝可梦的精灵图尺寸不一样，放在框里居中，界面不会跟着变高 */
-export function portraitSlot(dex: number, scale: number, cls = '') {
-  return h('div', { class: `pslot ${cls}` }, Animator.portrait(dex, scale));
+/** 固定大小的头像框：不同宝可梦的精灵图尺寸不一样，放在框里居中，界面不会跟着变高。闪光宝可梦右上角有一颗星 */
+export function portraitSlot(dex: number, scale: number, cls = '', shiny = false) {
+  return h('div', { class: `pslot ${cls}${shiny ? ' shiny' : ''}` }, Animator.portrait(dex, scale, shiny));
 }
 
-export function lineDetail(line: LineId, compact = false) {
+export function lineDetail(line: LineId, compact = false, shiny = false) {
   const L = LINES[line];
   const evo = h('div', { class: 'evo-chain' });
   L.forms.forEach((f, i) => {
     if (i > 0) evo.appendChild(h('span', { class: 'evo-arrow' }, L.stones ? `${STONE_NAME[Object.keys(L.stones).find((k) => L.stones![k] === i) ?? ''] ?? '进化石'} →` : `Lv${L.evoLevels[i - 1]} →`));
-    evo.appendChild(h('div', { class: 'evo-form' }, portraitSlot(f.dex, 1, 'tiny'), h('div', { class: 'small' }, f.name)));
+    evo.appendChild(h('div', { class: 'evo-form' }, portraitSlot(f.dex, 1, 'tiny', shiny), h('div', { class: 'small' }, f.name)));
   });
   if (L.forms.length === 1) evo.appendChild(h('span', { class: 'muted small' }, `Lv${L.evoLevels.join(' / Lv')} 觉醒`));
   const skillChip = (id: string, label: string) => {
@@ -56,17 +58,17 @@ export function lineDetail(line: LineId, compact = false) {
     tip(el, () => skillInfo(id, 1, line));
     return el;
   };
-  return h('div', { class: `line-detail ${compact ? 'compact' : ''}` },
+  return h('div', { class: `line-detail ${compact ? 'compact' : ''}${shiny ? ' shiny' : ''}` },
     h('div', { class: 'ld-top' },
-      portraitSlot(L.forms[0].dex, 3, 'ld-portrait'),
+      portraitSlot(L.forms[0].dex, 3, 'ld-portrait', shiny),
       h('div', { class: 'ld-info' },
-        h('h2', null, L.name),
-        h('div', null, ...L.forms[0].types.map(typeBadge)),
+        h('h2', null, shinyName(L.name, shiny)),
+        h('div', null, ...L.forms[0].types.map(typeBadge), shiny ? h('span', { class: 'shiny-tag' }, uiIcon('shiny', 1), '闪光 · 六项能力 +1%') : null),
         h('div', { class: 'muted small' }, `技能栏 ${L.forms[0].slots} 个 · ${TYPE_NAME[L.bonusType]}系技能 +${L.bonusPct}%`),
         h('p', { class: 'flavor' }, L.flavor),
       ),
     ),
-    statBars(line),
+    statBars(line, shiny),
     h('div', { class: 'passives' }, L.passives.slice(compact ? 1 : 0).map((p) => h('div', { class: 'passive' }, h('b', null, p.name), ' ', p.desc))),
     h('div', { class: 'ld-row' }, h('span', { class: 'muted small ld-label' }, '初始技能'), h('div', { class: 'chips' }, L.start.map((id) => skillChip(id, SKILLS[id].name)))),
     h('div', { class: 'ld-row' }, h('span', { class: 'muted small ld-label' }, '升级领悟'), h('div', { class: 'chips learn' }, L.learnset.map((e) => skillChip(e.skill, `Lv${e.lv} ${SKILLS[e.skill].name}`)))),
@@ -123,12 +125,12 @@ export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: nu
     const L = x.line ? LINES[x.line] : null;
     return h('div', { class: `slot ${x.id === you ? 'me' : ''}` },
       h('div', { class: 'slot-team' },
-        L ? portraitSlot(L.forms[0].dex, 2, 'slot-portrait') : h('div', { class: 'pslot slot-portrait slot-q' }, '?'),
+        L ? portraitSlot(L.forms[0].dex, 2, 'slot-portrait', x.shiny) : h('div', { class: 'pslot slot-portrait slot-q' }, '?'),
         trainerPortrait(x.trainer, 1, 'tportrait slot-trainer'),
       ),
       h('div', { class: 'slot-body' },
         h('div', { class: 'slot-name' }, x.name, x.host ? h('span', { class: 'tag' }, '房主') : null),
-        h('div', { class: 'small muted' }, `${TRAINERS[x.trainer]?.name ?? ''} · ${L?.name ?? '还没选伙伴'}`),
+        h('div', { class: 'small muted' }, `${TRAINERS[x.trainer]?.name ?? ''} · ${L ? shinyName(L.name, x.shiny) : '还没选伙伴'}`),
         h('div', { class: `small ${x.ready || x.host ? 'ok' : 'muted'}` }, x.host ? '房主' : x.ready ? '已准备' : '未准备'),
       ),
     );
@@ -157,9 +159,9 @@ export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: nu
           : h('button', { class: `btn big lobby-go ${me?.ready ? '' : 'gold'}`, 'data-key': 'y', disabled: !me?.line, onclick: () => a.ready(!me?.ready) }, me?.ready ? '取消准备' : '准备！'),
       ),
       h('div', { class: 'lobby-right' },
-        me?.line ? lineDetail(me.line, true) : h('div', { class: 'line-detail empty' }, h('p', { class: 'sub' }, '还没有选择伙伴')),
+        me?.line ? lineDetail(me.line, true, me.shiny) : h('div', { class: 'line-detail empty' }, h('p', { class: 'sub' }, '还没有选择伙伴')),
         h('div', { class: 'row between' },
-          h('span', { class: 'small muted' }, L ? `你的伙伴：${L.name}` : ''),
+          h('span', { class: 'small muted' }, L ? `你的伙伴：${shinyName(L.name, me?.shiny)}` : ''),
           iconBtn('swap', '换一只伙伴', () => { if (me?.ready) { toast('先取消准备再换伙伴', 'error'); return; } sfx('click'); a.partner(); }, { cls: 'small', text: '换伙伴' }),
         ),
       ),
@@ -249,7 +251,7 @@ export class BrowseScreen {
           if (!pl) return h('div', { class: 'room-mon empty' }, h('span', { class: 'small muted' }, '空位'));
           return h('div', { class: 'room-mon', title: pl.name },
             trainerPortrait(pl.trainer, 1, 'tportrait tiny'),
-            pl.line ? portraitSlot(LINES[pl.line].forms[0].dex, 1, 'tiny') : h('span', { class: 'pslot tiny slot-q' }, '?'),
+            pl.line ? portraitSlot(LINES[pl.line].forms[0].dex, 1, 'tiny', pl.shiny) : h('span', { class: 'pslot tiny slot-q' }, '?'),
             h('span', { class: 'small room-mon-name' }, pl.name));
         })),
       ),
@@ -264,21 +266,36 @@ export class BrowseScreen {
 
 // ---------------------------------------------------------------- 研究所 / 成就（大木研究所的标签页内容）
 
+/** 研究所里用界面图标（而不是道具图标）的研究 */
+const LAB_UI_ICONS = new Set(['bow', 'shiny']);
+
 export function labGrid(p: Profile, rerender: () => void) {
   return h('div', { class: 'lab-body' },
     h('div', { class: 'lab-grid' }, META_UPGRADES.map((u) => {
       const lv = p.upgrades[u.id] ?? 0;
       const maxed = lv >= u.max;
       const cost = maxed ? 0 : metaCost(u, lv);
-      return h('div', { class: `lab-item ${maxed ? 'max' : ''}` },
-        u.icon === 'bow' ? uiIcon('bow', 3) : iconImg(u.icon, 3),
+      // 闪光研究：显示现在的闪光几率（研究所 + 现在的训练家）
+      const shinyBonus = u.per.shiny ? lv * u.per.shiny + (trainerOf(p.trainer).mods.shiny ?? 0) : 0;
+      const el = h('div', { class: `lab-item ${maxed ? 'max' : ''}` },
+        LAB_UI_ICONS.has(u.icon) ? uiIcon(u.icon, 3) : iconImg(u.icon, 3),
         h('div', { class: 'lab-body-text' },
-          h('div', { class: 'lab-name' }, h('b', null, u.name), h('span', { class: 'small muted' }, ` ${lv}/${u.max}`)),
+          h('div', { class: 'lab-name' }, h('b', null, u.name), h('span', { class: 'small muted' }, ` ${lv}/${u.max}`),
+            u.per.shiny ? h('span', { class: 'small gold' }, ` · 现在 ${shinyOdds(shinyBonus)}`) : null),
           h('div', { class: 'small muted lab-desc' }, `${u.desc} / 级`),
           h('div', { class: 'pips' }, Array.from({ length: u.max }, (_, i) => h('i', { class: i < lv ? 'on' : '' }))),
         ),
         h('button', { class: 'btn small lab-buy', disabled: maxed || p.stardust < cost, onclick: () => { if (buyUpgrade(p, u.id)) { sfx('buy'); rerender(); } } }, maxed ? '已满级' : `${cost}`),
       );
+      if (u.per.shiny) {
+        tip(el, () => h('div', { class: 'info' },
+          h('b', null, '闪光宝可梦'),
+          h('div', { class: 'small' }, '每只野生宝可梦出现时有 1/1000 的几率是闪光的，最高能提高到 1/200。'),
+          h('div', { class: 'small' }, '研究所每级 +60%，训练家火箭队 +100%，冒险中的道具闪耀护符 +50%；联机时按队伍里最高的算。'),
+          h('div', { class: 'small gold' }, '打倒闪光宝可梦，它一定会崇拜你。闪光的和普通的是两只宝可梦，六项能力各高 1%。'),
+        ));
+      }
+      return el;
     })),
     h('div', { class: 'panel-foot' },
       h('span', { class: 'small muted' }, '用冒险得到的星之沙永久强化所有宝可梦（对战同样生效）。等级越高越贵，可以随时全额返还。'),
@@ -355,11 +372,12 @@ const CREDIT_TABS: [string, () => Node][] = [
     h('li', null, '普通波次 30~60 秒，撑到倒计时结束就算过关；第 10 波和第 20 波是 90 秒的首领波。技能会自动瞄准最近的敌人释放。'),
     h('li', null, '物理技能吃「物攻」（偏近身），特殊技能吃「特攻」（偏远程）；接触伤害由「物防」减免，弹幕与爆炸由「特防」减免。属性克制只多/少 10%，本系技能 1.5 倍。'),
     h('li', null, '冒险中会有野生宝可梦乱入。击败野生宝可梦时它有几率崇拜你，成为新的伙伴（整条进化线都能用）。研究所的「友情缎带」、精灵球类道具和小智都能提高崇拜几率。'),
+    h('li', null, '闪光宝可梦：每只宝可梦出现时有 1/1000 的几率是闪光（异色）的，六项能力各高 1%。打倒还没有的闪光宝可梦，它一定会崇拜你；闪光的和普通的是两只宝可梦，要分别培养、分别设为伙伴。研究所的「闪光研究」、火箭队和闪耀护符能提高几率，最高 1/200。'),
     h('li', null, '等级够了以后，波次结束时会询问是否进化，可以取消；伊布要在商店里买进化石。每波结束后进入商店：买道具、学招式，买错了可以撤销上一次购买。'),
   )],
   ['模式', () => h('ul', { class: 'credit-list' },
     h('li', null, '难度分简单 / 普通 / 困难：通关上一档才能解锁下一档。'),
-    h('li', null, '训练家各有加成：小智更容易让宝可梦崇拜、小霞擅长水系、火箭队赚得多但宝可梦不太信任他们……其他训练家靠成就或星之沙解锁。'),
+    h('li', null, '训练家各有加成：小智更容易让宝可梦崇拜、小霞擅长水系、火箭队赚得多还专门盯着闪光宝可梦，但宝可梦不太信任他们……其他训练家靠成就或星之沙解锁。'),
     h('li', null, '联机时倒下的队友身边会出现绿色救援圈，站进去就能把它救起来。首次通关后可以开启 AI 辅助战斗，由 AI 替你走位。'),
     h('li', null, '冒险结束后可以把宝可梦放进背包，在对战场里排位：单挑是三只同时上场（你操作队长），团战四人各一只；每场 60 秒，也可以整场交给 AI。'),
     h('li', null, '道馆：关都八个道馆按顺序挑战，先打道馆训练家再打馆主。每枚徽章永久提升一项能力和对应属性的技能伤害；打败小刚、娜姿还能解锁他们当你的训练家。'),
@@ -371,7 +389,7 @@ const CREDIT_TABS: [string, () => Node][] = [
     h('li', null, '手柄（Xbox / PlayStation）：左摇杆或十字键移动与选择，A/× 确认与进入建筑，B/○ 返回，X/□ 刷新商店，Y/△ 出发（战斗中切换自动战斗、镇上快速前往），LB/RB 翻页，LT 撤销购买，Start 暂停。'),
   )],
   ['致谢', () => h('div', { class: 'credit-list' },
-    h('p', { class: 'small' }, '宝可梦像素精灵：PMDCollab / SpriteCollab 的众多画师（CC BY-NC 4.0，非商业使用），通过 JPTER78/pokesurvivor 整理导入，完整名单见仓库 CREDITS.md。'),
+    h('p', { class: 'small' }, '宝可梦像素精灵（包括闪光宝可梦的异色精灵图）：PMDCollab / SpriteCollab 的众多画师（CC BY-NC 4.0，非商业使用），通过 JPTER78/pokesurvivor 整理导入，完整名单见仓库 CREDITS.md。'),
     h('p', { class: 'small' }, '真新镇图块、行走图与大木博士的立绘：《宝可梦 火红 / 叶绿》（通过 pret/pokefirered 导入）；训练家与道馆馆主的立绘：PokéRogue（CC BY-NC-SA 4.0）。'),
     h('p', { class: 'small' }, '界面风格与部分界面图标（齿轮、声音、奖杯、硬币、星星、王冠等）来自 JPTER78/pokesurvivor（MIT）。字体：缝合像素字体 Fusion Pixel Font（OFL 1.1）。'),
     h('p', { class: 'small muted' }, 'Pokémon 及相关名称为 Nintendo / Creatures Inc. / GAME FREAK / The Pokémon Company 的商标。本作为非营利粉丝作品。'),

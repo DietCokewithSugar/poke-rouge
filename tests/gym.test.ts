@@ -66,7 +66,7 @@ test('徽章加成：随研究所强化一起发给服务器，开局时加到�
 });
 
 test('道馆成就：徽章数量与击败馆主时的情况；冒险成就不会在道馆里误判', () => {
-  const s = (badges: number): LifetimeStats => ({ runs: 1, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 3, badges });
+  const s = (badges: number): LifetimeStats => ({ runs: 1, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 3, badges, shinies: 0 });
   const A = ACHIEVEMENT_BY_ID;
   assert.ok(A.badge_1.check(NO_RUN, s(1)));
   assert.ok(!A.badge_4.check(NO_RUN, s(3)));

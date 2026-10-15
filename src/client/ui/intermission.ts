@@ -4,6 +4,7 @@ import { SKILLS } from '../../shared/skills';
 import type { Command, MeState, PublicState } from '../../shared/sim/game';
 import type { LevelCard, ShopOffer } from '../../shared/sim/entities';
 import { MOD_LABEL } from '../../shared/stats';
+import { shinyName } from '../../shared/shiny';
 import { TYPE_NAME, type PType } from '../../shared/types';
 import { ENEMIES } from '../../shared/enemies';
 import { BIOMES, TOTAL_WAVES, WAVES, waveDuration } from '../../shared/waves';
@@ -100,8 +101,8 @@ export class Intermission {
 
   private renderEvolution(me: MeState, stage0: HTMLElement) {
     const evo = me.evo!;
-    const from = Animator.portrait(evo.fromDex, 3);
-    const to = Animator.portrait(evo.toDex, 3);
+    const from = Animator.portrait(evo.fromDex, 3, me.shiny);
+    const to = Animator.portrait(evo.toDex, 3, me.shiny);
     to.classList.add('evo-to');
     const stage = h('div', { class: 'evo-stage' }, from, to);
     const text = h('p', { class: 'evo-text' }, `咦？${evo.from}的样子……！`);
@@ -406,9 +407,9 @@ export class Intermission {
     clear(this.side);
     const L = LINES[me.line];
     this.side.appendChild(h('div', { class: 'side-head' },
-      Animator.portrait(me.dex, 2),
+      Animator.portrait(me.dex, 2, me.shiny),
       h('div', null,
-        h('div', { class: 'big' }, `${me.form}  Lv${me.level}`),
+        h('div', { class: 'big' }, `${shinyName(me.form, me.shiny)}  Lv${me.level}`),
         h('div', null, ...L.forms[Math.min(me.stage, L.forms.length - 1)].types.map((t) => typeBadge(t))),
         h('div', { class: 'muted small' }, `本系加成：${TYPE_NAME[L.bonusType]}系 +${L.bonusPct}%`),
       ),

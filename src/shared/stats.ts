@@ -1,3 +1,4 @@
+import { SHINY_STAT } from './shiny';
 import type { PType } from './types';
 
 /** 宝可梦式六维（种族值）。 */
@@ -33,6 +34,7 @@ export interface Mods {
   rerolls: number;   // 每波免费刷新次数
   enemies: number;   // 敌人数量 %（香水增加、喷雾减少；联机时全队叠加）
   recruit: number;   // 崇拜几率 %：击败野生宝可梦时它想成为你的伙伴的几率
+  shiny: number;     // 闪光几率 %：野生宝可梦是闪光宝可梦的几率（联机时按全队最高的算）
 }
 
 export type ModKey = keyof Mods;
@@ -44,7 +46,7 @@ export function emptyMods(): Mods {
     atkPct: 0, spaPct: 0, defPct: 0, spdPct: 0, spePct: 0,
     haste: 0, crit: 0, range: 0, dodge: 0, regen: 0, lifesteal: 0, pickup: 0, luck: 0,
     harvest: 0, xp: 0, money: 0, dmg: 0, dmgMinion: 0, dmgBoss: 0, thorns: 0, superEff: 0,
-    discount: 0, slots: 0, stun: 0, rerolls: 0, enemies: 0, recruit: 0,
+    discount: 0, slots: 0, stun: 0, rerolls: 0, enemies: 0, recruit: 0, shiny: 0,
   };
 }
 
@@ -93,19 +95,23 @@ export interface Derived {
   rerolls: number;
   enemies: number;
   recruitMult: number;
+  /** 闪光几率加成 % */
+  shiny: number;
 }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
-export function derive(base: BaseStats, m: Mods): Derived {
-  const pct = (v: number, p: number) => Math.max(1, v * (1 + p / 100));
+/** shiny：闪光宝可梦，六项能力各 +1% */
+export function derive(base: BaseStats, m: Mods, shiny = false): Derived {
+  const k = shiny ? SHINY_STAT : 1;
+  const pct = (v: number, p: number) => Math.max(1, v * (1 + p / 100) * k);
   const atk = pct(base.atk + m.atk, m.atkPct);
   const spa = pct(base.spa + m.spa, m.spaPct);
   const def = pct(base.def + m.def, m.defPct);
   const spd = pct(base.spd + m.spd, m.spdPct);
   const spe = pct(base.spe + m.spe, m.spePct);
   return {
-    maxHp: Math.max(1, Math.round(base.hp * 0.6 + 10 + m.maxHp)),
+    maxHp: Math.max(1, Math.round((base.hp * 0.6 + 10 + m.maxHp) * k)),
     atk, def, spa, spd, spe,
     physMult: atk / 50,
     specMult: spa / 50,
@@ -133,6 +139,7 @@ export function derive(base: BaseStats, m: Mods): Derived {
     rerolls: Math.max(0, m.rerolls),
     enemies: m.enemies,
     recruitMult: Math.max(0, 1 + m.recruit / 100),
+    shiny: Math.max(0, m.shiny),
   };
 }
 
@@ -144,12 +151,12 @@ export const MOD_LABEL: Record<ModKey, string> = {
   lifesteal: '吸血', pickup: '拾取范围', luck: '幸运', harvest: '收获', xp: '经验获取',
   money: '金钱获取', dmg: '全伤害', dmgMinion: '对小怪伤害', dmgBoss: '对精英/首领伤害',
   thorns: '反伤', superEff: '效果拔群伤害', discount: '商店折扣', slots: '技能栏', stun: '畏缩几率',
-  rerolls: '免费刷新', enemies: '敌人数量', recruit: '崇拜几率',
+  rerolls: '免费刷新', enemies: '敌人数量', recruit: '崇拜几率', shiny: '闪光几率',
 };
 
 const PCT_KEYS = new Set<ModKey>([
   'atkPct', 'spaPct', 'defPct', 'spdPct', 'spePct', 'haste', 'crit', 'range', 'dodge', 'lifesteal',
-  'pickup', 'xp', 'money', 'dmg', 'dmgMinion', 'dmgBoss', 'superEff', 'discount', 'stun', 'enemies', 'recruit',
+  'pickup', 'xp', 'money', 'dmg', 'dmgMinion', 'dmgBoss', 'superEff', 'discount', 'stun', 'enemies', 'recruit', 'shiny',
 ]);
 
 export function fmtMod(k: ModKey, v: number): string {

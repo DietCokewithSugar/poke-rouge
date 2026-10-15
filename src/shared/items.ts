@@ -174,7 +174,7 @@ const LIST: ItemDef[] = [
   I({ id: 'max_revive', name: '活力块', tier: 4, price: 150, special: 'revive', reviveHp: 1, max: 1, icon: 'revive', group: 'held', desc: '倒下时自动以满 HP 复活一次（用后消失）。' }),
   I({ id: 'soul_dew', name: '心之水滴', tier: 4, price: 185, mods: { spa: 20, spd: 20 }, typeMods: { psychic: 15, dragon: 15 }, icon: 'souldew', group: 'held' }),
   I({ id: 'gold_bottle_cap', name: '金色王冠', tier: 4, price: 190, mods: { atk: 12, def: 12, spa: 12, spd: 12, spe: 12 }, icon: 'cap_gold', group: 'held', desc: '极限特训：全部基础属性大幅提升。' }),
-  I({ id: 'shiny_charm', name: '闪耀护符', tier: 4, price: 175, mods: { luck: 25, xp: 15, money: 15 }, max: 1, icon: 'shinycharm', group: 'key' }),
+  I({ id: 'shiny_charm', name: '闪耀护符', tier: 4, price: 175, mods: { luck: 25, xp: 15, money: 15, shiny: 50 }, max: 1, icon: 'shinycharm', group: 'key' }),
 ];
 
 export const ITEMS: Record<string, ItemDef> = Object.fromEntries(LIST.map((i) => [i.id, i]));

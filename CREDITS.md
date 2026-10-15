@@ -2,7 +2,7 @@
 
 ## 精灵图（Sprites）
 
-宝可梦像素精灵来自 [PMDCollab / SpriteCollab](https://github.com/PMDCollab/SpriteCollab)，
+宝可梦像素精灵（包括闪光宝可梦的异色精灵图）来自 [PMDCollab / SpriteCollab](https://github.com/PMDCollab/SpriteCollab)，
 采用 [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) 许可：**仅限非商业用途，并需署名**。
 动画锚点数据整理自 [JPTER78/pokesurvivor](https://github.com/JPTER78/pokesurvivor)（MIT）。
 

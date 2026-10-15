@@ -3,7 +3,7 @@ import { decodeSnapshot, type PvpSeatInfo, type SnapEnemy, type SnapPlayer, type
 import { FX_KINDS, SKILLS } from '../../shared/skills';
 import { REVIVE_RADIUS, type Ev, type MeState, type PublicState } from '../../shared/sim/game';
 import { sfx } from '../audio';
-import { FxLayer, drawPickup, drawProj, drawZone, pxCircle, pxRing } from '../gfx/fx';
+import { FxLayer, drawPickup, drawProj, drawZone, pxCircle, pxRing, twinkle } from '../gfx/fx';
 import { vis, type Trail } from '../gfx/vfx';
 import { TYPES } from '../../shared/types';
 import { Animator, dirRow, preload, shadowSize } from '../gfx/sprites';
@@ -28,8 +28,8 @@ for (const s of Object.values(SKILLS)) if (!FX_PATTERN.has(s.fx)) FX_PATTERN.set
 const SEND_EVERY = 1000 / 20;
 
 interface TimedSnap { t: number; s: Snapshot; players: Map<number, SnapPlayer>; enemies: Map<number, SnapEnemy>; projs: Map<number, SnapProj> }
-interface EnemyVis { anim: Animator; flash: number; lx: number; ly: number; dir: number; scale: number; seen: number }
-interface PlayerVis { anim: Animator; flash: number; down: boolean; evoFlash: number }
+interface EnemyVis { anim: Animator; flash: number; lx: number; ly: number; dir: number; scale: number; seen: number; tw: number }
+interface PlayerVis { anim: Animator; flash: number; down: boolean; evoFlash: number; tw: number }
 interface Corpse { anim: Animator; x: number; y: number; t: number; scale: number }
 interface Flyer { x: number; y: number; kind: number; value: number; pid: number; t: number }
 
@@ -38,8 +38,10 @@ export interface ViewHooks {
   onBoss(name: string): void;
   onWave(n: number): void;
   onEvolve(pid: number, text: string): void;
-  /** 野生宝可梦崇拜了某位玩家 */
-  onRecruit(pid: number, dex: number, line: string): void;
+  /** 野生宝可梦崇拜了某位玩家（shiny：闪光宝可梦） */
+  onRecruit(pid: number, dex: number, line: string, shiny: boolean): void;
+  /** 闪光宝可梦出现了 */
+  onShiny(dex: number): void;
 }
 
 export class GameView {
@@ -63,6 +65,8 @@ export class GameView {
   sendAck: (k: number) => void = () => {};
   private lastAck = 0;
   private enemyVis = new Map<number, EnemyVis>();
+  /** 场上的闪光宝可梦：敌人 id → 种类（种类对不上说明编号已经给了别的敌人）与出现时间 */
+  private shinyEnemies = new Map<number, { kind: number; at: number }>();
   private playerVis = new Map<number, PlayerVis>();
   private corpses: Corpse[] = [];
   private pickups = new Map<number, { kind: number; x: number; y: number; value: number }>();
@@ -88,6 +92,8 @@ export class GameView {
   canMove = () => true;
   /** 自己是不是已经有这条进化线：没有的野生宝可梦头上画一颗爱心 */
   isOwned: (line: string) => boolean = () => true;
+  /** 自己是不是已经有这只闪光宝可梦：没有的闪光宝可梦头上画一颗星 */
+  isShinyOwned: (line: string) => boolean = () => true;
   /** 对战：每位玩家的队伍；revive 为倒下后能不能被救起（单挑倒下就退场） */
   private pvp: { teams: Map<number, number>; myTeam: number; revive: boolean } | null = null;
   /** 自己的宝可梦由服务器上的 AI 操作：画面跟随服务器位置，不再上报 */
@@ -156,6 +162,8 @@ export class GameView {
     this.snaps.push(ts);
     // 联机时视野外的敌人不再出现在快照里，清掉很久没见到的
     if (s.tick % 30 === 0) for (const [id, v] of this.enemyVis) if (this.time - v.seen > 2) this.enemyVis.delete(id);
+    // 闪光宝可梦总在快照里：不在了就是被打倒了（视野外的倒下事件不会发过来）
+    for (const [id, sh] of this.shinyEnemies) if (!ts.enemies.has(id) && this.time - sh.at > 1) this.shinyEnemies.delete(id);
     if (this.snaps.length > 12) this.snaps.shift();
     const mine = ts.players.get(this.you);
     if (mine && !(mine.flags & 64)) {
@@ -244,15 +252,28 @@ export class GameView {
         const id = n(1), x = n(2), y = n(3), kind = n(4);
         const v = this.enemyVis.get(id);
         const def = ENEMIES[ENEMY_IDS[kind]];
-        if (def && this.corpses.length < 60) {
-          const anim = new Animator(def.dex);
+        const shiny = this.isShiny(id, kind);
+        if (def && (this.corpses.length < 60 || shiny)) {
+          const anim = new Animator(def.dex, shiny);
           anim.dir = v?.anim.dir ?? 0;
           anim.play('Faint', true, 1.6);
           this.corpses.push({ anim, x, y, t: 0, scale: v?.scale ?? 1 });
         }
         this.enemyVis.delete(id);
         this.fx.death(x, y);
+        if (shiny) { this.shinyEnemies.delete(id); this.fx.shinyBurst(x, y, 12 * (v?.scale ?? 1)); }
         sfx('kill');
+        break;
+      }
+      case 'shiny': {
+        const id = n(1), kind = n(2);
+        const def = ENEMIES[ENEMY_IDS[kind]];
+        if (!def) break;
+        this.shinyEnemies.set(id, { kind, at: this.time });
+        void preload([def.dex], true);
+        this.fx.shinyBurst(n(3), n(4), 14 * (def.scale ?? 1));
+        sfx('shiny');
+        this.hooks.onShiny(def.dex);
         break;
       }
       case 'fx': this.skillFx(ev); break;
@@ -336,10 +357,11 @@ export class GameView {
       case 'msg': this.hooks.onMessage(ev[1] as string); break;
       case 'wild': void preload(ev[1] as number[]); break;
       case 'recruit': {
-        const x = n(4), y = n(5);
+        const x = n(4), y = n(5), shiny = ev[6] === 1;
         for (let i = 0; i < 8; i++) this.fx.sp('heart', 'fairy', x + (Math.random() - 0.5) * 18, y - 8 - Math.random() * 10, { vy: -30 - Math.random() * 20, life: 0.9 + Math.random() * 0.4 });
-        this.fx.text(x, y - 30, n(1) === this.you ? '崇拜了你！' : '崇拜了队友！', '#ff8ad8', 13, 1.6);
-        this.hooks.onRecruit(n(1), n(2), ev[3] as string);
+        if (shiny) this.fx.shinyBurst(x, y, 18);
+        this.fx.text(x, y - 30, n(1) === this.you ? '崇拜了你！' : '崇拜了队友！', shiny ? '#fff3a8' : '#ff8ad8', 13, 1.6);
+        this.hooks.onRecruit(n(1), n(2), ev[3] as string, shiny);
         break;
       }
       case 'boss': this.hooks.onBoss(ev[2] as string); sfx('boss'); break;
@@ -348,6 +370,7 @@ export class GameView {
         this.local.synced = false;
         this.pickups.clear();
         this.corpses = [];
+        this.shinyEnemies.clear();
         this.hooks.onWave(n(1));
         sfx('wave');
         break;
@@ -362,6 +385,10 @@ export class GameView {
     void owner;
     this.fx.skill(FX_PATTERN.get(fx), fx, x, y, ang, a, b);
     if (!this.settings.shake) this.fx.shake = 0;
+  }
+
+  private isShiny(id: number, kind: number) {
+    return this.shinyEnemies.get(id)?.kind === kind;
   }
 
   private nearestPid(x: number, y: number) {
@@ -514,13 +541,19 @@ export class GameView {
         const y = pa ? pa.y + (e.y - pa.y) * f : e.y;
         const def = ENEMIES[ENEMY_IDS[e.kind]];
         if (!def) continue;
+        const shiny = this.isShiny(e.id, e.kind);
         let v = this.enemyVis.get(e.id);
         if (!v) {
-          v = { anim: new Animator(def.dex), flash: 0, lx: x, ly: y, dir: 0, scale: def.scale ?? 1, seen: t };
+          v = { anim: new Animator(def.dex, shiny), flash: 0, lx: x, ly: y, dir: 0, scale: def.scale ?? 1, seen: t, tw: 0 };
           v.anim.loop('Walk');
           this.enemyVis.set(e.id, v);
         }
         const vis = v;
+        vis.anim.setDex(def.dex, shiny);
+        if (shiny && !(e.flags & 1) && (vis.tw -= dt) <= 0) {
+          vis.tw = 0.22;
+          this.fx.twinkle(x + (Math.random() - 0.5) * 18 * vis.scale, y - 4 - Math.random() * 20 * vis.scale);
+        }
         const mdx = x - vis.lx, mdy = y - vis.ly;
         if (Math.abs(mdx) + Math.abs(mdy) > 0.15) vis.anim.dir = dirRow(Math.atan2(mdy, mdx));
         vis.anim.loop((e.flags & 128) ? 'Idle' : 'Walk', (e.flags & 16) ? 0 : 1);
@@ -529,19 +562,25 @@ export class GameView {
         vis.anim.update(dt);
         vis.flash = Math.max(-1, vis.flash - dt);
         if (e.flags & 1) continue;
-        const want = !!def.wild && !this.isOwned(LINE_OF_DEX[def.dex]);
-        list.push({ y, draw: () => this.drawEnemy(e, def.rank, def.dex, x, y, vis, t, want) });
+        const line = LINE_OF_DEX[def.dex];
+        const want = shiny ? (this.isShinyOwned(line) ? '' : 'shiny') : def.wild && !this.isOwned(line) ? 'heart' : '';
+        list.push({ y, draw: () => this.drawEnemy(e, def.rank, def.dex, x, y, vis, t, want, shiny) });
       }
       for (const p of b.s.players) {
         const pa = a.players.get(p.id);
         let x = pa ? pa.x + (p.x - pa.x) * f : p.x;
         let y = pa ? pa.y + (p.y - pa.y) * f : p.y;
         if (p.id === this.you && this.local.synced) { x = this.local.x; y = this.local.y; }
+        const shiny = (p.flags & 128) !== 0;
         let v = this.playerVis.get(p.id);
-        if (!v) { v = { anim: new Animator(p.dex), flash: 0, down: false, evoFlash: 0 }; this.playerVis.set(p.id, v); }
+        if (!v) { v = { anim: new Animator(p.dex, shiny), flash: 0, down: false, evoFlash: 0, tw: 0.5 }; this.playerVis.set(p.id, v); }
         const vis = v;
-        vis.anim.setDex(p.dex);
+        vis.anim.setDex(p.dex, shiny);
         const down = (p.flags & 1) !== 0;
+        if (shiny && !down && (vis.tw -= dt) <= 0) {
+          vis.tw = 0.8 + Math.random() * 0.6;
+          this.fx.twinkle(x + (Math.random() - 0.5) * 16, y - 6 - Math.random() * 16);
+        }
         if (down && !vis.down) vis.anim.play('Faint', true);
         if (!down && vis.down) vis.anim.loop('Idle');
         vis.down = down;
@@ -641,6 +680,34 @@ export class GameView {
         ctx.fillText(label, ex, ey + 18 * S * k);
       }
     }
+    // 屏幕层：画面外的闪光宝可梦，在画面边上用一颗星指出方向（上下留出 HUD 的位置）
+    if (ip) {
+      const W = this.canvas.width, H = this.canvas.height;
+      const mx = Math.max(16 * S, W * 0.06), top = Math.max(16 * S, H * 0.2), bottom = Math.max(16 * S, H * 0.18);
+      const k = S + 1;
+      for (const e of ip.b.s.enemies) {
+        if (!this.isShiny(e.id, e.kind)) continue;
+        const sx = (e.x - cx) * S, sy = (e.y - 10 - cy) * S;
+        if (sx >= 0 && sy >= 0 && sx <= W && sy <= H) continue;
+        const ex = Math.max(mx, Math.min(W - mx, sx)), ey = Math.max(top, Math.min(H - bottom, sy));
+        const a = Math.atan2(sy - ey, sx - ex);
+        ctx.save();
+        ctx.translate(Math.round(ex), Math.round(ey));
+        ctx.scale(k, k);
+        ctx.globalAlpha = Math.floor(t * 4) % 2 ? 1 : 0.7;
+        const ux = Math.cos(a), uy = Math.sin(a);
+        ctx.fillStyle = '#9ae6ff';
+        ctx.beginPath();
+        ctx.moveTo(ux * 15, uy * 15);
+        ctx.lineTo(ux * 6 - uy * 3, uy * 6 + ux * 3);
+        ctx.lineTo(ux * 6 + uy * 3, uy * 6 - ux * 3);
+        ctx.closePath();
+        ctx.fill();
+        star(ctx, 0, 0);
+        twinkle(ctx, -5, -5, (t * 1.3) % 1);
+        ctx.restore();
+      }
+    }
     // 屏幕层：受伤红闪
     if (this.hurtFlash > 0) {
       this.hurtFlash -= dt;
@@ -665,13 +732,14 @@ export class GameView {
     this.ctx.fillRect(Math.round(x - rx + 2), Math.round(y - 2), Math.round(rx * 2 - 4), 5);
   }
 
-  private drawEnemy(e: SnapEnemy, rank: string, dex: number, x: number, y: number, v: EnemyVis, t: number, want = false) {
+  /** want：heart 还没有的乱入宝可梦（头上一颗爱心），shiny 还没有的闪光宝可梦（头上一颗星） */
+  private drawEnemy(e: SnapEnemy, rank: string, dex: number, x: number, y: number, v: EnemyVis, t: number, want: '' | 'heart' | 'shiny', shiny: boolean) {
     const ctx = this.ctx;
     this.drawShadow(x, y, shadowSize(dex), v.scale);
-    if (want) {
-      // 还没有的乱入宝可梦：脚下粉色光圈，头上一颗跳动的爱心
+    if (want || shiny) {
+      // 脚下的光圈：乱入的是粉色，闪光宝可梦是浅蓝色
       ctx.globalAlpha = 0.4 + 0.2 * Math.sin(t * 5);
-      pxRing(ctx, x, y, 11, '#ff8ad8', 1, 0.45, 2);
+      pxRing(ctx, x, y, 11 * v.scale, shiny ? '#9ae6ff' : '#ff8ad8', 1, 0.45, 2);
       ctx.globalAlpha = 1;
     }
     if (rank !== 'minion') {
@@ -693,7 +761,8 @@ export class GameView {
       ctx.fillRect(Math.round(x) - 1, Math.round(top) - 6, 2, 5);
       ctx.fillRect(Math.round(x) - 1, Math.round(top), 2, 2);
     }
-    if (want) heart(ctx, x, top - 4 + Math.round(Math.sin(t * 4) * 1.5));
+    if (want === 'heart') heart(ctx, x, top - 4 + Math.round(Math.sin(t * 4) * 1.5));
+    else if (want === 'shiny') star(ctx, x, top - 5 + Math.round(Math.sin(t * 4) * 1.5));
     if (rank !== 'minion' || e.hp < 0.999) {
       const w = rank === 'boss' ? 0 : rank === 'elite' ? 22 : 12;
       if (w) {
@@ -779,10 +848,16 @@ export class GameView {
   }
 }
 
+function pixels(ctx: CanvasRenderingContext2D, X: number, Y: number, rows: string[], col: Record<string, string>) {
+  rows.forEach((r, j) => { for (let i = 0; i < r.length; i++) { const c = col[r[i]]; if (c) { ctx.fillStyle = c; ctx.fillRect(X + i, Y + j, 1, 1); } } });
+}
+
 /** 5×4 的像素爱心（带描边） */
 function heart(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  const X = Math.round(x) - 3, Y = Math.round(y) - 3;
-  const rows = ['.oo.oo.', 'oppopqo', 'opppppo', '.opppo.', '..opo..', '...o...'];
-  const col: Record<string, string> = { o: '#401030', p: '#ff6ab8', q: '#ffd0ec' };
-  rows.forEach((r, j) => { for (let i = 0; i < r.length; i++) { const c = col[r[i]]; if (c) { ctx.fillStyle = c; ctx.fillRect(X + i, Y + j, 1, 1); } } });
+  pixels(ctx, Math.round(x) - 3, Math.round(y) - 3, ['.oo.oo.', 'oppopqo', 'opppppo', '.opppo.', '..opo..', '...o...'], { o: '#401030', p: '#ff6ab8', q: '#ffd0ec' });
+}
+
+/** 7×7 的像素四角星（带描边）：还没有的闪光宝可梦 */
+function star(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  pixels(ctx, Math.round(x) - 3, Math.round(y) - 3, ['...o...', '..oyo..', '.oywyo.', 'oywwwyo', '.oywyo.', '..oyo..', '...o...'], { o: '#4a3010', y: '#ffd23f', w: '#fff6c8' });
 }

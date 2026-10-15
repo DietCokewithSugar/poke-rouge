@@ -101,6 +101,8 @@ export const STAT_ROWS: [string, string, (v: number) => string][] = [
   ['moveSpeed', '移动速度', (v) => String(v)],
   ['enemies', '敌人数量', (v) => `${v >= 0 ? '+' : ''}${v}%`],
   ['recruit', '崇拜几率', (v) => `${v >= 0 ? '+' : ''}${v}%`],
+  // 全队的闪光几率：1/N
+  ['shiny', '闪光几率', (v) => `1/${v}`],
 ];
 
 export function statCardText(stat: ModKey, amount: number) {

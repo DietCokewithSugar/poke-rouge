@@ -1133,6 +1133,21 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 .locked-detail { display: flex !important; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 0.25rem; }
 .locked-detail .ld-portrait { width: 6rem !important; height: 6rem; }
 .partner-modal { width: 58rem; height: 32rem; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.875rem 1.125rem; }
+.pmon-views { gap: 0.25rem; }
+.pmon-views img.uico, .shiny-tag img.uico { width: 0.75rem; height: 0.75rem; }
+
+/* 闪光宝可梦：浅蓝色的光、淡金色的字 */
+.pmon.shiny, .mon-card.shiny { background: linear-gradient(160deg, rgba(154, 230, 255, .2), rgba(0, 0, 0, .22) 60%); }
+.pmon.shiny.on { background: linear-gradient(160deg, rgba(154, 230, 255, .24), rgba(255, 210, 63, .12) 60%); }
+.pmon.shiny .pmon-name, .line-detail.shiny .ld-info h2, .shiny-stat { color: #fff3a8; }
+.shiny-tag {
+  display: inline-flex; align-items: center; gap: 0.1875rem; margin: 1px 0 1px 0.25rem; padding: 0 0.3125rem; border-radius: 0.25rem; vertical-align: middle;
+  font-size: 0.75rem; line-height: 1.125rem; color: #fff3a8; white-space: nowrap; background: rgba(154, 230, 255, .16); border: 1px solid rgba(154, 230, 255, .5);
+}
+.line-detail.shiny .statbar { grid-template-columns: 2.375rem 2.5rem 1fr; }
+.line-detail.compact.shiny .statbar { grid-template-columns: 2rem 2.25rem 1fr; }
+.dex-shiny { position: absolute; top: 0.125rem; right: 0.25rem; line-height: 0; }
+.r-recruit.shiny { background: rgba(154, 230, 255, .14); border-color: rgba(154, 230, 255, .6); }
 
 /* 我的家 */
 .home-trainers { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 15rem; gap: 0.75rem; }
@@ -1285,8 +1300,8 @@ body.pad .th-num, .th-quick .btn:not(:hover) .th-num { opacity: .8; }
 /* 对战开场：VS */
 .vs { position: fixed; inset: 0; overflow: hidden; cursor: pointer; background: repeating-linear-gradient(115deg, #0c1226 0 0.75rem, #111a36 0.75rem 1.5rem); }
 .vs-side { position: absolute; top: 0; bottom: 0; width: 56%; display: flex; align-items: center; gap: 1.5rem; padding: 0 6%; transition: transform .35s cubic-bezier(.2, .9, .3, 1.2); }
-.vs-side.left { left: 0; background: linear-gradient(115deg, #1c3f9a 0%, #2f66d0 70%, transparent 70.2%); transform: translateX(-100%); }
-.vs-side.right { right: 0; flex-direction: row-reverse; text-align: right; background: linear-gradient(115deg, transparent 29.8%, #c83b3b 30%, #8e1f2a 100%); transform: translateX(100%); }
+.vs-side.left { left: 0; background: linear-gradient(115deg, #1c3f9a 0%, #2f66d0 81%, #f4f8ff 81.2%, #f4f8ff 82%, transparent 82.2%); transform: translateX(-100%); }
+.vs-side.right { right: 0; flex-direction: row-reverse; text-align: right; background: linear-gradient(115deg, transparent 17.8%, #f4f8ff 18%, #f4f8ff 18.8%, #c83b3b 19%, #8e1f2a 100%); transform: translateX(100%); }
 .vs.in .vs-side { transform: none; }
 .vs.out { opacity: 0; transition: opacity .26s; }
 .vs-art .tart { width: calc(var(--pw) * .85); height: calc(var(--ph) * .85); filter: drop-shadow(0.25rem 0.25rem 0 rgba(0, 0, 0, .4)); }

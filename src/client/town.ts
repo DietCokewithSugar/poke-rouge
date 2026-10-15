@@ -5,6 +5,7 @@
 import { TOWN_WHERE, type TownPeer } from '../shared/protocol';
 import { BUILDINGS, CELL, NPCS, SPAWN, VIEW_BOUNDS, blocked, doorPos, drawTownBg, drawTownFg, spotAt, type PlaceId, type Spot } from './gfx/town';
 import { Animator, dirRow } from './gfx/sprites';
+import { twinkle } from './gfx/fx';
 import { drawNpc, drawTrainer, tdirOf, walkFrame, type TDir } from './gfx/trainers';
 import { moveVector } from './input';
 import { renderDpr } from './game/view';
@@ -14,9 +15,13 @@ const SPEED = 88;
 /** 跟随的宝可梦和训练家之间隔多远 */
 const FOLLOW_GAP = 22;
 
-interface Walker { x: number; y: number; dir: TDir; moving: boolean; t: number; trail: { x: number; y: number }[]; mon: Animator; mx: number; my: number }
+/** tw：闪光宝可梦下一次闪烁的倒计时 */
+interface Walker { x: number; y: number; dir: TDir; moving: boolean; t: number; trail: { x: number; y: number }[]; mon: Animator; mx: number; my: number; tw: number }
 
 interface Peer extends Walker { id: number; name: string; trainer: string; dex: number; tx: number; ty: number; w: number; seen: number }
+
+/** 在线玩家（给界面显示）；shiny：跟随的是闪光宝可梦 */
+export interface OnlinePeer { id: number; name: string; trainer: string; dex: number; shiny: boolean; where: string }
 
 export interface TownHooks {
   enter(id: PlaceId): void;
@@ -29,12 +34,12 @@ export interface TownHooks {
 /** 刚出现时，跟随的宝可梦站在训练家身后（面朝下时在上方） */
 const BEHIND: Record<number, [number, number]> = { 0: [0, -1], 1: [1, 0], 2: [0, 1], 3: [-1, 0] };
 
-function walker(x: number, y: number, dex: number, dir: TDir = 0): Walker {
-  const mon = new Animator(dex);
+function walker(x: number, y: number, dex: number, dir: TDir = 0, shiny = false): Walker {
+  const mon = new Animator(dex, shiny);
   mon.loop('Idle');
   const [bx, by] = BEHIND[dir];
   const mx = x + bx * FOLLOW_GAP, my = y + by * FOLLOW_GAP;
-  return { x, y, dir, moving: false, t: 0, trail: [{ x: mx, y: my }, { x, y }], mon, mx, my };
+  return { x, y, dir, moving: false, t: 0, trail: [{ x: mx, y: my }, { x, y }], mon, mx, my, tw: 0.4 };
 }
 
 /** 跟随：沿着训练家走过的路径落后一段距离 */
@@ -77,20 +82,23 @@ export class TownScene {
   private sentAt = 0;
   private sentMoving = false;
   private cam = { x: 0, y: 0 };
+  /** 闪光宝可梦身上的闪烁 */
+  private twinkles: { x: number; y: number; t: number; life: number }[] = [];
 
-  constructor(private canvas: HTMLCanvasElement, private settings: () => Settings, private hooks: TownHooks, opts: { trainer: string; name: string; dex: number; pos?: { x: number; y: number } | null }) {
+  constructor(private canvas: HTMLCanvasElement, private settings: () => Settings, private hooks: TownHooks, opts: { trainer: string; name: string; dex: number; shiny: boolean; pos?: { x: number; y: number } | null }) {
     this.trainer = opts.trainer;
     this.name = opts.name;
     this.dex = opts.dex;
     const p = opts.pos && !blocked(opts.pos.x, opts.pos.y) ? opts.pos : SPAWN;
-    this.me = walker(p.x, p.y, opts.dex);
+    this.me = walker(p.x, p.y, opts.dex, 0, opts.shiny);
     window.addEventListener('keydown', this.onKey);
   }
 
-  setIdentity(trainer: string, name: string, dex: number) {
+  setIdentity(trainer: string, name: string, dex: number, shiny: boolean) {
     this.trainer = trainer;
     this.name = name;
-    if (dex !== this.dex) { this.dex = dex; this.me.mon.setDex(dex); }
+    this.dex = dex;
+    this.me.mon.setDex(dex, shiny);
   }
 
   /** 从建筑里出来：站在门口，面朝下 */
@@ -113,11 +121,12 @@ export class TownScene {
       if (p.id === you) continue;
       let q = this.peers.get(p.id);
       if (!q) {
-        q = { ...walker(p.x, p.y, p.dex, (p.d & 3) as TDir), id: p.id, name: p.name, trainer: p.trainer, dex: p.dex, tx: p.x, ty: p.y, w: p.w, seen: now };
+        q = { ...walker(p.x, p.y, p.dex, (p.d & 3) as TDir, !!p.s), id: p.id, name: p.name, trainer: p.trainer, dex: p.dex, tx: p.x, ty: p.y, w: p.w, seen: now };
         this.peers.set(p.id, q);
       }
       q.name = p.name; q.trainer = p.trainer; q.w = p.w; q.seen = now;
-      if (q.dex !== p.dex) { q.dex = p.dex; q.mon.setDex(p.dex); }
+      q.dex = p.dex;
+      q.mon.setDex(p.dex, !!p.s);
       q.tx = p.x; q.ty = p.y; q.dir = (p.d & 3) as TDir; q.moving = !!p.m;
       if (Math.hypot(q.tx - q.x, q.ty - q.y) > 160) {
         q.x = q.tx; q.y = q.ty;
@@ -130,8 +139,8 @@ export class TownScene {
   }
 
   /** 在线玩家列表（给界面显示） */
-  online(): { id: number; name: string; trainer: string; dex: number; where: string }[] {
-    return [...this.peers.values()].map((q) => ({ id: q.id, name: q.name, trainer: q.trainer, dex: q.dex, where: TOWN_WHERE[q.w] ?? 'menu' }));
+  online(): OnlinePeer[] {
+    return [...this.peers.values()].map((q) => ({ id: q.id, name: q.name, trainer: q.trainer, dex: q.dex, shiny: q.mon.shiny, where: TOWN_WHERE[q.w] ?? 'menu' }));
   }
 
   start() {
@@ -175,6 +184,9 @@ export class TownScene {
     }
     me.t += dt;
     follow(me, dt);
+    this.sparkle(me, dt);
+    for (const w of this.twinkles) w.t += dt;
+    this.twinkles = this.twinkles.filter((w) => w.t < w.life);
     const s = spotAt(me.x, me.y);
     if (s !== this.spot) { this.spot = s; this.hooks.spot(s); }
     // 位置上报：走动时每 0.2 秒一次，停下时立刻报一次
@@ -193,7 +205,15 @@ export class TownScene {
       }
       q.t += dt;
       follow(q, dt);
+      if (q.w === 0) this.sparkle(q, dt);
     }
+  }
+
+  /** 跟随的闪光宝可梦时不时闪一下 */
+  private sparkle(w: Walker, dt: number) {
+    if (!w.mon.shiny || (w.tw -= dt) > 0 || this.twinkles.length > 60) return;
+    w.tw = 0.7 + Math.random() * 0.7;
+    this.twinkles.push({ x: w.mx + (Math.random() - 0.5) * 14, y: w.my - 4 - Math.random() * 14, t: 0, life: 0.5 + Math.random() * 0.2 });
   }
 
   private frame = (now: number) => {
@@ -241,6 +261,7 @@ export class TownScene {
     pushWalker(this.me, this.trainer);
     list.sort((a, b) => a.y - b.y);
     for (const d of list) d.draw();
+    for (const w of this.twinkles) twinkle(ctx, w.x, w.y - w.t * 8, w.t / w.life);
     drawTownFg(ctx);
 
     // 文字用屏幕像素画，保证清晰

@@ -13,7 +13,10 @@ interface Member {
   meta: Record<string, number>;
   trainer: string;
   owned: string[];
+  ownedShiny: string[];
   line: LineId | null;
+  /** 带来的伙伴是闪光宝可梦 */
+  shiny: boolean;
   ready: boolean;
   joinedAt: number;
   sync: PeerSync;
@@ -84,9 +87,11 @@ export class Room {
     if (this.sim) return '该房间正在游戏中，请等待本局结束';
     let id = 1;
     while (this.members.has(id)) id++;
+    const line = isLine(ident.line) ? ident.line : null;
     this.members.set(id, {
-      conn, name: cleanName(name), meta: cleanMeta(meta), trainer: trainerOf(ident.trainer).id, owned: cleanOwned(ident.owned),
-      line: isLine(ident.line) ? ident.line : null, ready: false, joinedAt: ++this.joinSeq, sync: new PeerSync(),
+      conn, name: cleanName(name), meta: cleanMeta(meta), trainer: trainerOf(ident.trainer).id,
+      owned: cleanOwned(ident.owned), ownedShiny: cleanOwned(ident.ownedShiny),
+      line, shiny: !!line && ident.shiny === true, ready: false, joinedAt: ++this.joinSeq, sync: new PeerSync(),
     });
     this.send(conn, { t: 'joined', code: this.code, you: id, solo: this.solo });
     this.sendLobby();
@@ -105,7 +110,7 @@ export class Room {
 
   lobbyPlayers(): LobbyPlayer[] {
     const host = this.hostId;
-    return [...this.members.entries()].map(([id, m]) => ({ id, name: m.name, trainer: m.trainer, line: m.line, ready: m.ready, host: id === host }));
+    return [...this.members.entries()].map(([id, m]) => ({ id, name: m.name, trainer: m.trainer, line: m.line, shiny: m.shiny || undefined, ready: m.ready, host: id === host }));
   }
 
   sendLobby() {
@@ -117,7 +122,7 @@ export class Room {
     return {
       code: this.code,
       host: host?.name ?? '',
-      players: [...this.members.values()].map((m) => ({ name: m.name, trainer: m.trainer, line: m.line })),
+      players: [...this.members.values()].map((m) => ({ name: m.name, trainer: m.trainer, line: m.line, shiny: m.shiny || undefined })),
       max: MAX_PLAYERS,
       inGame: this.inGame,
       wave: this.sim?.wave ?? 0,
@@ -132,6 +137,7 @@ export class Room {
       case 'pick':
         if (this.sim || !isLine(msg.line)) return;
         m.line = msg.line;
+        m.shiny = msg.shiny === true;
         this.sendLobby();
         return;
       case 'ready':
@@ -171,6 +177,7 @@ export class Room {
         if (msg.cmd === 'down') sim.downPlayer(p);
         else if (msg.cmd === 'endWave') sim.waveT = sim.waveDur;
         else if (msg.cmd === 'xp') sim.debugXp(p, 400);
+        else if (msg.cmd === 'shiny') sim.forceShiny += 3;
         return;
       }
       case 'pause':
@@ -223,12 +230,12 @@ export class Room {
   }
 
   private startGame() {
-    const inits = [...this.members.entries()].map(([id, m]) => ({ id, name: m.name, line: m.line!, meta: m.meta, trainer: m.trainer, owned: m.owned }));
+    const inits = [...this.members.entries()].map(([id, m]) => ({ id, name: m.name, line: m.line!, shiny: m.shiny, meta: m.meta, trainer: m.trainer, owned: m.owned, ownedShiny: m.ownedShiny }));
     this.sim = new GameSim(inits, (Math.random() * 2 ** 31) | 0, this.difficulty);
     this.tick = 0;
     this.paused = false;
     this.lastPhase = '';
-    this.broadcast({ t: 'start', w: this.sim.w, h: this.sim.h, players: inits.map((i) => ({ id: i.id, name: i.name, trainer: i.trainer, line: i.line })) });
+    this.broadcast({ t: 'start', w: this.sim.w, h: this.sim.h, players: inits.map((i) => ({ id: i.id, name: i.name, trainer: i.trainer, line: i.line, shiny: i.shiny || undefined })) });
     this.broadcast({ t: 'ev', e: this.sim.flushEvents() });
     this.sendPublic();
     for (const m of this.members.values()) m.sync.reset();
@@ -300,10 +307,13 @@ export class Room {
 
   private endGame() {
     const sim = this.sim!;
-    const board = sim.players.map((p) => ({ id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level, kills: p.stats.kills, damage: Math.round(p.stats.damage), taken: Math.round(p.stats.taken), revives: p.stats.revives }));
+    const board = sim.players.map((p) => ({
+      id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, shiny: p.shiny || undefined, level: p.level,
+      kills: p.stats.kills, damage: Math.round(p.stats.damage), taken: Math.round(p.stats.taken), revives: p.stats.revives,
+    }));
     for (const [id, m] of this.members) {
       const p = sim.players.find((q) => q.id === id);
-      if (p) m.owned = [...p.owned];
+      if (p) { m.owned = [...p.owned]; m.ownedShiny = [...p.ownedShiny]; }
       this.send(m.conn, { t: 'end', victory: sim.phase === 'won', summary: p ? sim.summary(p) : null, board });
     }
     this.sim = null;

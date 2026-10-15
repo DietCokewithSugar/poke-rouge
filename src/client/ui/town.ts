@@ -3,7 +3,7 @@
  * 我的家（训练家与伙伴）、大木研究所（研究/图鉴/成就）、1 号道路（出发冒险）、NPC 对话。
  */
 import { DEX } from '../../shared/dex';
-import { ACHIEVEMENTS, trainerHint, unlockHint } from '../../shared/meta';
+import { ACHIEVEMENTS, metaBonus, trainerHint, unlockHint } from '../../shared/meta';
 import { LINES, LINE_IDS, LINE_OF_DEX, STARTERS, formOf, type LineId } from '../../shared/pokemon';
 import type { ServerStats } from '../../shared/protocol';
 import { fmtMod, type ModKey } from '../../shared/stats';
@@ -19,15 +19,25 @@ import { GYMS, GYM_BY_ID } from '../../shared/gyms';
 import { uiIcon } from '../gfx/uiicons';
 import { iconImg } from '../gfx/icons';
 import {
-  autoAssistUnlocked, buyLine, buyTrainer, isDifficultyUnlocked, isTrainerUnlocked, isUnlocked, saveProfile, unlockedLines, type Profile,
+  autoAssistUnlocked, buyLine, buyTrainer, isDifficultyUnlocked, isTrainerUnlocked, isUnlocked, monKey, monList, ownsMon, partnerOf, sameMon, saveProfile,
+  unlockedLines, type Mon, type Profile,
 } from '../save';
+import { shinyName, shinyOdds } from '../../shared/shiny';
+import type { OnlinePeer } from '../town';
 import { clear, h, tip, toast } from './dom';
 import { typeBadge } from './describe';
 import { iconBtn, pager } from './layout';
 import { achList, difficultyPicker, labGrid, lineDetail, mount, portraitSlot, tabs } from './screens';
 
-export function partnerName(p: Profile) { return LINES[p.partner]?.name ?? '？？？'; }
+export function partnerName(p: Profile) { return LINES[p.partner] ? shinyName(LINES[p.partner].name, p.partnerShiny) : '？？？'; }
 export function partnerDex(p: Profile) { return formOf(p.partner, 0).dex; }
+/** 宝可梦的名字（闪光的叫「闪光 + 名字」） */
+export const monName = (m: Mon) => shinyName(LINES[m.line]?.name ?? '？？？', m.shiny);
+
+/** 这位训练家现在的闪光几率（研究所 + 训练家；冒险中的闪耀护符另算） */
+export function shinyOddsOf(p: Profile) {
+  return shinyOdds((metaBonus(p.upgrades).mods.shiny ?? 0) + (TRAINERS[p.trainer]?.mods.shiny ?? 0));
+}
 
 /** 训练家的加成（一行一条） */
 export function trainerBonus(id: string): string[] {
@@ -194,24 +204,40 @@ export function setupScreen(root: HTMLElement, p: Profile, onDone: (trainer: str
 
 const PICK_PER = 21;
 
-/** 宝可梦格子（按图鉴顺序，分页）：没有的显示剪影 */
-export function partnerGrid(p: Profile, sel: LineId | null, onPick: (l: LineId) => void, page: number, onPage: (n: number) => void, opts: { ownedOnly?: boolean; taken?: Map<LineId, string> } = {}) {
-  const ids = opts.ownedOnly ? LINE_IDS.filter((l) => isUnlocked(p, l)) : LINE_IDS;
-  const pg = pager(ids, PICK_PER, page, (id) => {
-    const L = LINES[id];
-    const open = isUnlocked(p, id);
+/** 宝可梦格子里显示哪些：全部（没有的显示剪影）/ 已拥有的 / 只看闪光的 */
+export type MonView = 'all' | 'owned' | 'shiny';
+
+function viewList(p: Profile, view: MonView): Mon[] {
+  return view === 'shiny' ? monList(p).filter((m) => m.shiny) : monList(p, view === 'all');
+}
+
+/** 宝可梦格子（按图鉴顺序，分页；闪光的排在普通的后面，是单独的一格） */
+export function partnerGrid(p: Profile, sel: Mon | null, onPick: (m: Mon) => void, page: number, onPage: (n: number) => void, opts: { view?: MonView; taken?: Map<string, string> } = {}) {
+  const me = partnerOf(p);
+  const pg = pager(viewList(p, opts.view ?? 'owned'), PICK_PER, page, (m) => {
+    const L = LINES[m.line];
+    const open = ownsMon(p, m);
+    const taken = opts.taken?.get(monKey(m));
     const el = h('button', {
-      class: `pmon ${sel === id ? 'on' : ''} ${open ? '' : 'locked'} ${p.partner === id ? 'partner' : ''}`,
-      onclick: () => { sfx('click'); onPick(id); },
+      class: `pmon ${sel && sameMon(sel, m) ? 'on' : ''} ${open ? '' : 'locked'} ${sameMon(me, m) ? 'partner' : ''} ${m.shiny ? 'shiny' : ''}`,
+      onclick: () => { sfx('click'); onPick(m); },
     },
-    portraitSlot(L.forms[0].dex, 1, 'pmon-portrait'),
+    portraitSlot(L.forms[0].dex, 1, 'pmon-portrait', m.shiny),
     h('span', { class: 'pmon-name' }, open ? L.name : '？？？'),
-    opts.taken?.get(id) ? h('i', { class: 'pmon-tag' }, opts.taken.get(id)!) : p.partner === id ? h('i', { class: 'pmon-tag' }, '伙伴') : null,
+    taken ? h('i', { class: 'pmon-tag' }, taken) : sameMon(me, m) ? h('i', { class: 'pmon-tag' }, '伙伴') : null,
     );
-    tip(el, () => open ? `${L.name} · ${L.forms.map((f) => f.name).join(' → ')}` : unlockHint(id));
+    tip(el, () => open ? `${monName(m)} · ${L.forms.map((f) => f.name).join(' → ')}${m.shiny ? ' · 六项能力 +1%' : ''}` : unlockHint(m.line));
     return el;
-  }, { cls: 'pmon-grid', filler: () => h('div', { class: 'pmon filler' }), onPage, label: `已拥有 ${unlockedLines(p).length} / ${LINE_IDS.length} 种` });
+  }, {
+    cls: 'pmon-grid', filler: () => h('div', { class: 'pmon filler' }), onPage,
+    label: `已拥有 ${unlockedLines(p).length} / ${LINE_IDS.length} 种${p.shiny.length ? ` · 闪光 ${p.shiny.length} 种` : ''}`,
+  });
   return h('div', { class: 'pmon-wrap' }, pg.list, pg.nav);
+}
+
+/** 选中的宝可梦在第几页 */
+function pageOf(p: Profile, view: MonView, m: Mon) {
+  return Math.max(0, Math.floor(viewList(p, view).findIndex((x) => sameMon(x, m)) / PICK_PER));
 }
 
 /** 宝可梦详情：没有的显示解锁方式 */
@@ -226,25 +252,26 @@ function lockedDetail(id: LineId) {
   );
 }
 
-/** 换伙伴（弹窗）：大厅、出发前都可以换 */
-export function partnerModal(p: Profile, onPick: (l: LineId) => void, opts: { taken?: Map<LineId, string> } = {}) {
+/** 换伙伴（弹窗）：大厅、出发前都可以换。taken：房间里别人选了的（键为 monKey） */
+export function partnerModal(p: Profile, onPick: (m: Mon) => void, opts: { taken?: Map<string, string> } = {}) {
   const overlay = h('div', { class: 'modal' });
-  let sel: LineId = p.partner;
-  let page = Math.floor(LINE_IDS.filter((l) => isUnlocked(p, l)).indexOf(sel) / PICK_PER);
+  let sel: Mon = partnerOf(p);
+  let page = pageOf(p, 'owned', sel);
   const close = () => overlay.remove();
   const render = () => {
     clear(overlay);
-    const open = isUnlocked(p, sel);
+    const open = ownsMon(p, sel);
+    const name = monName(sel);
     overlay.appendChild(h('div', { class: 'box modal-box partner-modal no-anim' },
       h('div', { class: 'panel-head' },
         h('h2', null, '选择跟随的伙伴'),
         iconBtn('close', '关闭', () => { sfx('click'); close(); }, { attrs: { 'data-back': '1' }, cls: 'ghost small' }),
       ),
       h('div', { class: 'partner-body' },
-        partnerGrid(p, sel, (l) => { sel = l; render(); }, page, (n) => { page = n; render(); }, { ownedOnly: true, taken: opts.taken }),
+        partnerGrid(p, sel, (m) => { sel = m; render(); }, page, (n) => { page = n; render(); }, { view: 'owned', taken: opts.taken }),
         h('div', { class: 'partner-side' },
-          open ? lineDetail(sel, true) : lockedDetail(sel),
-          h('button', { class: 'btn gold', 'data-key': 'y', disabled: !open, onclick: () => { sfx('wave'); close(); onPick(sel); } }, p.partner === sel ? `继续和${LINES[sel].name}一起` : `就决定是你了，${LINES[sel].name}！`),
+          open ? lineDetail(sel.line, true, sel.shiny) : lockedDetail(sel.line),
+          h('button', { class: 'btn gold', 'data-key': 'y', disabled: !open, onclick: () => { sfx('wave'); close(); onPick(sel); } }, sameMon(partnerOf(p), sel) ? `继续和${name}一起` : `就决定是你了，${name}！`),
         ),
       ),
     ));
@@ -258,9 +285,9 @@ export function partnerModal(p: Profile, onPick: (l: LineId) => void, opts: { ta
 
 export interface HomeActions { back(): void; changed(): void }
 
-export function homeScreen(root: HTMLElement, p: Profile, a: HomeActions, tab = 0, state = { page: -1, sel: '' as LineId, ownedOnly: false }) {
+export function homeScreen(root: HTMLElement, p: Profile, a: HomeActions, tab = 0, state: { page: number; sel: Mon | null; view: MonView } = { page: -1, sel: null, view: 'all' }) {
   const re = (t = tab) => homeScreen(root, p, a, t, state);
-  if (!state.sel) state.sel = p.partner;
+  if (!state.sel) state.sel = partnerOf(p);
   let body: Node;
   if (tab === 0) {
     const input = h('input', { class: 'field', maxlength: 12, value: p.name }) as HTMLInputElement;
@@ -289,23 +316,30 @@ export function homeScreen(root: HTMLElement, p: Profile, a: HomeActions, tab = 
       h('div', { class: 'home-name' }, h('label', null, uiIcon('pencil', 2), ' 训练家的名字'), input, h('div', { class: 'small muted' }, `星之沙 ${p.stardust}`)),
     );
   } else {
-    const ids = state.ownedOnly ? LINE_IDS.filter((l) => isUnlocked(p, l)) : LINE_IDS;
-    if (state.page < 0) state.page = Math.max(0, Math.floor(ids.indexOf(state.sel) / PICK_PER));
-    const open = isUnlocked(p, state.sel);
+    if (state.view === 'shiny' && !p.shiny.length) state.view = 'all';
+    const sel = state.sel;
+    if (state.page < 0) state.page = pageOf(p, state.view, sel);
+    const open = ownsMon(p, sel);
+    const cur = sameMon(partnerOf(p), sel);
+    const name = monName(sel);
+    const views: [MonView, string][] = [['all', '全部'], ['owned', '已拥有'], ...(p.shiny.length ? [['shiny', `闪光 ${p.shiny.length}`] as [MonView, string]] : [])];
     body = h('div', { class: 'partner-body' },
       h('div', { class: 'partner-left' },
         h('div', { class: 'row between' },
           h('span', { class: 'small muted' }, uiIcon('pc', 2), ' 宝可梦存储系统'),
-          h('button', { class: `btn tiny ${state.ownedOnly ? '' : 'ghost'}`, onclick: () => { state.ownedOnly = !state.ownedOnly; state.page = 0; re(); } }, state.ownedOnly ? '显示全部宝可梦' : '只看已拥有的'),
+          h('div', { class: 'row pmon-views' }, views.map(([v, label]) => h('button', {
+            class: `btn tiny ${state.view === v ? '' : 'ghost'}`,
+            onclick: () => { if (state.view === v) return; sfx('click'); state.view = v; state.page = 0; re(); },
+          }, v === 'shiny' ? uiIcon('shiny', 1) : null, label))),
         ),
-        partnerGrid(p, state.sel, (l) => { state.sel = l; re(); }, state.page, (n) => { state.page = n; re(); }, { ownedOnly: state.ownedOnly }),
+        partnerGrid(p, sel, (m) => { state.sel = m; re(); }, state.page, (n) => { state.page = n; re(); }, { view: state.view }),
       ),
       h('div', { class: 'partner-side' },
-        open ? lineDetail(state.sel, true) : lockedDetail(state.sel),
+        open ? lineDetail(sel.line, true, sel.shiny) : lockedDetail(sel.line),
         h('button', {
-          class: 'btn gold', 'data-key': 'y', disabled: !open || p.partner === state.sel,
-          onclick: () => { sfx('wave'); p.partner = state.sel; saveProfile(p); a.changed(); toast(`${LINES[state.sel].name}现在跟着你了！`, 'gold'); re(); },
-        }, p.partner === state.sel ? `${LINES[state.sel].name}正跟着你` : open ? `让${LINES[state.sel].name}跟着我` : '还没有成为伙伴'),
+          class: 'btn gold', 'data-key': 'y', disabled: !open || cur,
+          onclick: () => { sfx('wave'); p.partner = sel.line; p.partnerShiny = sel.shiny; saveProfile(p); a.changed(); toast(`${name}现在跟着你了！`, 'gold'); re(); },
+        }, cur ? `${name}正跟着你` : open ? `让${name}跟着我` : '还没有成为伙伴'),
       ),
     );
   }
@@ -329,14 +363,19 @@ function dexGrid(p: Profile, page: number, onPage: (n: number) => void) {
   const pg = pager(all, DEX_PER, page, (d) => {
     const line = LINE_OF_DEX[d];
     const open = isUnlocked(p, line);
-    const el = h('div', { class: `dex-cell ${open ? '' : 'locked'}` },
+    const shiny = p.shiny.includes(line);
+    const el = h('div', { class: `dex-cell ${open || shiny ? '' : 'locked'}` },
       h('span', { class: 'dex-no' }, `#${String(d).padStart(3, '0')}`),
+      shiny ? h('span', { class: 'dex-shiny' }, uiIcon('shiny', 1)) : null,
       portraitSlot(d, 1, 'dex-portrait'),
-      h('span', { class: 'dex-name' }, open ? DEX[d].name : '？？？'),
+      h('span', { class: 'dex-name' }, open || shiny ? DEX[d].name : '？？？'),
     );
-    tip(el, () => open ? h('div', { class: 'info' }, h('b', null, `#${d} ${DEX[d].name}`), h('div', null, ...DEX[d].types.map(typeBadge)), h('div', { class: 'small muted' }, LINES[line].flavor)) : unlockHint(line));
+    tip(el, () => open || shiny
+      ? h('div', { class: 'info' }, h('b', null, `#${d} ${DEX[d].name}`), h('div', null, ...DEX[d].types.map(typeBadge)), h('div', { class: 'small muted' }, LINES[line].flavor),
+        shiny ? h('div', { class: 'small gold' }, `已经有闪光的${LINES[line].name}了${open ? '' : '（普通的还没有）'}`) : null)
+      : unlockHint(line));
     return el;
-  }, { cls: 'dex-grid', onPage, label: `图鉴 ${owned} / 151` });
+  }, { cls: 'dex-grid', onPage, label: `图鉴 ${owned} / 151${p.shiny.length ? ` · 闪光 ${p.shiny.length} 种` : ''}` });
   return h('div', { class: 'dex-wrap' }, pg.list, pg.nav);
 }
 
@@ -363,6 +402,7 @@ export function routeScreen(root: HTMLElement, p: Profile, a: RouteActions) {
   let diff: DifficultyId = isDifficultyUnlocked(p, p.lastDifficulty) ? p.lastDifficulty : 'easy';
   const render = () => {
     const L = LINES[p.partner];
+    const shiny = p.partnerShiny;
     mount(root, h('div', { class: 'box panel-md route' },
       h('div', { class: 'panel-head' },
         h('div', { class: 'row' }, uiIcon('sign', 3), h('h2', null, '1号道路 · 出发冒险')),
@@ -370,12 +410,13 @@ export function routeScreen(root: HTMLElement, p: Profile, a: RouteActions) {
       ),
       h('div', { class: 'route-team' },
         h('div', { class: 'route-who' }, trainerFull(p.trainer, 1), h('div', null, h('b', null, p.name || TRAINERS[p.trainer].name), h('div', { class: 'small muted' }, TRAINERS[p.trainer].title), h('div', { class: 'small pos' }, trainerBonus(p.trainer).join(' · ')))),
-        h('div', { class: 'route-mon' }, portraitSlot(L.forms[0].dex, 3, 'route-portrait'),
-          h('div', null, h('b', null, L.name), h('div', null, ...L.forms[0].types.map(typeBadge)), h('div', { class: 'small muted' }, `技能栏 ${L.forms[0].slots} 个 · ${L.forms.map((f) => f.name).join(' → ')}`)),
+        h('div', { class: 'route-mon' }, portraitSlot(L.forms[0].dex, 3, 'route-portrait', shiny),
+          h('div', null, h('b', null, shinyName(L.name, shiny)), h('div', null, ...L.forms[0].types.map(typeBadge), shiny ? h('span', { class: 'shiny-tag' }, uiIcon('shiny', 1), '+1%') : null),
+            h('div', { class: 'small muted' }, `技能栏 ${L.forms[0].slots} 个 · ${L.forms.map((f) => f.name).join(' → ')}`)),
           iconBtn('swap', '换伙伴', () => { sfx('click'); a.partner(); }, { cls: 'small', text: '换伙伴' })),
       ),
       difficultyPicker(p, diff, (d) => { diff = d; render(); }),
-      h('p', { class: 'small muted' }, '一路上会有野生宝可梦乱入，击败它们，也许它们会崇拜你、成为新的伙伴。'),
+      h('p', { class: 'small muted' }, `一路上会有野生宝可梦乱入，击败它们，也许它们会崇拜你、成为新的伙伴。每只宝可梦有 ${shinyOddsOf(p)} 的几率是闪光的，打倒还没有的闪光宝可梦，它一定会崇拜你。`),
       h('div', { class: 'row between route-foot' },
         assistToggle(p, render),
         h('button', { class: 'btn gold big go', 'data-key': 'y', onclick: () => { p.lastDifficulty = diff; saveProfile(p); sfx('wave'); a.go(diff); } }, `出发！`),
@@ -460,7 +501,7 @@ export class TownHud {
   private prompt = h('button', { class: 'th-prompt box tight hidden' });
   private dust = h('div', { class: 'th-dust box tight' });
   private goal = h('button', { class: 'th-goal box tight' });
-  private peers: { name: string; trainer: string; dex: number; where: string }[] = [];
+  private peers: OnlinePeer[] = [];
   private total = 1;
 
   constructor(parent: HTMLElement, private p: Profile, private a: TownHudActions) {
@@ -503,7 +544,7 @@ export class TownHud {
         h('div', { class: 'th-title small muted' }, TRAINERS[p.trainer].title),
         h('div', { class: 'th-partner small' }, h('span', { class: 'muted' }, '伙伴 '), partnerName(p)),
       ),
-      h('div', { class: 'th-mon' }, portraitSlot(partnerDex(p), 1, 'th-mon-portrait')),
+      h('div', { class: 'th-mon' }, portraitSlot(partnerDex(p), 1, 'th-mon-portrait', p.partnerShiny)),
     );
     clear(this.dust);
     const stat = (icon: Node, text: string, label: string, id: PlaceId, tab?: number) => h('button', {
@@ -512,7 +553,7 @@ export class TownHud {
     }, icon, h('span', null, text));
     this.dust.append(
       stat(iconImg('stardust', 1), String(p.stardust), '星之沙：去大木研究所做研究', 'lab', 0),
-      stat(uiIcon('ball', 1), `${unlockedLines(p).length}/${LINE_IDS.length}`, '拥有的宝可梦：在我的家查看、换伙伴', 'home', 1),
+      stat(uiIcon('ball', 1), `${unlockedLines(p).length}/${LINE_IDS.length}`, `拥有的宝可梦${p.shiny.length ? `（另有闪光宝可梦 ${p.shiny.length} 种）` : ''}：在我的家查看、换伙伴`, 'home', 1),
       stat(uiIcon('badge_boulder', 1), `${Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).length}/${GYMS.length}`, '道馆徽章：去道馆挑战馆主', 'gym'),
       stat(uiIcon('trophy', 1), `${Object.keys(p.achievements).length}/${ACHIEVEMENTS.length}`, '成就：在大木研究所查看', 'lab', 2),
     );
@@ -522,7 +563,7 @@ export class TownHud {
     this.goal.title = `下一步：${g.text}（点一下直接前往）`;
   }
 
-  setOnline(peers: { name: string; trainer: string; dex: number; where: string }[], total?: number) {
+  setOnline(peers: OnlinePeer[], total?: number) {
     this.peers = peers;
     this.total = total ?? peers.length + 1;
     const span = this.onlineBtn.querySelector('span');
@@ -537,7 +578,7 @@ export class TownHud {
       h('div', { class: 'th-online-head' }, `在线 ${this.total} 人`),
       ...(list.length ? list.map((q) => h('div', { class: 'th-peer' },
         trainerPortrait(q.trainer, 1, 'tportrait tiny'),
-        portraitSlot(q.dex, 1, 'tiny'),
+        portraitSlot(q.dex, 1, 'tiny', q.shiny),
         h('span', { class: 'th-peer-name' }, q.name),
         h('span', { class: `small ${q.where === 'town' ? 'ok' : 'muted'}` }, WHERE_NAME[q.where] ?? ''),
       )) : [h('div', { class: 'small muted' }, '现在只有你在线。邀请朋友一起来吧！')]),
