@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildOf, generateBuild, validateBuild, type SavedBuild } from '../src/shared/pvp/build';
+import { buildOf, fillTeam, generateBuild, generateTeam, validateBuild, validateTeam, type SavedBuild } from '../src/shared/pvp/build';
 import { eloDelta, tierOf } from '../src/shared/pvp/rating';
-import { PvpSim, type PvpInit } from '../src/shared/pvp/sim';
+import { PvpRoom, type PvpSeat } from '../src/shared/pvp/room';
+import { CAP_BURST, CAP_RATE, PvpSim, type PvpInit } from '../src/shared/pvp/sim';
+import type { S2C } from '../src/shared/protocol';
 import { Rng } from '../src/shared/rng';
 import { REVIVE_RADIUS } from '../src/shared/sim/game';
 import { runBotGame } from './bot';
@@ -91,6 +93,119 @@ test('对战：缩圈会伤害圈外的玩家', () => {
   for (let i = 0; i < 30; i++) sim.step(1 / 30);
   assert.ok(a.hp < hp, '圈外掉血');
   assert.ok(sim.ring.r < 100);
+});
+
+test('承伤上限：再强的构筑也要十几秒才能打倒一只宝可梦', () => {
+  const strong = generateBuild(new Rng(3), 40);
+  const weak = build({ level: 6, stage: 0, items: [], levelMods: {} });
+  const sim = new PvpSim('1v1', [
+    { id: 1, name: 'A', team: 0, build: strong, meta: { atk: 10, spa: 10, crit: 10 }, bot: true },
+    { id: 2, name: 'B', team: 1, build: weak, meta: {}, bot: true },
+  ], 5);
+  const [a, b] = sim.players;
+  run(sim, 3.1);
+  b.x = a.x + 30; b.y = a.y;
+  run(sim, 60);
+  assert.equal(sim.phase, 'over');
+  const ko = sim.result().feed[0];
+  assert.ok(ko, '强者最终能打倒弱者');
+  const minTime = (1 - CAP_BURST) / CAP_RATE;
+  assert.ok(ko[0] >= minTime * 0.9, `第一次击倒在 ${ko[0]} 秒，不能早于约 ${minTime.toFixed(1)} 秒`);
+});
+
+test('对战里的回复减半，加时里继续降低', () => {
+  const sim = new PvpSim('1v1', [
+    { id: 1, name: 'A', team: 0, build: build(), meta: {} },
+    { id: 2, name: 'B', team: 1, build: build(), meta: {} },
+  ], 1);
+  for (const p of sim.players) p.skills = [];
+  run(sim, 3.2);
+  assert.equal(sim.healScale, 0.5);
+  sim.matchT = sim.def.dur - 0.5;
+  run(sim, 0.1);
+  assert.ok(sim.healScale < 0.25);
+});
+
+test('队伍：校验、借用补位与 AI 队伍', () => {
+  const rng = new Rng(11);
+  const a = generateBuild(rng, 12);
+  assert.equal(typeof validateTeam([a, a], 3), 'string', '同一个构筑不能上场两次');
+  assert.equal(typeof validateTeam([], 3), 'string');
+  assert.equal(typeof validateTeam([a, generateBuild(rng, 8)], 1), 'string', '团战只能派一只');
+  const team = validateTeam([a], 3) as SavedBuild[];
+  const full = fillTeam(rng, team, 3);
+  assert.equal(full.length, 3);
+  assert.deepEqual(full[0], a);
+  assert.ok(full.slice(1).every((b) => b.level === a.level - 2), '借来的比队伍平均低 2 级');
+  const bots = generateTeam(rng, 15, 3);
+  assert.equal(new Set(bots.map((b) => b.line)).size, 3, 'AI 队伍是三只不同的宝可梦');
+  for (const b of [...full, ...bots]) assert.notEqual(typeof validateBuild(b), 'string');
+});
+
+/** 收集发给某个座位的消息 */
+function conn() {
+  const msgs: S2C[] = [];
+  return { msgs, send: (d: string | ArrayBuffer) => { if (typeof d === 'string') msgs.push(JSON.parse(d)); } };
+}
+
+test('单挑三对三：每位训练家派出三只，自己操作队长，另外两只由 AI 操作，倒下就退场', () => {
+  const rng = new Rng(21);
+  const c = conn();
+  const seats: PvpSeat[] = [
+    { id: 1, name: '小智', team: 0, builds: generateTeam(rng, 12, 3), meta: {}, trainer: 'ash', conn: c, bot: false, rating: 1000 },
+    { id: 2, name: '小霞', team: 1, builds: generateTeam(rng, 12, 3), meta: {}, trainer: 'misty', conn: null, bot: true, rating: 1000 },
+  ];
+  const room = new PvpRoom('测试', '1v1', seats, 9);
+  room.local = true;
+  room.begin();
+  const sim = room.sim;
+  assert.equal(sim.players.length, 6);
+  const me = seats[0].unit!;
+  const joined = c.msgs.find((m) => m.t === 'joined') as Extract<S2C, { t: 'joined' }>;
+  assert.equal(joined.you, me, '客户端控制的是自己的队长');
+  const start = c.msgs.find((m) => m.t === 'start') as Extract<S2C, { t: 'start' }>;
+  const info = start.pvp!.seats;
+  assert.equal(info.filter((s) => s.owner === 1).length, 3);
+  assert.deepEqual(info.filter((s) => s.owner === 1 && !s.helper).map((s) => s.id), [me]);
+  const mine = sim.players.filter((p) => sim.ownerOf(p.id).owner === 1);
+  assert.ok(mine.every((p) => p.bot === (p.id !== me)), '帮手由 AI 操作，队长由玩家操作');
+  // 队长可以切换自动战斗，帮手不能切成手动
+  room.handle(me, { t: 'auto', on: true });
+  assert.ok(sim.players.find((p) => p.id === me)!.bot);
+  room.handle(me, { t: 'auto', on: false });
+  assert.ok(!sim.players.find((p) => p.id === me)!.bot);
+  const helper = mine.find((p) => p.id !== me)!;
+  sim.setAuto(helper.id, false);
+  assert.ok(helper.bot, '帮手一直由 AI 操作');
+  // 打起来以后：倒下的宝可梦没法被救起
+  for (let i = 0; i < 30 * 3.2; i++) room.update();
+  for (const p of sim.players) { p.skills = []; p.bot = false; }
+  const lead = sim.players.find((p) => p.id === me)!;
+  sim.downPlayer(lead);
+  helper.x = lead.x + 4; helper.y = lead.y;
+  for (const p of sim.players) if (p.team === 1) { p.x = lead.x + 300; p.y = lead.y; }
+  for (let i = 0; i < 30 * 6; i++) sim.step(1 / 30);
+  assert.ok(lead.down, '单挑倒下就退场');
+  assert.equal(sim.aliveCount(0), 2);
+});
+
+test('自动走位：开启后服务器替玩家走位，忽略客户端上报的位置', () => {
+  const sim = new PvpSim('1v1', [
+    { id: 1, name: 'A', team: 0, build: build(), meta: {} },
+    { id: 2, name: 'B', team: 1, build: build(), meta: {}, bot: true },
+  ], 4);
+  run(sim, 3.2);
+  const [a] = sim.players;
+  sim.setAuto(1, true);
+  const x0 = a.x, y0 = a.y;
+  sim.setPlayerPos(1, x0 + 50, y0, true, 0);
+  assert.equal(a.x, x0, '自动时忽略上报的位置');
+  run(sim, 2);
+  assert.ok(Math.hypot(a.x - x0, a.y - y0) > 5, 'AI 在走位');
+  sim.setAuto(1, false);
+  const x1 = a.x;
+  for (let i = 0; i < 10; i++) { sim.setPlayerPos(1, a.x + 3, a.y, true, 0); sim.step(1 / 30); }
+  assert.ok(a.x > x1, '切回手动后按上报的位置移动');
 });
 
 test('积分：赢了加分输了扣分，段位随分数提升', () => {

@@ -1,5 +1,5 @@
 import type { C2S, S2C } from '../shared/protocol';
-import { NPC_NAMES, generateBuild, npcTrainer, type SavedBuild } from '../shared/pvp/build';
+import { NPC_NAMES, fillTeam, generateBuild, generateTeam, npcTrainer, teamLevel, type SavedBuild } from '../shared/pvp/build';
 import { PvpRoom, type PvpSeat } from '../shared/pvp/room';
 import { PVP_MODES, type PvpMode } from '../shared/pvp/sim';
 import { Rng } from '../shared/rng';
@@ -131,7 +131,10 @@ export class LocalTransport implements Transport {
   }
 }
 
-/** 离线练习赛：在浏览器里和 AI 训练家对战，不计分。团战时队友优先用背包里的其他宝可梦。 */
+/**
+ * 离线练习赛：在浏览器里和 AI 训练家对战，不计分。单挑时不够三只由 AI 借给你；
+ * 团战时队友优先用背包里的其他宝可梦，对手按每位队友的等级生成，两队实力接近。
+ */
 export class LocalPvpTransport implements Transport {
   readonly online = false;
   private room: PvpRoom;
@@ -145,23 +148,25 @@ export class LocalPvpTransport implements Transport {
     queueMicrotask(() => this.onMessage(m));
   };
 
-  constructor(mode: PvpMode, me: { name: string; build: SavedBuild; meta: Record<string, number>; trainer: string }, allies: SavedBuild[]) {
+  constructor(mode: PvpMode, me: { name: string; team: SavedBuild[]; meta: Record<string, number>; trainer: string; auto?: boolean }, party: SavedBuild[]) {
     const rng = new Rng((Math.random() * 2 ** 31) | 0);
-    const size = PVP_MODES[mode].size;
+    const M = PVP_MODES[mode];
     const names = rng.shuffle(NPC_NAMES.filter((n) => n !== me.name));
-    const lv = me.build.level;
-    const seats: PvpSeat[] = [{ id: 1, name: me.name, team: 0, build: me.build, meta: me.meta, trainer: me.trainer, conn: { send: this.deliver }, bot: false, rating: 1000 }];
+    const mine = fillTeam(rng, me.team.slice(0, M.team), M.team);
+    const lv = teamLevel(mine);
+    const seats: PvpSeat[] = [{ id: 1, name: me.name, team: 0, builds: mine, meta: me.meta, trainer: me.trainer, conn: { send: this.deliver }, bot: false, rating: 1000, auto: me.auto }];
     let id = 2;
-    // 队友用背包里等级相近的宝可梦；每个对手按对应队友的等级生成，两队实力接近
-    const near = allies.filter((b) => Math.abs(b.level - lv) <= 6).sort((a, b) => Math.abs(a.level - lv) - Math.abs(b.level - lv));
-    const team: SavedBuild[] = [me.build];
-    for (let i = 1; i < size; i++) team.push(near[i - 1] ?? generateBuild(rng, lv + rng.int(-1, 1)));
-    const bot = (team: number, build: SavedBuild): PvpSeat => {
+    const bot = (team: number, builds: SavedBuild[]): PvpSeat => {
       const name = names.pop()!;
-      return { id: id++, name, team, build, meta: me.meta, trainer: npcTrainer(rng, name), conn: null, bot: true, rating: 1000 };
+      return { id: id++, name, team, builds, meta: me.meta, trainer: npcTrainer(rng, name), conn: null, bot: true, rating: 1000 };
     };
-    for (const b of team.slice(1)) seats.push(bot(0, b));
-    for (const b of team) seats.push(bot(1, generateBuild(rng, b.level + rng.int(-1, 1))));
+    if (M.size === 1) seats.push(bot(1, generateTeam(rng, lv, M.team)));
+    else {
+      const near = party.filter((b) => !mine.includes(b) && Math.abs(b.level - lv) <= 6).sort((a, b) => Math.abs(a.level - lv) - Math.abs(b.level - lv));
+      const allies = Array.from({ length: M.size - 1 }, (_, i) => near[i] ?? generateBuild(rng, lv + rng.int(-1, 1)));
+      for (const b of allies) seats.push(bot(0, [b]));
+      for (const b of [mine[0], ...allies]) seats.push(bot(1, [generateBuild(rng, b.level + rng.int(-1, 1))]));
+    }
     this.room = new PvpRoom('练习赛', mode, seats);
     this.room.local = true;
     if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __pvpRoom: PvpRoom }).__pvpRoom = this.room;
@@ -181,10 +186,12 @@ export class LocalPvpTransport implements Transport {
     }, step / 2);
   }
 
-  send(msg: C2S) { this.room.handle(1, msg); }
+  private get unit() { return this.room.seats[0].unit!; }
+
+  send(msg: C2S) { this.room.handle(this.unit, msg); }
 
   close() {
     window.clearInterval(this.timer);
-    this.room.leave(1);
+    this.room.leave(this.unit);
   }
 }

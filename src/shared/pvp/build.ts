@@ -74,6 +74,47 @@ export function validateBuild(raw: unknown): SavedBuild | string {
   return { line, stage: b.stage, level, skills, items, levelMods };
 }
 
+/** 校验出战队伍：1 ~ max 只，同一个构筑不能上场两次 */
+export function validateTeam(raw: unknown, max: number): SavedBuild[] | string {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > max) return max > 1 ? `出战的宝可梦要有 1 ~ ${max} 只` : '只能派出 1 只宝可梦';
+  const team: SavedBuild[] = [];
+  const seen = new Set<string>();
+  for (const r of raw) {
+    const b = validateBuild(r);
+    if (typeof b === 'string') return b;
+    const key = JSON.stringify(b);
+    if (seen.has(key)) return '同一只宝可梦不能重复上场';
+    seen.add(key);
+    team.push(b);
+  }
+  return team;
+}
+
+/** 往队伍里补生成的构筑，直到 size 只（尽量不和已有的重复） */
+function padTeam(rng: Rng, team: SavedBuild[], size: number, level: () => number): SavedBuild[] {
+  const out = team.slice(0, size);
+  for (let tries = 0; out.length < size && tries < 40; tries++) {
+    const b = generateBuild(rng, level());
+    if (!out.some((x) => x.line === b.line) || tries > 30) out.push(b);
+  }
+  return out;
+}
+
+export const teamLevel = (team: SavedBuild[]) => Math.round(team.reduce((a, b) => a + b.level, 0) / Math.max(1, team.length));
+
+/** 背包里不够三只时借给玩家的宝可梦：比自己的队伍平均低 2 级 */
+export function fillTeam(rng: Rng, team: SavedBuild[], size: number): SavedBuild[] {
+  const lv = teamLevel(team) - 2;
+  return padTeam(rng, team, size, () => lv);
+}
+
+/** AI 训练家的队伍：size 只不同的宝可梦 */
+export function generateTeam(rng: Rng, level: number, size: number): SavedBuild[] {
+  return padTeam(rng, [], size, () => level + rng.int(-1, 1));
+}
+
+export const teamPower = (team: SavedBuild[]) => team.reduce((a, b) => a + buildPower(b), 0);
+
 /** 从一局结束时的玩家状态生成构筑 */
 export function buildOf(p: SimPlayer): SavedBuild {
   const levelMods: SavedBuild['levelMods'] = {};

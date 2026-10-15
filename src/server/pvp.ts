@@ -5,12 +5,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { formOf } from '../shared/pokemon';
 import type { PvpBoardRow, PvpHistory, PvpRatingChange, PvpRecord, S2C } from '../shared/protocol';
 import { PROTOCOL_VERSION } from '../shared/protocol';
 import { Rng } from '../shared/rng';
 import { cleanMeta, cleanName, type Conn } from '../shared/room';
-import { NPC_NAMES, buildDex, buildPower, generateBuild, npcTrainer, validateBuild, type SavedBuild } from '../shared/pvp/build';
+import { NPC_NAMES, buildDex, fillTeam, generateTeam, npcTrainer, teamLevel, teamPower, validateBuild, validateTeam, type SavedBuild } from '../shared/pvp/build';
 import { trainerOf } from '../shared/trainers';
 import { START_RATING, eloDelta, kFactor } from '../shared/pvp/rating';
 import { PvpRoom, type PvpSeat } from '../shared/pvp/room';
@@ -25,13 +24,15 @@ export interface PvpClient {
 
 interface ModeRec { rating: number; best: number; wins: number; losses: number; draws: number; streak: number; games: number; dex: number }
 interface StoredPlayer { pid: string; hash: string; name: string; created: number; last: number; modes: Partial<Record<PvpMode, ModeRec>>; history: PvpHistory[] }
-interface Ghost { pid: string; name: string; build: SavedBuild; meta: Record<string, number>; trainer?: string; rating: number; power: number; at: number }
-interface Entry { c: PvpClient; pid: string; name: string; build: SavedBuild; meta: Record<string, number>; trainer: string; rating: number; power: number; mode: PvpMode; at: number }
+/** 玩家用过的队伍（AI 训练家会用它们补位）；power 为平均每只的强度 */
+interface Ghost { pid: string; name: string; team: SavedBuild[]; meta: Record<string, number>; trainer?: string; rating: number; power: number; at: number }
+interface Entry { c: PvpClient; pid: string; name: string; team: SavedBuild[]; own: SavedBuild[]; auto: boolean; meta: Record<string, number>; trainer: string; rating: number; power: number; mode: PvpMode; at: number }
 
 const MAX_GHOSTS = 400;
 
 const hash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 const freshRec = (): ModeRec => ({ rating: START_RATING, best: START_RATING, wins: 0, losses: 0, draws: 0, streak: 0, games: 0, dex: 0 });
+const avgPower = (team: SavedBuild[]) => teamPower(team) / Math.max(1, team.length);
 
 export class PvpService {
   players = new Map<string, StoredPlayer>();
@@ -53,9 +54,11 @@ export class PvpService {
   private load() {
     try {
       if (!fs.existsSync(this.file)) return;
-      const data = JSON.parse(fs.readFileSync(this.file, 'utf8')) as { players?: StoredPlayer[]; ghosts?: Ghost[] };
+      const data = JSON.parse(fs.readFileSync(this.file, 'utf8')) as { players?: StoredPlayer[]; ghosts?: (Ghost & { build?: SavedBuild })[] };
       for (const p of data.players ?? []) this.players.set(p.pid, p);
-      this.ghosts = (data.ghosts ?? []).filter((g) => typeof validateBuild(g.build) !== 'string');
+      // 旧数据每个 AI 构筑只有一只宝可梦
+      this.ghosts = (data.ghosts ?? []).map(({ build, ...g }) => ({ ...g, team: Array.isArray(g.team) ? g.team : build ? [build] : [] }))
+        .filter((g) => g.team.length > 0 && g.team.every((b) => typeof validateBuild(b) !== 'string'));
       console.log(`对战数据已载入：${this.players.size} 位训练家，${this.ghosts.length} 个 AI 构筑`);
     } catch (err) {
       console.error('对战数据读取失败', err);
@@ -132,20 +135,21 @@ export class PvpService {
 
   queued(c: PvpClient) { return this.queue.some((e) => e.c === c); }
 
-  enqueue(c: PvpClient, msg: { mode: unknown; build: unknown; name: unknown; meta: unknown; v: unknown; pid: unknown; secret: unknown; trainer?: unknown }): string | null {
+  enqueue(c: PvpClient, msg: { mode: unknown; team: unknown; name: unknown; meta: unknown; v: unknown; pid: unknown; secret: unknown; trainer?: unknown; auto?: unknown }): string | null {
     if (msg.v !== PROTOCOL_VERSION) return '客户端版本与服务器不一致，请刷新页面';
     const mode = msg.mode as PvpMode;
     if (!PVP_MODE_IDS.includes(mode)) return '未知的对战模式';
     if (c.pvp && !c.pvp.ended) return '你已经在对战中';
-    const b = validateBuild(msg.build);
-    if (typeof b === 'string') return b;
+    const own = validateTeam(msg.team, PVP_MODES[mode].team);
+    if (typeof own === 'string') return own;
     const p = this.auth(msg.pid, msg.secret, String(msg.name ?? ''), true);
     if (!p || typeof p === 'string') return p ?? '对战身份无效';
     if (this.queue.some((e) => e.pid === p.pid && e.c !== c)) return '这个对战身份已经在匹配中（是不是开了两个页面？）';
     for (const r of this.rooms) if (!r.ended && r.seats.some((s) => s.pid === p.pid && s.conn && !s.left)) return '这个对战身份正在对战中';
     this.cancel(c);
     const meta = cleanMeta(msg.meta);
-    const e: Entry = { c, pid: p.pid, name: p.name, build: b, meta, trainer: trainerOf(msg.trainer).id, rating: this.rec(p, mode).rating, power: buildPower(b), mode, at: Date.now() };
+    const team = fillTeam(this.rng, own, PVP_MODES[mode].team);
+    const e: Entry = { c, pid: p.pid, name: p.name, team, own, auto: msg.auto === true, meta, trainer: trainerOf(msg.trainer).id, rating: this.rec(p, mode).rating, power: avgPower(team), mode, at: Date.now() };
     this.queue.push(e);
     p.last = Date.now();
     this.addGhost(e);
@@ -159,10 +163,11 @@ export class PvpService {
     return this.queue.length !== n;
   }
 
+  /** 只记下玩家自己的宝可梦（不含借来的） */
   private addGhost(e: Entry) {
-    const key = JSON.stringify(e.build);
-    this.ghosts = this.ghosts.filter((g) => !(g.pid === e.pid && JSON.stringify(g.build) === key));
-    this.ghosts.push({ pid: e.pid, name: e.name, build: e.build, meta: e.meta, trainer: e.trainer, rating: e.rating, power: e.power, at: Date.now() });
+    const key = JSON.stringify(e.own);
+    this.ghosts = this.ghosts.filter((g) => !(g.pid === e.pid && JSON.stringify(g.team) === key));
+    this.ghosts.push({ pid: e.pid, name: e.name, team: e.own, meta: e.meta, trainer: e.trainer, rating: e.rating, power: avgPower(e.own), at: Date.now() });
     if (this.ghosts.length > MAX_GHOSTS) this.ghosts.splice(0, this.ghosts.length - MAX_GHOSTS);
     this.touch();
   }
@@ -203,8 +208,9 @@ export class PvpService {
     if (this.dirty && now - this.lastSave > 5000) this.saveNow();
   }
 
-  /** 选一个 AI 对手：优先用其他玩家放进队列过的构筑（强度接近），没有就现场生成 */
-  private botSeat(id: number, near: Entry, exclude: Set<string>, rating: number, names: Set<string>): PvpSeat {
+  /** 选一个 AI 对手：优先用其他玩家放进队列过的队伍（强度接近），没有就现场生成 */
+  private botSeat(id: number, mode: PvpMode, near: Entry, exclude: Set<string>, rating: number, names: Set<string>): PvpSeat {
+    const size = PVP_MODES[mode].team;
     const cands = this.ghosts.filter((g) => !exclude.has(g.pid))
       .map((g) => ({ g, d: Math.abs(g.power - near.power) / Math.max(50, near.power) + Math.abs(g.rating - near.rating) / 2000 }))
       .sort((a, b) => a.d - b.d);
@@ -213,13 +219,13 @@ export class PvpService {
       const g = this.rng.pick(top).g;
       exclude.add(g.pid);
       names.add(g.name);
-      return { id, name: g.name, team: 0, build: g.build, meta: g.meta, trainer: trainerOf(g.trainer).id, conn: null, bot: true, rating };
+      return { id, name: g.name, team: 0, builds: fillTeam(this.rng, g.team, size), meta: g.meta, trainer: trainerOf(g.trainer).id, conn: null, bot: true, rating };
     }
-    const build = generateBuild(this.rng, near.build.level + this.rng.int(-1, 1));
+    const builds = generateTeam(this.rng, teamLevel(near.team), size);
     const free = NPC_NAMES.filter((n) => !names.has(n));
     const name = free.length ? this.rng.pick(free) : `训练家${id}`;
     names.add(name);
-    return { id, name, team: 0, build, meta: near.meta, trainer: npcTrainer(this.rng, name), conn: null, bot: true, rating };
+    return { id, name, team: 0, builds, meta: near.meta, trainer: npcTrainer(this.rng, name), conn: null, bot: true, rating };
   }
 
   private startMatch(mode: PvpMode, group: Entry[]) {
@@ -227,18 +233,18 @@ export class PvpService {
     const exclude = new Set(group.map((e) => e.pid));
     const avg = group.reduce((a, e) => a + e.rating, 0) / group.length;
     let id = 1;
-    const seats: PvpSeat[] = group.map((e) => ({ id: id++, name: e.name, team: 0, build: e.build, meta: e.meta, trainer: e.trainer, conn: e.c.conn, bot: false, rating: e.rating, pid: e.pid }));
+    const seats: PvpSeat[] = group.map((e) => ({ id: id++, name: e.name, team: 0, builds: e.team, meta: e.meta, trainer: e.trainer, conn: e.c.conn, bot: false, rating: e.rating, pid: e.pid, auto: e.auto }));
     const names = new Set(group.map((e) => e.name));
-    while (seats.length < need) seats.push(this.botSeat(id++, this.rng.pick(group), exclude, avg, names));
-    // 按构筑强度蛇形分队，让两队实力接近
-    const order = seats.slice().sort((a, b) => buildPower(b.build) - buildPower(a.build));
+    while (seats.length < need) seats.push(this.botSeat(id++, mode, this.rng.pick(group), exclude, avg, names));
+    // 按队伍强度蛇形分队，让两队实力接近
+    const order = seats.slice().sort((a, b) => teamPower(b.builds) - teamPower(a.builds));
     const snake = [0, 1, 1, 0, 0, 1, 1, 0];
     order.forEach((s, i) => { s.team = snake[i % 8]; });
     if (mode === '1v1' && seats[0].team === seats[1].team) seats[1].team = 1 - seats[0].team;
     const room = new PvpRoom(`对战${++this.seq}`, mode, seats);
     room.onEnd = (res) => this.settle(room, res);
     this.rooms.add(room);
-    for (const e of group) { e.c.pvp = room; e.c.pvpId = seats.find((s) => s.pid === e.pid)!.id; }
+    for (const e of group) { e.c.pvp = room; e.c.pvpId = seats.find((s) => s.pid === e.pid)!.unit!; }
     room.begin();
     console.log(`[${new Date().toISOString()}] ${PVP_MODES[mode].name} 开始：${seats.map((s) => `${s.name}${s.bot ? '(AI)' : ''}/${s.team}`).join('，')}`);
   }
@@ -268,10 +274,10 @@ export class PvpService {
       if (score === 1) { r.wins++; r.streak = r.streak > 0 ? r.streak + 1 : 1; }
       else if (score === 0) { r.losses++; r.streak = r.streak < 0 ? r.streak - 1 : -1; }
       else { r.draws++; r.streak = 0; }
-      r.dex = buildDex(s.build);
+      r.dex = buildDex(s.builds[0]);
       p.last = at;
       const opp = room.seats.filter((x) => x.team !== s.team).map((x) => x.name).join('、');
-      p.history.unshift({ at, mode, result: score === 1 ? 'win' : score === 0 ? 'loss' : 'draw', delta, dex: formOf(s.build.line, s.build.stage).dex, opp });
+      p.history.unshift({ at, mode, result: score === 1 ? 'win' : score === 0 ? 'loss' : 'draw', delta, dex: r.dex, opp });
       p.history.length = Math.min(p.history.length, 12);
       for (const g of this.ghosts) if (g.pid === p.pid) g.rating = r.rating;
       this.touch();

@@ -10,6 +10,7 @@ import { SKILLS, skillLevelCd } from '../skills';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
 import { updateEnemy } from './ai';
+import { autopilot } from './autopilot';
 import { PLAYER_R, beamHit, healMult, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
 import {
@@ -126,6 +127,8 @@ export class GameSim {
   private idSeq = 1;
   /** 救援速度倍率（对战里救人更慢） */
   protected reviveSpeed = 1;
+  /** 回复效果倍率（对战里回复减半，避免回复型构筑互相拖到超时） */
+  healScale = 1;
   private spawnAcc = 0;
   private elitesDone = 0;
   private treasureAt = -1;
@@ -504,7 +507,10 @@ export class GameSim {
     if (this.phase !== 'wave') return;
     this.waveT += dt;
     this.updateSpawning(dt);
-    for (const p of this.players) this.updatePlayer(p, dt);
+    for (const p of this.players) {
+      if (p.bot) autopilot(this, p, dt);
+      this.updatePlayer(p, dt);
+    }
     this.updateEnemies(dt);
     this.updateProjs(dt);
     this.updateZones(dt);
@@ -634,7 +640,7 @@ export class GameSim {
     p.lsWindow += dt;
     if (p.lsWindow >= 1) { p.lsWindow = 0; p.lsCount = 0; }
     if (p.d.regenPerSec > 0 && p.hp < p.d.maxHp) {
-      p.regenAcc += p.d.regenPerSec * dt;
+      p.regenAcc += p.d.regenPerSec * this.healScale * dt;
       if (p.regenAcc >= 1) {
         const n = Math.floor(p.regenAcc);
         p.regenAcc -= n;
@@ -881,9 +887,17 @@ export class GameSim {
 
   // ------------------------------------------------------------ 玩家输入
 
+  /** AI 辅助战斗：由服务器替这位玩家走位（客户端不再上报位置） */
+  setAuto(id: number, on: boolean) {
+    const p = this.players.find((q) => q.id === id);
+    if (!p || p.bot === on) return;
+    p.bot = on;
+    p.moving = false;
+  }
+
   setPlayerPos(id: number, x: number, y: number, moving: boolean, dir: number) {
     const p = this.players.find((q) => q.id === id);
-    if (!p || p.down || this.phase !== 'wave') return;
+    if (!p || p.bot || p.down || this.phase !== 'wave') return;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     x = Math.max(8, Math.min(this.w - 8, x));
     y = Math.max(14, Math.min(this.h - 6, y));
@@ -1000,7 +1014,7 @@ export class GameSim {
       boss: this.boss && !this.boss.dead ? { name: this.boss.def.name, hp: Math.max(0, Math.round(this.boss.hp)), max: this.boss.maxHp } : null,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level,
-        hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills,
+        hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills, bot: p.bot || undefined,
       })),
     };
   }
