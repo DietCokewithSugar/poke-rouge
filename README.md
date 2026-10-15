@@ -74,19 +74,83 @@ npm run dev        # 前端 http://localhost:5173 ，/ws 自动代理到 8787 �
 npm ci && npm run build && PORT=8787 npm start
 ```
 
-也可以用仓库里的 `Dockerfile`：`docker build -t poke-rouge . && docker run -p 8787:8787 -v poke-pvp:/app/data poke-rouge`（`/app/data` 保存对战积分与排行榜）。
+也可以用仓库里的 `Dockerfile`：`docker build -t poke-rouge . && docker run -p 8787:8787 -v poke-pvp:/app/data poke-rouge`。
+没配置 Supabase 时，`/app/data` 保存对战积分与排行榜；配置之后这些数据在 Supabase 里，重新部署不会丢。
 
 如果前端和服务器分开部署（例如前端放静态托管），构建前端时指定服务器地址：
 `VITE_SERVER_URL=https://你的服务器域名 npm run build:client`。
 
 环境变量：`PORT`（默认 8787）、`HOST`（默认 0.0.0.0）、`MAX_ROOMS`（默认 300）、`STATIC_DIR`（默认 `dist/`）、
-`PVP_DATA`（对战积分与排行榜的保存位置，默认 `data/pvp.json`；用 Docker 部署时请挂载持久卷）、
+`PVP_DATA`（没配置 Supabase 时，对战积分与排行榜的保存位置，默认 `data/pvp.json`；用 Docker 部署时请挂载持久卷）、
 `PVP_BOT_AFTER`（匹配多少秒找不到真人就由 AI 补位，默认 1v1 12 秒、4v4 18 秒）、
 `NET_DROP_BYTES`（服务器进程里待发送的数据超过多少字节就跳过快照，默认 32768）、
+`SUPABASE_URL`、`SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`（三个都配上才开启账号和云存档；见下面一节）、
+`PUBLIC_URL`（游戏对外的网址，多个用逗号分隔。登录邮件和 Google 跳回来时只允许这些网址和服务器自己的域名）、
 `POKE_DEBUG=1`（开启测试用的调试指令，正式部署不要开）。
 
 `GET /api/stats` 返回在线人数（打开着游戏页面的连接数）、游戏中人数与房间数；`GET /api/rooms` 返回公开房间列表；
 `GET /api/pvp/leaderboard?mode=1v1|4v4` 返回排行榜前 50 名（冒险榜和道馆榜通过 WebSocket 的 `rankBoard` 查询）。
+`GET /api/config` 告诉前端有没有云存档（不包含任何密钥）。
+
+## 云存档（Supabase）
+
+玩家可以不登录直接玩，进度只在这台设备。在标题或设置里用邮箱和密码注册后，宝可梦、背包、星之沙、研究所、成就、徽章、训练家和对战身份会存到云端，换设备登录同一个账号就能继续。音量、界面缩放、帧率、画质和滤镜不上传。云端暂时连不上时游戏照常进行，进度先留在本机，连上后再同步。
+
+两台设备同时玩、进度对不上时，游戏会让玩家选保留云端还是保留这台设备。空的新账号会把这台设备上的进度传上去；如果这台设备上的进度其实是上一个账号的，会先问一声。训练家名字不用全局唯一。这一轮不在服务器上核对星之沙和解锁（改本地存档仍可能改这些数字）。对战积分由服务器计算，登录后跟着账号里的对战身份走。
+
+浏览器只和游戏服务器通信，由服务器转给 Supabase，这样国内玩家只要连得上游戏服务器就能登录。Google 登录仍要打开 Google，国内打不开时用邮箱即可。
+
+Render 用仓库里的 Dockerfile 部署时，在服务的环境变量里加上下面三个（改这些不用重新构建前端）：
+
+| 变量 | 从哪复制 |
+|---|---|
+| `SUPABASE_URL` | Project Settings → API → Project URL |
+| `SUPABASE_ANON_KEY` | 同一个页面的 `anon` / `publishable` 公钥 |
+| `SUPABASE_SERVICE_ROLE_KEY` | 同一个页面的 `service_role` / `secret`。只放在服务器上，不要写进前端、不要提交到仓库 |
+
+建议把 Supabase 项目建在新加坡，和 Render 新加坡靠近。三个变量缺任何一个，游戏就退回「只存本机、对战数据写文件」，不会报错退出。
+
+### 建表
+
+Supabase → SQL Editor，把 `supabase/migrations/20261015150000_cloud_save.sql` 整段贴进去执行一次。里面是云存档 `saves`、对战 `pvp_players` / `pvp_ghosts`，以及行级权限（玩家就算拿着公钥也只能读自己的存档；积分只有服务器能改）。以前没有玩家数据，不用迁移旧的 `data/pvp.json`。
+
+### 注册不用验证邮箱
+
+Authentication → Providers → Email，关掉 Confirm email，这样注册完就能玩。需要的话仍可在游戏里「忘记密码」和「修改密码」。
+
+### 发信（找回密码）
+
+Supabase 自带的发信次数很少，也容易进垃圾箱。Authentication → Emails → SMTP，配一个自己的发信服务（Resend、SendGrid、阿里云邮件推送等），发件人用你自己的域名。
+
+默认的重置链接会先打开 Supabase，再跳回游戏。国内如果打不开 Supabase，把 Authentication → Email Templates → Reset Password 的链接改成直接回到游戏（`{{ .RedirectTo }}` 就是游戏地址）：
+
+```html
+<h2>重置宝可肉鸽的密码</h2>
+<p>点下面的链接设置新密码。如果不是你本人操作，忽略这封邮件即可。</p>
+<p><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=recovery">设置新密码</a></p>
+```
+
+如果以后打开了「注册要验证邮箱」，Confirm signup 模板同样改成：
+
+```html
+<p><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=signup">确认邮箱</a></p>
+```
+
+### Google 登录
+
+1. Google Cloud Console 建一个 OAuth 客户端，类型选 Web。
+2. 已获授权的重定向 URI 填 `https://<项目ID>.supabase.co/auth/v1/callback`。
+3. Supabase → Authentication → Providers → Google，打开并填上 Client ID 和 Client Secret。
+4. Authentication → URL Configuration：Site URL 填游戏网址（例如 `https://xxx.onrender.com`），Redirect URLs 加上 `https://xxx.onrender.com/**`。有自定义域名就两个都加上。
+5. 服务器环境变量 `PUBLIC_URL` 写成同一个网址（多个用逗号）。不填的话，只允许跳回这次请求的 Host。
+
+Google 的 Client Secret 放在 Supabase 后台，不要放进游戏仓库。
+
+### 玩家会看到的规则
+
+- 游客可以玩排位，积分记在这台设备上。登录之后，积分跟着账号里的对战身份走。
+- 冒险榜和道馆榜的成绩仍由客户端上报，服务器只检查格式、每人保留最好的一次。改存档可以影响这两块榜；对战积分不行。
+- 云端连不上、或服务器没配 Supabase：不挡游戏。
 
 ## 操作
 

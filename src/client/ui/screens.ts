@@ -415,9 +415,9 @@ const PAD_KEYS: [keyof typeof PAD_BTN, string, string, string][] = [
   ['LB', 'LB', 'L1', '翻页 / 切换标签'], ['LT', 'LT', 'L2', '撤销购买'], ['START', 'Start', 'Options', '暂停 / 菜单'], ['UP', '十字键', '十字键', '移动 / 选择'],
 ];
 
-export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => void, onBack: () => void) {
+export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => void, onBack: () => void, onAccount?: () => void) {
   const s = p.settings;
-  const render = () => settingsScreen(root, p, onChange, onBack);
+  const render = () => settingsScreen(root, p, onChange, onBack, onAccount);
   const set = <K extends keyof Profile['settings']>(k: K, v: Profile['settings'][K], rerender = true) => {
     s[k] = v;
     saveProfile(p);
@@ -512,6 +512,8 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
       ),
     ),
     h('div', { class: 'panel-foot' },
+      onAccount ? h('button', { class: 'btn small ghost with-ico', onclick: () => { sfx('click'); onAccount(); } }, uiIcon('user', 2), '账号与云存档') : h('span'),
+      h('span', { class: 'set-note' }, '音量和画面只存在这台设备'),
       confirmButton('恢复默认设置', '再点一次确认恢复', 'btn small ghost', () => {
         p.settings = defaultSettings();
         saveProfile(p);
@@ -520,7 +522,6 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
         toast('已恢复默认设置');
         render();
       }, {}, 'undo'),
-      h('span', { class: 'set-note' }, '设置会自动保存'),
     ),
   ), 'settings');
   poll();
@@ -534,6 +535,7 @@ const CREDIT_TABS: [string, () => Node][] = [
     h('li', null, '冒险中会有野生宝可梦乱入。击败野生宝可梦时它有几率崇拜你，成为新的伙伴（整条进化线都能用）。研究所的「友情缎带」、精灵球类道具和小智都能提高崇拜几率。'),
     h('li', null, '闪光宝可梦：每只宝可梦出现时有 1/1000 的几率是闪光（异色）的，六项能力各高 1%。打倒闪光宝可梦 100% 得到它（首领也一样）；闪光的和普通的是两只宝可梦，要分别培养、分别设为伙伴。研究所的「闪光研究」、火箭队和闪耀护符能提高几率，加在一起最高 1/200。'),
     h('li', null, '等级够了以后，波次结束时会询问是否进化，可以取消；伊布要在商店里买进化石。每波结束后进入商店：买道具、学招式，买错了可以撤销上一次购买。'),
+    h('li', null, '账号：用邮箱或 Google 登录后，进度存到云端，换设备还能继续。'),
   )],
   ['模式', () => h('ul', { class: 'credit-list' },
     h('li', null, '难度分简单 / 普通 / 困难：通关上一档才能解锁下一档。'),
