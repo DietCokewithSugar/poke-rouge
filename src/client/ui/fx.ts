@@ -66,7 +66,7 @@ export async function transition(kind: Cover, swap: () => void, o: { hold?: numb
 
 // ---------------------------------------------------------------- 对战开场
 
-export interface VsSide { name: string; sub?: string; art: string; dex: number[] }
+export interface VsSide { name: string; sub?: string; art: string; mons: { dex: number; shiny: boolean }[] }
 
 /** 对战开场：两位训练家从两边滑进来，中间一个大大的 VS。点一下可以跳过 */
 export async function vsSplash(left: VsSide, right: VsSide, title: string) {
@@ -76,7 +76,7 @@ export async function vsSplash(left: VsSide, right: VsSide, title: string) {
     h('div', { class: 'vs-info' },
       h('div', { class: 'vs-name' }, s.name),
       s.sub ? h('div', { class: 'vs-sub' }, s.sub) : null,
-      h('div', { class: 'vs-mons' }, s.dex.map((d) => Animator.portrait(d, 1))),
+      h('div', { class: 'vs-mons' }, s.mons.map((m) => Animator.portrait(m.dex, 1, m.shiny))),
     ),
   );
   const el = h('div', { class: 'vs' },

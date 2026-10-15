@@ -46,6 +46,23 @@ function rect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h:
   ctx.fillRect(Math.round(x), Math.round(y), w, h);
 }
 
+/**
+ * 闪光宝可梦身上的闪烁（画法参考 pokesurvivor 的 Icons.twinkle，MIT）：
+ * 一个像素点长出十字，再长出斜角的尖，然后缩回去消失。phase 0~1。
+ */
+export function twinkle(ctx: CanvasRenderingContext2D, x: number, y: number, phase: number) {
+  const st = phase < 0.15 ? 0 : phase < 0.32 ? 1 : phase < 0.62 ? 2 : phase < 0.82 ? 1 : 0;
+  const X = Math.round(x), Y = Math.round(y);
+  const dot = (dx: number, dy: number, c: string) => { ctx.fillStyle = c; ctx.fillRect(X + dx, Y + dy, 1, 1); };
+  const ARM = '#fff3a8', TIP = '#9ae6ff';
+  dot(0, 0, '#ffffff');
+  if (st >= 1) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) dot(dx, dy, ARM);
+  if (st >= 2) {
+    for (const [dx, dy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) dot(dx, dy, ARM);
+    for (const [dx, dy] of [[3, 0], [-3, 0], [0, 3], [0, -3], [1, 1], [-1, 1], [1, -1], [-1, -1]]) dot(dx, dy, TIP);
+  }
+}
+
 // ---------------------------------------------------------------- 弹体
 
 /** 绘制弹体：地面影子、敌方弹体的红色警示圈、按属性上色的像素小图。 */
@@ -176,6 +193,7 @@ export class FxLayer {
   bolts: Bolt[] = [];
   ground: Ground[] = [];
   texts: FloatText[] = [];
+  twinkles: { x: number; y: number; vy: number; t: number; life: number }[] = [];
   shake = 0;
   private now = 0;
 
@@ -215,6 +233,22 @@ export class FxLayer {
   text(x: number, y: number, text: string, color: string, size = 12, dur = 0.8) {
     if (this.texts.length > 120) this.texts.shift();
     this.texts.push({ x: x + rnd(-3, 3), y, text, color, t: 0, dur, size, vy: -28 });
+  }
+
+  /** 闪光宝可梦的闪烁 */
+  twinkle(x: number, y: number, life = rnd(0.45, 0.7), vy = -8) {
+    if (this.twinkles.length > 120) this.twinkles.shift();
+    this.twinkles.push({ x, y, vy, t: 0, life });
+  }
+
+  /** 闪光宝可梦出现 / 被打倒：一圈闪烁 + 光环 */
+  shinyBurst(x: number, y: number, r = 14) {
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * TAU + rnd(-0.2, 0.2), d = rnd(r * 0.4, r);
+      this.twinkle(x + Math.cos(a) * d, y - 10 + Math.sin(a) * d * 0.8, rnd(0.5, 0.9), -rnd(6, 18));
+    }
+    this.ring(x, y, 4, r * 2.6, '#9ae6ff', 0.6, 2);
+    this.burst(x, y - 10, ['#fff3a8', '#ffffff', '#9ae6ff'], 14, 90);
   }
 
   // ---------- 技能 ----------
@@ -507,6 +541,8 @@ export class FxLayer {
     }
     for (const t of this.texts) { t.t += dt; t.y += t.vy * dt; t.vy *= 0.92; }
     this.texts = this.texts.filter((t) => t.t < t.dur);
+    for (const w of this.twinkles) { w.t += dt; w.y += w.vy * dt; }
+    this.twinkles = this.twinkles.filter((w) => w.t < w.life);
     this.shake = Math.max(0, this.shake - dt * 18);
   }
 
@@ -603,6 +639,8 @@ export class FxLayer {
       const k = 1 - s.t / s.life;
       drawShape(ctx, s.shape, s.pal, s.x, s.y, { angle: s.angle, scale: s.scale, alpha: s.fade ? step(k) : 1, frame: Math.floor(s.t * s.fr) });
     }
+    ctx.globalAlpha = 1;
+    for (const w of this.twinkles) twinkle(ctx, w.x, w.y, w.t / w.life);
     // 飘字画成缓存的小图再贴上去：每个字只画一次（描边要 6 次 fillText），后期满屏伤害数字时省很多
     const m = ctx.getTransform();
     const S = m.a;

@@ -4,6 +4,7 @@ import { DIFFICULTIES } from '../../shared/difficulty';
 import type { MeState, PublicState } from '../../shared/sim/game';
 import type { PvpSeatInfo } from '../../shared/protocol';
 import { PVP_MODES, RING_START, type PvpMode } from '../../shared/pvp/sim';
+import { shinyName } from '../../shared/shiny';
 import { Animator } from '../gfx/sprites';
 import { trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
@@ -152,9 +153,9 @@ export class Hud {
       const form = LINES[s.line]?.forms.find((f) => f.dex === s.dex)?.name ?? '';
       return h('div', {
         class: `pvp-chip ${s.id === you ? 'me' : ''} ${me && s.owner === me.owner ? 'mine' : ''}`, 'data-id': s.id,
-        title: `${s.name}${s.bot ? '（AI 训练家）' : ''}的${form} · Lv${s.level}${s.helper ? ' · AI 操作' : ''}`,
+        title: `${s.name}${s.bot ? '（AI 训练家）' : ''}的${shinyName(form, s.shiny)} · Lv${s.level}${s.helper ? ' · AI 操作' : ''}`,
       },
-      h('div', { class: 'pvp-chip-portrait' }, Animator.portrait(s.dex, 1)),
+      h('div', { class: 'pvp-chip-portrait' }, Animator.portrait(s.dex, 1, s.shiny)),
       h('div', { class: 'pvp-chip-body' }, h('div', { class: 'bar thin' }, h('div', { class: 'bar-fill hp' }))),
       );
     };
@@ -195,9 +196,9 @@ export class Hud {
       if (me.dex !== this.lastDex) {
         this.lastDex = me.dex;
         clear(this.me.portrait);
-        this.me.portrait.appendChild(Animator.portrait(me.dex, 1));
+        this.me.portrait.appendChild(Animator.portrait(me.dex, 1, me.shiny));
       }
-      set(this.me.name, me.form);
+      set(this.me.name, shinyName(me.form, me.shiny));
       set(this.me.lv, `Lv${me.level}`);
       const hp = hpOverride?.hp ?? me.hp, max = hpOverride?.maxHp ?? me.maxHp;
       this.me.hpFill.style.width = `${Math.max(0, Math.min(100, (hp / Math.max(1, max)) * 100))}%`;
@@ -243,15 +244,15 @@ export class Hud {
         this.bossFill.style.width = `${(pub.boss.hp / pub.boss.max) * 100}%`;
       } else this.bossBox.classList.add('hidden');
       const others = pub.players.filter((p) => p.id !== you);
-      const tk = others.map((p) => `${p.id}:${p.dex}`).join(',');
+      const tk = others.map((p) => `${p.id}:${p.dex}:${p.shiny ? 1 : 0}`).join(',');
       if (tk !== this.teamKey) {
         this.teamKey = tk;
         clear(this.team);
         for (const p of others) {
           this.team.appendChild(h('div', { class: 'team-row box tight', 'data-id': p.id },
-            h('div', { class: 'team-portrait' }, Animator.portrait(p.dex, 1)),
+            h('div', { class: 'team-portrait' }, Animator.portrait(p.dex, 1, p.shiny)),
             h('div', { class: 'team-body' },
-              h('div', { class: 'team-name' }, `${p.name} · ${LINES[p.line].forms.find((f) => f.dex === p.dex)?.name ?? ''}`),
+              h('div', { class: 'team-name' }, `${p.name} · ${shinyName(LINES[p.line].forms.find((f) => f.dex === p.dex)?.name ?? '', p.shiny)}`),
               h('div', { class: 'bar thin' }, h('div', { class: 'bar-fill hp' })),
               h('div', { class: 'team-status' }),
             ),

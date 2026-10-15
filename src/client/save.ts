@@ -40,8 +40,12 @@ export interface Profile {
   trainers: string[];
   /** 跟随的宝可梦：冒险与对战都直接用它 */
   partner: LineId;
+  /** 跟随的是闪光宝可梦 */
+  partnerShiny: boolean;
   /** 拥有的宝可梦（进化线）：初始伙伴、崇拜你的、买来的。成就解锁的另外判断 */
   owned: LineId[];
+  /** 拥有的闪光宝可梦（进化线）：和普通的是两只宝可梦，冒险中打倒闪光宝可梦时得到 */
+  shiny: LineId[];
   stardust: number;
   upgrades: Record<string, number>;
   achievements: Record<string, number>;
@@ -77,11 +81,13 @@ function fresh(): Profile {
     trainer: 'ash',
     trainers: [],
     partner: 'charmander',
+    partnerShiny: false,
     owned: [],
+    shiny: [],
     stardust: 0,
     upgrades: {},
     achievements: {},
-    stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 0, badges: 0 },
+    stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 0, badges: 0, shinies: 0 },
     lastDifficulty: 'easy',
     settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true, uiScale: defaultUiScale(), fps: 60, quality: 'high', transitions: true },
     seenEnemies: [],
@@ -107,9 +113,31 @@ export function badgeMeta(p: Profile): Record<string, number> {
 /** 冒险的 AI 辅助战斗：通关过一次才能用 */
 export const autoAssistUnlocked = (p: Profile) => p.stats.wins > 0;
 
-/** 对战的队长：背包里跟随的伙伴那条进化线的构筑（优先上次选的，其次最强的） */
+/** 一只宝可梦：进化线 + 是不是闪光的（普通的和闪光的是两只独立的宝可梦） */
+export interface Mon { line: LineId; shiny: boolean }
+
+export const monKey = (m: Mon) => (m.shiny ? `${m.line}*` : m.line);
+export const sameMon = (a: Mon, b: Mon) => a.line === b.line && a.shiny === b.shiny;
+export const partnerOf = (p: Profile): Mon => ({ line: p.partner, shiny: p.partnerShiny });
+export const buildMon = (b: SavedBuild): Mon => ({ line: b.line, shiny: !!b.shiny });
+
+export function ownsMon(p: Profile, m: Mon): boolean {
+  return m.shiny ? p.shiny.includes(m.line) : isUnlocked(p, m.line);
+}
+
+/** 拥有的宝可梦（按图鉴顺序，闪光的排在普通的后面）；all 时没有的普通宝可梦也列出来 */
+export function monList(p: Profile, all = false): Mon[] {
+  return LINE_IDS.flatMap((line) => {
+    const out: Mon[] = [];
+    if (all || isUnlocked(p, line)) out.push({ line, shiny: false });
+    if (p.shiny.includes(line)) out.push({ line, shiny: true });
+    return out;
+  });
+}
+
+/** 对战的队长：背包里跟随的伙伴的构筑（闪光的和普通的分开；优先上次选的，其次最强的） */
 export function pvpLeader(p: Profile): PartyMon | null {
-  const own = p.party.filter((m) => m.build.line === p.partner);
+  const own = p.party.filter((m) => sameMon(buildMon(m.build), partnerOf(p)));
   return own.find((m) => m.uid === p.pvpPick) ?? own.sort((a, b) => buildPower(b.build) - buildPower(a.build))[0] ?? null;
 }
 
@@ -170,11 +198,14 @@ export function loadProfile(): Profile {
     // 旧存档：以前御三家一开始就能用，保留下来；需要重新走一遍开场选训练家
     if (!Array.isArray(p.owned)) out.owned = (p.stats?.runs ?? 0) > 0 ? [...STARTERS] : [];
     out.owned = out.owned.filter(isLine);
+    out.shiny = [...new Set((Array.isArray(out.shiny) ? out.shiny : []).filter(isLine))];
     out.trainers = (Array.isArray(out.trainers) ? out.trainers : []).filter((t) => TRAINERS[t]);
     if (!TRAINERS[out.trainer]) out.trainer = 'ash';
     if (!isLine(out.partner)) out.partner = isLine(p.lastLine) ? p.lastLine : 'charmander';
-    if (out.setup && !isUnlocked(out, out.partner)) out.partner = unlockedLines(out)[0] ?? 'charmander';
+    out.partnerShiny = out.partnerShiny === true;
+    if (out.setup && !ownsMon(out, partnerOf(out))) { out.partner = unlockedLines(out)[0] ?? 'charmander'; out.partnerShiny = false; }
     out.stats.owned = unlockedLines(out).length;
+    out.stats.shinies = out.shiny.length;
     return out;
   } catch {
     return fresh();
@@ -229,13 +260,16 @@ export function buyLine(p: Profile, id: LineId): boolean {
   return true;
 }
 
-/** 新的伙伴：冒险中崇拜你的宝可梦（返回是不是第一次得到） */
-export function addOwned(p: Profile, id: LineId, recruited = false): boolean {
+/** 新的伙伴：冒险中崇拜你的宝可梦（shiny：闪光宝可梦；返回是不是第一次得到） */
+export function addOwned(p: Profile, id: LineId, recruited = false, shiny = false): boolean {
   if (!isLine(id)) return false;
-  const isNew = !isUnlocked(p, id);
-  if (!p.owned.includes(id)) p.owned.push(id);
+  const isNew = !ownsMon(p, { line: id, shiny });
+  if (shiny) {
+    if (!p.shiny.includes(id)) p.shiny.push(id);
+  } else if (!p.owned.includes(id)) p.owned.push(id);
   if (recruited) p.stats.recruits++;
   p.stats.owned = unlockedLines(p).length;
+  p.stats.shinies = p.shiny.length;
   saveProfile(p);
   return isNew;
 }
@@ -269,6 +303,8 @@ export interface RunReward {
   newAchievements: { id: string; name: string; reward: number; unlocks?: LineId[]; trainer?: string }[];
   /** 本局崇拜你的新伙伴 */
   recruits: LineId[];
+  /** 本局崇拜你的闪光宝可梦 */
+  shinyRecruits: LineId[];
 }
 
 /** 结算一局：更新统计、判定成就、发放星之沙。 */
@@ -281,11 +317,12 @@ export function applyRun(p: Profile, r: RunSummary): RunReward {
   p.stats.revives += r.revives;
   // 冒险中已经实时解锁过了；断线等情况下漏掉的在这里补上
   for (const id of r.recruits) if (!p.owned.includes(id)) addOwned(p, id, true);
+  for (const id of r.shinyRecruits) if (!p.shiny.includes(id)) addOwned(p, id, true, true);
   const got = evalAchievements(p, r);
   const dust = stardustFor(r) + got.dust;
   p.stardust += stardustFor(r);
   saveProfile(p);
-  return { stardust: dust, newAchievements: got.fresh, recruits: r.recruits.slice() };
+  return { stardust: dust, newAchievements: got.fresh, recruits: r.recruits.slice(), shinyRecruits: r.shinyRecruits.slice() };
 }
 
 /** 判定成就并发放奖励（星之沙直接加到存档里）。冒险结算、赢了道馆之后都会调用 */
@@ -294,6 +331,7 @@ export function evalAchievements(p: Profile, r: RunSummary = NO_RUN, g: GymOutco
   let dust = 0;
   p.stats.badges = Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).length;
   p.stats.owned = unlockedLines(p).length;
+  p.stats.shinies = p.shiny.length;
   // 成就可能会连锁（解锁新宝可梦让图鉴数达标），多判定几轮
   for (let round = 0; round < 3; round++) {
     let any = false;

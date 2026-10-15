@@ -1,8 +1,10 @@
 import './style.css';
+import { DEX } from '../shared/dex';
 import { ENEMIES } from '../shared/enemies';
-import { LINES, formOf, type LineId } from '../shared/pokemon';
+import { LINES, LINE_OF_DEX, formOf, type LineId } from '../shared/pokemon';
 import type { DifficultyId } from '../shared/difficulty';
-import { PROTOCOL_VERSION, type BoardEntry, type C2S, type LobbyPlayer, type PvpRatingChange, type PvpSeatInfo, type ServerStats } from '../shared/protocol';
+import { PROTOCOL_VERSION, type BoardEntry, type C2S, type LobbyPlayer, type PvpRatingChange, type PvpSeatInfo, type ServerStats, type StartPlayer } from '../shared/protocol';
+import { shinyName } from '../shared/shiny';
 import { PVP_MODES, PVP_MODE_IDS, type PvpMatchResult, type PvpMode } from '../shared/pvp/sim';
 import type { MeState, PublicState } from '../shared/sim/game';
 import { BIOMES, WAVES } from '../shared/waves';
@@ -21,8 +23,8 @@ import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
 import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
 import {
-  addOwned, applyRun, autoAssistUnlocked, badgeMeta, isUnlocked, loadProfile, pvpIdentity, releaseFromParty, saveProfile, unlockedLines, winGym,
-  type PartyMon, type Profile, type Settings,
+  addOwned, applyRun, autoAssistUnlocked, badgeMeta, buildMon, isUnlocked, loadProfile, monKey, ownsMon, partnerOf, pvpIdentity, releaseFromParty, saveProfile,
+  unlockedLines, winGym, type Mon, type PartyMon, type Profile, type Settings,
 } from './save';
 import { $, clear, h, toast } from './ui/dom';
 import { Hud } from './ui/hud';
@@ -240,7 +242,10 @@ class App {
     if (!this.profile.setup || !this.ws?.connected) return;
     const p = this.profile;
     const busy = this.where === 'game' && (this.solo || !!this.pvpMatch?.practice);
-    this.ws.send({ t: 'presence', name: this.name(), trainer: p.trainer, dex: partnerDex(p), town: this.where === 'town' || this.where === 'place', busy: busy ? 1 : undefined });
+    this.ws.send({
+      t: 'presence', name: this.name(), trainer: p.trainer, dex: partnerDex(p), shiny: p.partnerShiny ? 1 : undefined,
+      town: this.where === 'town' || this.where === 'place', busy: busy ? 1 : undefined,
+    });
     if ((this.where === 'town' || this.where === 'place') && this.town) {
       const pos = this.town.pos;
       this.ws.send({ t: 'tpos', x: pos.x, y: pos.y, d: this.town.me.dir, m: 0 });
@@ -290,6 +295,7 @@ class App {
       const p = this.profile;
       p.trainer = trainer;
       p.partner = starter;
+      p.partnerShiny = false;
       p.name = name;
       if (!p.owned.includes(starter)) p.owned.push(starter);
       p.setup = true;
@@ -334,9 +340,9 @@ class App {
         enter: (id) => this.openPlace(id, 0, 'door'),
         move: (x, y, d, m) => { if (this.ws?.connected) this.ws.send({ t: 'tpos', x: Math.round(x), y: Math.round(y), d, m: m ? 1 : 0 }); },
         spot: (s) => this.townHud?.setSpot(s),
-      }, { trainer: p.trainer, name: this.name(), dex: partnerDex(p), pos: p.townPos });
+      }, { trainer: p.trainer, name: this.name(), dex: partnerDex(p), shiny: p.partnerShiny, pos: p.townPos });
     }
-    this.town.setIdentity(p.trainer, this.name(), partnerDex(p));
+    this.town.setIdentity(p.trainer, this.name(), partnerDex(p), p.partnerShiny);
     if (from) this.town.placeAt(from);
     this.town.active = true;
     this.town.start();
@@ -406,7 +412,7 @@ class App {
     const back = () => this.backToTown();
     // 对话框关掉就回到镇上，不需要过场
     const close = () => this.enterTown();
-    const changed = () => { this.townHud?.refresh(); this.town?.setIdentity(this.profile.trainer, this.name(), partnerDex(this.profile)); this.presence(); };
+    const changed = () => { this.townHud?.refresh(); this.town?.setIdentity(this.profile.trainer, this.name(), partnerDex(this.profile), this.profile.partnerShiny); this.presence(); };
     const p = this.profile;
     switch (id) {
       case 'home': homeScreen(this.screen, p, { back, changed }, tab); break;
@@ -417,8 +423,9 @@ class App {
       case 'oak': {
         const n = unlockedLines(p).length;
         const b = badgeCount(p);
-        npcDialog(this.screen, '大木博士', n >= 79 ? '了不起！你已经和所有的宝可梦都成为朋友了！'
-          : `你已经拥有 ${n} 种宝可梦${b ? `、${b} 枚徽章` : ''}了！冒险中击败野生宝可梦时，它们有时会崇拜你。研究所里的「友情缎带」能让它们更容易崇拜你哦。`, [
+        const s = p.shiny.length;
+        npcDialog(this.screen, '大木博士', n >= 79 ? `了不起！你已经和所有的宝可梦都成为朋友了！${s ? `闪光宝可梦也有 ${s} 种了。` : ''}`
+          : `你已经拥有 ${n} 种宝可梦${b ? `、${b} 枚徽章` : ''}${s ? `，还有 ${s} 种闪光宝可梦` : ''}了！冒险中击败野生宝可梦时，它们有时会崇拜你。研究所里的「友情缎带」能让它们更容易崇拜你，「闪光研究」能让闪光宝可梦更常出现哦。`, [
           ['去研究所', () => labHub(this.screen, p, { back, changed }, 1), 'gold'],
           ['好的', close, 'ghost'],
         ], { art: 'oak' });
@@ -458,19 +465,20 @@ class App {
   private route() {
     const p = this.profile;
     const render = () => routeScreen(this.screen, p, {
-      go: (d) => void transition('battle', () => this.startSolo(p.partner, d), { hold: 300 }),
-      partner: () => partnerModal(p, (l) => { this.setPartner(l); render(); }),
+      go: (d) => void transition('battle', () => this.startSolo(partnerOf(p), d), { hold: 300 }),
+      partner: () => partnerModal(p, (m) => { this.setPartner(m); render(); }),
       back: () => this.backToTown(),
     });
     render();
     tour(p, 'route', TOURS.route);
   }
 
-  private setPartner(line: LineId) {
-    if (!isUnlocked(this.profile, line)) return;
-    this.profile.partner = line;
+  private setPartner(m: Mon) {
+    if (!ownsMon(this.profile, m)) return;
+    this.profile.partner = m.line;
+    this.profile.partnerShiny = m.shiny;
     saveProfile(this.profile);
-    this.town?.setIdentity(this.profile.trainer, this.name(), partnerDex(this.profile));
+    this.town?.setIdentity(this.profile.trainer, this.name(), partnerDex(this.profile), m.shiny);
     this.townHud?.refresh();
     this.presence();
   }
@@ -511,7 +519,7 @@ class App {
       practice: (mode, team) => this.pvpPractice(mode, team),
       release: (uid) => releaseFromParty(this.profile, uid),
       board: (mode) => { saveProfile(this.profile); this.requestBoard(mode); },
-      partner: (mon) => { this.setPartner(mon.build.line); this.profile.pvpPick = mon.uid; saveProfile(this.profile); },
+      partner: (mon) => { this.setPartner(buildMon(mon.build)); this.profile.pvpPick = mon.uid; saveProfile(this.profile); },
       adventure: () => { this.pvpUi = null; this.where = 'place'; this.route(); },
       back: () => { saveProfile(this.profile); this.pvpUi = null; this.backToTown(); },
     }, ws.connected);
@@ -710,18 +718,22 @@ class App {
   private meta() { return { ...this.profile.upgrades, ...badgeMeta(this.profile) }; }
   private name() { return this.profile.name || TRAINERS[this.profile.trainer]?.name || '训练家'; }
   /** 加入房间时带上的身份 */
-  private ident() { return { trainer: this.profile.trainer, line: this.profile.partner, owned: unlockedLines(this.profile) }; }
+  private ident() {
+    const p = this.profile;
+    return { trainer: p.trainer, line: p.partner, shiny: p.partnerShiny || undefined, owned: unlockedLines(p), ownedShiny: p.shiny };
+  }
 
   // ------------------------------------------------------------ 冒险
 
-  startSolo(line: LineId, difficulty: DifficultyId) {
+  startSolo(mon: Mon, difficulty: DifficultyId) {
     mobileFullscreen();
     this.close();
     this.solo = true;
-    this.profile.partner = line;
+    if (ownsMon(this.profile, mon)) { this.profile.partner = mon.line; this.profile.partnerShiny = mon.shiny; }
     this.pendingDifficulty = difficulty;
     this.hideTown();
-    void preload(runDex([line]));
+    void preload(runDex([mon.line]));
+    if (mon.shiny) void preload(LINES[mon.line].forms.map((f) => f.dex), true);
     const t = new LocalTransport();
     this.t = t;
     t.onMessage = (m) => this.onMessage(m);
@@ -838,9 +850,9 @@ class App {
     this.screen.classList.remove('hidden');
     lobbyScreen(this.screen, this.profile, this.code, this.you, this.lobby, {
       partner: () => {
-        const taken = new Map<LineId, string>();
-        for (const x of this.lobby) if (x.line && x.id !== this.you) taken.set(x.line, x.name);
-        partnerModal(this.profile, (l) => { this.setPartner(l); this.send({ t: 'pick', line: l }); }, { taken });
+        const taken = new Map<string, string>();
+        for (const x of this.lobby) if (x.line && x.id !== this.you) taken.set(monKey({ line: x.line, shiny: !!x.shiny }), x.name);
+        partnerModal(this.profile, (m) => { this.setPartner(m); this.send({ t: 'pick', line: m.line, shiny: m.shiny || undefined }); }, { taken });
       },
       ready: (on) => this.send({ t: 'ready', on }),
       start: () => this.send({ t: 'start' }),
@@ -851,7 +863,7 @@ class App {
     setRoomParam(this.code);
   }
 
-  private beginGame(w: number, h: number, players: { id: number; name: string; trainer: string; line: LineId }[], pvpSeats?: PvpSeatInfo[]) {
+  private beginGame(w: number, h: number, players: StartPlayer[], pvpSeats?: PvpSeatInfo[]) {
     this.leaveGame();
     this.hideTown();
     this.pvpUi = null;
@@ -860,6 +872,8 @@ class App {
     clear(this.screen);
     this.screen.classList.add('hidden');
     if (!pvpSeats) void preload(runDex(players.map((p) => p.line)));
+    const shinyDex = [...(pvpSeats ?? players).filter((p) => p.shiny).flatMap((p) => LINES[p.line]?.forms.map((f) => f.dex) ?? [])];
+    if (shinyDex.length) void preload(shinyDex, true);
     this.view = new GameView(this.canvas, w, h, this.you, this.profile.settings, {
       onMessage: (text) => this.hud?.message(text),
       onBoss: (name) => this.hud?.announce(`野生的${name}出现了！`),
@@ -873,9 +887,16 @@ class App {
         if (pid === this.you) this.hud?.announce(text);
         else this.hud?.message(`${players.find((p) => p.id === pid)?.name ?? '队友'}：${text}`);
       },
-      onRecruit: (pid, dex, line) => this.onRecruit(pid, dex, line, players),
+      onRecruit: (pid, dex, line, shiny) => this.onRecruit(pid, dex, line, shiny, players),
+      onShiny: (dex) => {
+        const line = LINE_OF_DEX[dex];
+        const name = DEX[dex]?.name ?? '';
+        this.hud?.announce(`闪光的${name}出现了！`, this.profile.shiny.includes(line) ? '已经有这只闪光宝可梦了' : '打倒它，它一定会崇拜你！');
+        this.hud?.message(`闪闪发光！野生的${name}是闪光宝可梦！`);
+      },
     });
     this.view.isOwned = (line) => isUnlocked(this.profile, line);
+    this.view.isShinyOwned = (line) => this.profile.shiny.includes(line);
     for (const p of players) this.view.names.set(p.id, p.name);
     this.view.onView = (w, h) => this.send({ t: 'view', w, h });
     this.view.resize();
@@ -918,15 +939,16 @@ class App {
   }
 
   /** 野生宝可梦崇拜了你：立刻解锁并保存（中途离开也不会丢） */
-  private onRecruit(pid: number, dex: number, line: string, players: { id: number; name: string }[]) {
-    const name = LINES[line]?.name ?? '';
+  private onRecruit(pid: number, dex: number, line: string, shiny: boolean, players: { id: number; name: string }[]) {
+    const name = shinyName(LINES[line]?.name ?? '', shiny);
     if (pid !== this.you) {
       this.hud?.message(`${players.find((p) => p.id === pid)?.name ?? '队友'} 结交了新伙伴：${name}`);
       return;
     }
-    const isNew = addOwned(this.profile, line, true);
-    sfx('achieve');
-    this.hud?.announce(`野生的${formOf(line, LINES[line].forms.findIndex((f) => f.dex === dex)).name}崇拜了你！`, isNew ? `${name}成为了你的伙伴！回到真新镇可以让它跟着你` : '');
+    const isNew = addOwned(this.profile, line, true, shiny);
+    sfx(shiny ? 'shiny' : 'achieve');
+    const form = shinyName(formOf(line, LINES[line].forms.findIndex((f) => f.dex === dex)).name, shiny);
+    this.hud?.announce(`野生的${form}崇拜了你！`, isNew ? `${name}成为了你的伙伴！回到真新镇可以让它跟着你` : '');
   }
 
   /** 对战开场：两边的训练家和宝可梦（道馆对战显示道馆训练家 / 馆主的立绘） */
@@ -935,15 +957,16 @@ class App {
     if (!me) return;
     const allies = seats.filter((s) => s.team === me.team), foes = seats.filter((s) => s.team !== me.team);
     const gym = this.pvpMatch?.gym ? GYM_BY_ID[this.pvpMatch.gym.id] : null;
-    const left: VsSide = { name: this.name(), sub: TRAINERS[this.profile.trainer]?.title, art: this.profile.trainer, dex: allies.map((s) => s.dex) };
+    const mons = (list: PvpSeatInfo[]) => list.map((s) => ({ dex: s.dex, shiny: !!s.shiny }));
+    const left: VsSide = { name: this.name(), sub: TRAINERS[this.profile.trainer]?.title, art: this.profile.trainer, mons: mons(allies) };
     let right: VsSide, title: string;
     if (gym && this.pvpMatch?.gym) {
       const T = gym[this.pvpMatch.gym.stage];
-      right = { name: T.name, sub: T.title, art: T.art, dex: foes.map((s) => s.dex) };
+      right = { name: T.name, sub: T.title, art: T.art, mons: mons(foes) };
       title = `${gym.name} · ${this.pvpMatch.gym.stage === 'leader' ? '馆主战' : '道馆训练家'}`;
     } else {
       const names = [...new Set(foes.map((s) => s.name))];
-      right = { name: names.length > 1 ? `${names[0]} 等 ${names.length} 人` : names[0] ?? '对手', sub: foes[0]?.bot ? 'AI 训练家' : '训练家', art: foes[0]?.trainer ?? 'gary', dex: foes.map((s) => s.dex) };
+      right = { name: names.length > 1 ? `${names[0]} 等 ${names.length} 人` : names[0] ?? '对手', sub: foes[0]?.bot ? 'AI 训练家' : '训练家', art: foes[0]?.trainer ?? 'gary', mons: mons(foes) };
       title = `${PVP_MODES[mode].name}${this.pvpMatch?.practice ? ' · 练习赛' : ' · 排位赛'}`;
     }
     void vsSplash(left, right, title);
@@ -1039,9 +1062,9 @@ class App {
       this.backdrop();
       this.screen.classList.remove('hidden');
       playMusic('shop');
-      const line = this.profile.partner, diff = this.pendingDifficulty;
+      const mon = partnerOf(this.profile), diff = this.pendingDifficulty;
       resultsScreen(this.screen, victory, summary, reward, board, this.you, () => {
-        if (this.solo) void transition('battle', () => { this.close(); this.startSolo(line, diff); }, { hold: 300 });
+        if (this.solo) void transition('battle', () => { this.close(); this.startSolo(mon, diff); }, { hold: 300 });
         else this.showLobby();
       }, this.solo ? '再来一局' : '返回房间', this.profile, () => { this.close(); this.backToTown(); });
       // 第一次结算：提醒把宝可梦放进背包（之后可以挑战道馆、对战）

@@ -5,6 +5,7 @@ import { DIFFICULTIES } from '../../shared/difficulty';
 import { ITEMS } from '../../shared/items';
 import { LINES, formOf } from '../../shared/pokemon';
 import type { PvpBoardRow, PvpHistory, PvpRatingChange, PvpSeatInfo, S2C } from '../../shared/protocol';
+import { shinyName } from '../../shared/shiny';
 import { buildPower, type SavedBuild } from '../../shared/pvp/build';
 import { START_RATING, tierOf } from '../../shared/pvp/rating';
 import { PVP_MODES, PVP_MODE_IDS, RING_END, RING_START, type PvpMatchResult, type PvpMode, type PvpPlayerResult } from '../../shared/pvp/sim';
@@ -26,7 +27,7 @@ const TEAM_COLOR = ['#5aa0ff', '#ff6a6a'];
 const fmt = (n: number) => (n >= 100000 ? `${(n / 10000).toFixed(1)} 万` : Math.round(n).toLocaleString('zh-CN'));
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
-function formName(b: SavedBuild) { return formOf(b.line, b.stage).name; }
+function formName(b: SavedBuild) { return shinyName(formOf(b.line, b.stage).name, b.shiny); }
 
 function originText(m: PartyMon) {
   const D = DIFFICULTIES[m.from.difficulty];
@@ -51,11 +52,11 @@ export function monCard(m: PartyMon, opts: { selected?: boolean; onClick?: () =>
   const f = formOf(b.line, b.stage);
   const items = b.items.reduce((a, [, n]) => a + n, 0);
   const rec = m.pvp.wins + m.pvp.losses + m.pvp.draws ? `${m.pvp.wins} 胜 ${m.pvp.losses} 负` : '还没有对战';
-  return h('div', { class: `mon-card ${opts.selected ? 'on' : ''}`, onclick: opts.onClick, tabindex: opts.onClick ? 0 : undefined, 'data-pad': opts.onClick ? '1' : undefined },
+  return h('div', { class: `mon-card ${opts.selected ? 'on' : ''}${b.shiny ? ' shiny' : ''}`, onclick: opts.onClick, tabindex: opts.onClick ? 0 : undefined, 'data-pad': opts.onClick ? '1' : undefined },
     opts.badge ? h('span', { class: `mon-badge ${opts.badge === '队长' ? 'lead' : ''}` }, opts.badge) : null,
-    portraitSlot(f.dex, 2, 'mon-portrait'),
+    portraitSlot(f.dex, 2, 'mon-portrait', b.shiny),
     h('div', { class: 'mon-body' },
-      h('div', { class: 'mon-name' }, f.name, h('span', { class: 'mon-lv' }, ` Lv${b.level}`)),
+      h('div', { class: 'mon-name', title: b.shiny ? `闪光${f.name} · 六项能力 +1%` : undefined }, f.name, h('span', { class: 'mon-lv' }, ` Lv${b.level}`)),
       h('div', { class: 'small muted', title: `道具 ${items} 件 · 技能 ${b.skills.length} 个` }, ...f.types.map(typeBadge), ` 强度 ${buildPower(b)}`),
       h('div', { class: 'small mon-rec' }, rec),
     ),
@@ -234,8 +235,8 @@ export class PvpScreen {
         h('button', { class: 'btn gold', onclick: () => { sfx('click'); this.a.adventure(); } }, '去冒险'),
       ),
       !focus && p.party.length ? h('div', { class: 'pvp-detail pvp-nobuild' },
-        h('b', null, `跟随你的${LINES[p.partner]?.name ?? '伙伴'}还没有对战构筑`),
-        h('p', { class: 'small muted' }, '带它完成一次冒险，在结算时放入背包；或者点上面背包里的宝可梦，把它设为队长。'),
+        h('b', null, `跟随你的${LINES[p.partner] ? shinyName(LINES[p.partner].name, p.partnerShiny) : '伙伴'}还没有对战构筑`),
+        h('p', { class: 'small muted' }, `带它完成一次冒险，在结算时放入背包；或者点上面背包里的宝可梦，把它设为队长。${p.partnerShiny ? '闪光的和普通的要分别培养。' : ''}`),
       ) : null,
       focus ? h('div', { class: 'pvp-detail' },
         h('div', { class: 'row between' },
@@ -286,7 +287,7 @@ export class PvpScreen {
           class: `pvp-slot ${m ? '' : 'rental'} ${m && m === focus ? 'on' : ''}`, 'data-pad': m ? '1' : undefined, tabindex: m ? 0 : undefined,
           onclick: m ? () => this.view(m) : undefined,
         },
-        m ? portraitSlot(formOf(m.build.line, m.build.stage).dex, 1, 'pvp-slot-portrait') : h('div', { class: 'pvp-slot-q' }, '?'),
+        m ? portraitSlot(formOf(m.build.line, m.build.stage).dex, 1, 'pvp-slot-portrait', m.build.shiny) : h('div', { class: 'pvp-slot-q' }, '?'),
         h('div', { class: 'pvp-slot-label' }, i === 0 ? '队长' : m ? `Lv${m.build.level}` : '借用'));
         if (!m) tip(el, () => h('div', { class: 'info small' }, '背包里不够三只时，AI 会借给你一只比队伍平均低 2 级的宝可梦'));
         return el;
@@ -394,7 +395,7 @@ function boardRow(r: PvpBoardRow) {
   const T = tierOf(r.rating).tier;
   return h('div', { class: `lb-row ${r.you ? 'me' : ''}` },
     h('span', { class: r.rank <= 3 ? `top${r.rank}` : '' }, r.rank || '-'),
-    h('span', { class: 'board-mon' }, r.dex ? portraitSlot(r.dex, 1, 'tiny') : null, h('span', { class: 'lb-name' }, r.name)),
+    h('span', { class: 'board-mon' }, r.dex ? portraitSlot(r.dex, 1, 'tiny', r.shiny) : null, h('span', { class: 'lb-name' }, r.name)),
     h('span', { class: 'lb-tier', style: `color:${T.color}` }, iconImg(T.icon, 1), ` ${T.name}`),
     h('span', null, h('b', null, r.rating)),
     h('span', null, `${r.wins}/${r.losses}`),
@@ -405,7 +406,7 @@ function histRow(x: PvpHistory) {
   const label = x.result === 'win' ? '胜' : x.result === 'loss' ? '负' : '平';
   return h('div', { class: `hist ${x.result}` },
     h('b', null, label),
-    x.dex ? Animator.portrait(x.dex, 1) : null,
+    x.dex ? Animator.portrait(x.dex, 1, x.shiny) : null,
     h('span', { class: 'grow small' }, `${x.mode} · 对手 ${x.opp}`),
     h('span', { class: x.delta >= 0 ? 'pos' : 'neg' }, `${x.delta >= 0 ? '+' : ''}${x.delta}`),
   );
@@ -507,7 +508,7 @@ function scoreboard(res: PvpMatchResult, you: number, myTeam: number, seats: Pvp
           const aiTrainer = seat ? seat.bot : p.bot && !p.helper;
           return h('tr', { class: `${p.id === you ? 'me' : ''} ${p.alive ? '' : 'dead'}` },
             h('td', null, p.name, aiTrainer ? h('span', { class: 'tag ai' }, 'AI') : null, multi && !p.helper ? h('span', { class: 'tag lead' }, '队长') : null, p === mvp ? h('span', { class: 'tag mvp' }, 'MVP') : null),
-            h('td', { class: 'board-mon' }, Animator.portrait(p.dex, 1), `${p.form} Lv${p.level}`),
+            h('td', { class: 'board-mon' }, Animator.portrait(p.dex, 1, p.shiny), `${shinyName(p.form, p.shiny)} Lv${p.level}`),
             h('td', null, h('div', { class: 'dmg-cell' }, h('i', { style: `width:${(p.damage / maxDmg) * 100}%;background:${TEAM_COLOR[mine ? 0 : 1]}` }), h('span', null, fmt(p.damage)))),
             h('td', null, fmt(p.taken)), h('td', null, fmt(p.healed)), h('td', null, p.kos), h('td', null, multi ? (p.alive ? '-' : '是') : p.revives),
           );
@@ -521,7 +522,7 @@ function scoreboard(res: PvpMatchResult, you: number, myTeam: number, seats: Pvp
 function feedList(res: PvpMatchResult, myTeam: number, page: number, onPage: (n: number) => void) {
   const name = (id: number) => {
     const p = res.players.find((x) => x.id === id);
-    return p ? h('span', { style: `color:${TEAM_COLOR[p.team === myTeam ? 0 : 1]}` }, `${p.name}的${p.form}`) : h('span', { class: 'muted' }, '缩圈');
+    return p ? h('span', { style: `color:${TEAM_COLOR[p.team === myTeam ? 0 : 1]}` }, `${p.name}的${shinyName(p.form, p.shiny)}`) : h('span', { class: 'muted' }, '缩圈');
   };
   const pg = pager(res.feed, 10, page, ([t, k, v]) => h('div', { class: 'small ko-row' },
     h('span', { class: 'muted' }, fmtTime(t), ' '), k >= 0 ? name(k) : h('span', { class: 'muted' }, '缩小的场地'), ' 击倒了 ', name(v)), {
@@ -570,13 +571,13 @@ export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: nu
   const status = (p: PvpPlayerResult) => h('div', { class: 'small', style: `color:${p.alive ? '#78f878' : '#ff8c8c'}` }, p.alive ? `存活 · HP ${p.hp} / ${p.maxHp}` : multi ? '退场' : '被击倒');
   const hero = multi
     ? h('div', { class: 'r-hero r-hero-team' }, mine.map((p) => h('div', { class: `r-hero-mon ${p.alive ? '' : 'dead'}` },
-      portraitSlot(p.dex, 2, 'r-hero-portrait'),
-      h('div', null, h('b', null, `${p.form} Lv${p.level}`), h('div', { class: 'small muted' }, p.helper ? 'AI 操作' : '队长'), status(p)),
+      portraitSlot(p.dex, 2, 'r-hero-portrait', p.shiny),
+      h('div', null, h('b', null, `${shinyName(p.form, p.shiny)} Lv${p.level}`), h('div', { class: 'small muted' }, p.helper ? 'AI 操作' : '队长'), status(p)),
     )))
     : h('div', { class: 'r-hero' },
-      portraitSlot(me.dex, 3, 'r-hero-portrait'),
+      portraitSlot(me.dex, 3, 'r-hero-portrait', me.shiny),
       h('div', null,
-        h('div', { class: 'big' }, `${me.form}  Lv${me.level}`),
+        h('div', { class: 'big' }, `${shinyName(me.form, me.shiny)}  Lv${me.level}`),
         h('div', null, ...(LINES[me.line].forms.find((f) => f.dex === me.dex)?.types ?? []).map(typeBadge)),
         status(me),
       ),
@@ -597,7 +598,7 @@ export function pvpResultsScreen(root: HTMLElement, res: PvpMatchResult, you: nu
   );
   const shown = mine[Math.min(unit, mine.length - 1)] ?? me;
   const unitTabs = multi
-    ? h('div', { class: 'r-unit-tabs' }, mine.map((p, i) => h('button', { class: `btn tiny ${p === shown ? 'gold' : 'ghost'}`, onclick: () => again(tab, feedPage, i) }, Animator.portrait(p.dex, 1), p.form)))
+    ? h('div', { class: 'r-unit-tabs' }, mine.map((p, i) => h('button', { class: `btn tiny ${p === shown ? 'gold' : 'ghost'}`, onclick: () => again(tab, feedPage, i) }, Animator.portrait(p.dex, 1, p.shiny), p.form)))
     : null;
   const content = tab === 0
     ? h('div', { class: 'r-grid' },

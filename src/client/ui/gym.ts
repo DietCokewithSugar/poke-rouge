@@ -6,6 +6,7 @@ import { GUIDE, GYMS, GYM_BY_ID, counters, gymOpen, nextGym, type GymDef } from 
 import { formOf } from '../../shared/pokemon';
 import { teamLevel } from '../../shared/pvp/build';
 import { gymTeam } from '../../shared/pvp/gym';
+import { shinyName } from '../../shared/shiny';
 import { fmtMod, type ModKey } from '../../shared/stats';
 import { TYPE_NAME, type PType } from '../../shared/types';
 import { sfx } from '../audio';
@@ -123,8 +124,8 @@ export function gymScreen(root: HTMLElement, p: Profile, a: GymActions, sel?: st
   const you = h('div', { class: 'gym-you' },
     h('div', { class: 'gym-you-team' },
       h('span', { class: 'small muted' }, '你的队伍'),
-      slots.map((m, i) => h('div', { class: `pvp-slot ${m ? '' : 'rental'}`, title: m ? `${formOf(m.build.line, m.build.stage).name} Lv${m.build.level}` : '背包不够三只时，AI 会借你一只比队伍平均低 2 级的宝可梦' },
-        m ? portraitSlot(formOf(m.build.line, m.build.stage).dex, 1, 'pvp-slot-portrait') : h('div', { class: 'pvp-slot-q' }, '?'),
+      slots.map((m, i) => h('div', { class: `pvp-slot ${m ? '' : 'rental'}`, title: m ? `${shinyName(formOf(m.build.line, m.build.stage).name, m.build.shiny)} Lv${m.build.level}` : '背包不够三只时，AI 会借你一只比队伍平均低 2 级的宝可梦' },
+        m ? portraitSlot(formOf(m.build.line, m.build.stage).dex, 1, 'pvp-slot-portrait', m.build.shiny) : h('div', { class: 'pvp-slot-q' }, '?'),
         h('div', { class: 'pvp-slot-label' }, i === 0 ? '队长' : m ? `Lv${m.build.level}` : '借用'))),
       h('div', { class: 'gym-you-btns' },
         team.length ? iconBtn('swap', '在对战场调整出战的三只', () => { sfx('click'); a.pvp(); }, { cls: 'small ghost', text: '调整队伍' })
