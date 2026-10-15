@@ -20,6 +20,8 @@ export interface Settings {
   quality: 'high' | 'smooth';
   /** 切换界面时的过场动画 */
   transitions: boolean;
+  /** 像全屏播放视频一样占满浏览器。按 Esc 退出 */
+  fullscreen: boolean;
 }
 
 /** 背包：12 格；在对战场达到超级球级（任意模式的最高分）后再多 6 格 */
@@ -114,7 +116,7 @@ function fresh(): Profile {
     achievements: {},
     stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 0, badges: 0, shinies: 0 },
     lastDifficulty: 'easy',
-    settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true, uiScale: defaultUiScale(), fps: 60, quality: 'high', transitions: true },
+    settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true, uiScale: defaultUiScale(), fps: 60, quality: 'high', transitions: true, fullscreen: true },
     seenEnemies: [],
     party: [],
     pvpId: null,

@@ -188,7 +188,7 @@ export class GameSim {
 
   flushEvents(): Ev[] {
     const out = this.events;
-    for (const [id, h] of this.hits) out.push(['h', id, Math.round(h.x), Math.round(h.y), h.dmg, h.flags, h.type]);
+    for (const [id, h] of this.hits) out.push(['h', id, Math.round(h.x), Math.round(h.y), Math.round(h.dmg), h.flags, h.type]);
     this.hits.clear();
     this.events = [];
     return out;
@@ -950,6 +950,7 @@ export class GameSim {
     if (!p || p.bot === on || p.away) return;
     p.bot = on;
     p.moving = false;
+    this.dirty.add(p.id);
   }
 
   /** 联机时玩家离开 / 回到房间：离开期间走位和商店都交给 AI */

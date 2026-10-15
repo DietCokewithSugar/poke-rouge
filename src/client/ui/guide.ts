@@ -9,7 +9,7 @@ import { sfx } from '../audio';
 import type { PlaceId } from '../gfx/town';
 import { artFull, npcArt, trainerPortrait } from '../gfx/trainers';
 import { saveProfile, type Profile } from '../save';
-import { clear, h } from './dom';
+import { clear, h, hideTip } from './dom';
 import { mount } from './screens';
 
 // ---------------------------------------------------------------- 逐字出现的台词
@@ -93,6 +93,7 @@ export function tour(p: Profile, id: string, steps: TourStep[], o: { force?: boo
   );
   const root = h('div', { class: 'modal tour' }, spot, bubble);
   active = root;
+  hideTip();
   const end = () => {
     window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('resize', place);
@@ -108,11 +109,13 @@ export function tour(p: Profile, id: string, steps: TourStep[], o: { force?: boo
     const r = el && el.offsetParent !== null ? el.getBoundingClientRect() : null;
     root.classList.toggle('dim', !r);
     spot.classList.toggle('hidden', !r);
-    const W = window.innerWidth, H = window.innerHeight;
+    const vv = window.visualViewport;
+    const W = vv?.width ?? window.innerWidth, H = vv?.height ?? window.innerHeight;
+    const ox = vv?.offsetLeft ?? 0, oy = vv?.offsetTop ?? 0;
     const bw = bubble.offsetWidth, bh = bubble.offsetHeight;
     if (!r) {
-      bubble.style.left = `${Math.round((W - bw) / 2)}px`;
-      bubble.style.top = `${Math.round((H - bh) / 2)}px`;
+      bubble.style.left = `${Math.round(ox + (W - bw) / 2)}px`;
+      bubble.style.top = `${Math.round(oy + Math.max(8, (H - bh) / 2))}px`;
       return;
     }
     const pad = 6;
@@ -124,8 +127,8 @@ export function tour(p: Profile, id: string, steps: TourStep[], o: { force?: boo
     if (top < 8) top = Math.max(8, Math.min(H - bh - 8, r.top + r.height / 2 - bh / 2));
     let left = r.left + r.width / 2 - bw / 2;
     if (top < r.bottom && top + bh > r.top) left = r.right + gap + bw < W - 8 ? r.right + gap : r.left - gap - bw;
-    bubble.style.left = `${Math.round(Math.max(8, Math.min(W - bw - 8, left)))}px`;
-    bubble.style.top = `${Math.round(top)}px`;
+    bubble.style.left = `${Math.round(ox + Math.max(8, Math.min(W - bw - 8, left - ox)))}px`;
+    bubble.style.top = `${Math.round(oy + Math.max(8, Math.min(H - bh - 8, top - oy)))}px`;
   };
   const show = () => {
     const s = steps[i];
@@ -140,6 +143,12 @@ export function tour(p: Profile, id: string, steps: TourStep[], o: { force?: boo
   const go = () => { sfx('click'); if (++i >= steps.length) end(); else show(); };
   next.addEventListener('click', go);
   skip.addEventListener('click', () => { sfx('click'); end(); });
+  // 点暗处也能翻页或关掉：手机上按钮被浏览器边栏挡住时，不会一直留在画面上
+  root.addEventListener('pointerdown', (e) => {
+    if ((e.target as HTMLElement).closest?.('.tour-bubble')) return;
+    e.preventDefault();
+    go();
+  });
   const onKey = (e: KeyboardEvent) => {
     if (e.code === 'Enter' || e.code === 'Space' || e.code === 'NumpadEnter') go();
     else if (e.code === 'Escape') end();
