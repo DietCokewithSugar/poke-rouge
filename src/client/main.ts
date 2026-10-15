@@ -395,10 +395,14 @@ class App {
     if (this.where !== 'game') this.loading(`正在回到房间 ${s.code} 的冒险…`);
   }
 
-  /** Esc / 手柄 Start / 左上角的按钮：单人暂停，联机和对战打开菜单 */
+  /** Esc / 手柄 Start / 右上角的按钮：单人暂停（波次中和升级、商店阶段都可以），联机和对战打开菜单 */
   private pauseOrMenu() {
     if (this.where !== 'game') return;
-    if (this.solo) { if (this.pub?.phase === 'wave' || this.paused) this.setPause(!this.paused); return; }
+    if (this.solo) {
+      const phase = this.pub?.phase;
+      if (this.paused || (!this.ending && (phase === 'wave' || phase === 'inter'))) this.setPause(!this.paused);
+      return;
+    }
     if (this.menuAuto !== null) this.closeGameMenu();
     else this.openGameMenu();
   }
@@ -1223,7 +1227,7 @@ class App {
     } else {
       this.lastBiome = -1;
       this.hud = new Hud(this.ui, () => this.pauseOrMenu(), this.solo ? 'pause' : 'menu');
-      this.inter = new Intermission(this.ui, (c) => this.send(c));
+      this.inter = new Intermission(this.ui, (c) => this.send(c), { kind: this.solo ? 'pause' : 'menu', open: () => this.pauseOrMenu() });
       if (autoAssistUnlocked(this.profile)) {
         this.hud.enableAuto(() => this.toggleAuto(), 'AI 替你走位、躲开攻击、捡糖果和救队友；技能照常自动释放，商店和升级仍由你来选。');
         if (this.profile.autoAssist) this.setAutoLocal(true);
@@ -1326,6 +1330,12 @@ class App {
     this.send({ t: 'pause', on });
   }
 
+  /** 单人暂停菜单的「放弃本局」：波次中和升级、商店阶段都走这里 */
+  private abandonRun() {
+    this.close();
+    this.backToTown();
+  }
+
   private renderPause() {
     if (this.paused) {
       setInputEnabled(false);
@@ -1333,7 +1343,7 @@ class App {
       pauseScreen(this.screen, {
         resume: () => this.setPause(false),
         settings: () => this.openSettings(() => this.renderPause()),
-        quit: { label: '放弃本局，回到真新镇', confirm: '再点一次确认放弃', run: () => { this.close(); this.backToTown(); } },
+        quit: { label: '放弃本局，回到真新镇', confirm: '再点一次确认放弃', run: () => this.abandonRun() },
       });
     } else {
       clear(this.screen);

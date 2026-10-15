@@ -42,8 +42,13 @@ export class Intermission {
   /** 窗口缩放、字体加载完以后，重新算预告一行放得下几只 */
   private resize = new ResizeObserver(() => this.fitPreview());
 
-  constructor(parent: HTMLElement, private send: (c: Command) => void) {
+  /** menu：右上角的暂停 / 菜单按钮。商店盖住了战斗 HUD，这里放一个同样位置的按钮 */
+  constructor(parent: HTMLElement, private send: (c: Command) => void, menu?: { kind: 'pause' | 'menu'; open: () => void }) {
     this.root.append(this.main, this.side, this.modal);
+    if (menu) {
+      const label = menu.kind === 'pause' ? '暂停（设置、放弃本局）' : '菜单（设置、离开）';
+      this.root.appendChild(h('button', { class: 'btn small icon hud-pause inter-menu', 'data-key': 'start', title: label, 'aria-label': label, onclick: () => menu.open() }, uiIcon(menu.kind, 2)));
+    }
     parent.appendChild(this.root);
     window.addEventListener('keydown', this.onKey);
     this.resize.observe(this.main);
@@ -57,8 +62,14 @@ export class Intermission {
   }
 
   private onKey = (e: KeyboardEvent) => {
-    if ((e.key === 'z' || e.key === 'Z') && !(e.target instanceof HTMLInputElement)) this.undo();
+    if ((e.key === 'z' || e.key === 'Z') && !(e.target instanceof HTMLInputElement) && !this.covered()) this.undo();
   };
+
+  /** 暂停菜单、设置盖在商店上面时，商店的快捷键不生效 */
+  private covered() {
+    const s = document.getElementById('screen');
+    return !!s && !s.classList.contains('hidden') && s.childElementCount > 0;
+  }
 
   show(on: boolean) {
     this.root.classList.toggle('hidden', !on);
