@@ -21,7 +21,7 @@ function startRoom() {
 }
 
 test('联机对局中有人离开：AI 接手（走位和商店都由 AI 来），其他人继续玩', () => {
-  const { room, b, ib } = startRoom();
+  const { room, b, ib, tokenB } = startRoom();
   const sim = room.sim!;
   room.leave(ib, b);
   const p = sim.players.find((q) => q.id === ib)!;
@@ -36,6 +36,13 @@ test('联机对局中有人离开：AI 接手（走位和商店都由 AI 来）�
   assert.ok(p.ready, 'AI 准备好了');
   assert.ok(!p.cards && !p.crates.length, '升级和道具球都处理了');
   assert.ok(!sim.players.find((q) => q.id !== ib)!.ready, '留下的玩家照常自己选');
+  // 商店里回来：AI 买的东西还在，出发由自己确认
+  const items = { ...p.items }, money = p.money;
+  assert.equal(room.rejoin(conn(), tokenB, PROTOCOL_VERSION), ib);
+  assert.ok(!p.away && !p.bot);
+  assert.equal(p.ready, false, '回来后要自己点准备');
+  assert.deepEqual(p.items, items);
+  assert.equal(p.money, money);
 });
 
 test('离开的玩家凭 token 回到对局：收到开局信息与现在的状态，AI 交还操作', () => {

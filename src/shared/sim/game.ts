@@ -956,6 +956,8 @@ export class GameSim {
     p.away = away;
     p.bot = away;
     p.moving = false;
+    // 商店里回来：AI 买的东西留着，但出发要自己确认（这时一定还有队友没准备，不会拖住别人）
+    if (!away && this.phase === 'inter') p.ready = false;
     this.emit(['msg', away ? `${p.name} 离开了，AI 先替 TA 战斗` : `${p.name} 回来了！`]);
     this.dirty.add(p.id);
   }
