@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { ITEMS } from '../src/shared/items';
 import { ACHIEVEMENT_BY_ID, NO_RUN, metaBonus, type LifetimeStats } from '../src/shared/meta';
 import { decodeSnapshot, encodeSnapshot, type S2C } from '../src/shared/protocol';
 import { buildOf, validateBuild } from '../src/shared/pvp/build';
 import { Room } from '../src/shared/room';
 import { SHINY_BASE, SHINY_MAX, shinyOdds, shinyRate } from '../src/shared/shiny';
 import { GameSim } from '../src/shared/sim/game';
-import { createPlayerFromBuild } from '../src/shared/sim/player';
+import { createPlayerFromBuild, giveItem } from '../src/shared/sim/player';
 import { emptyMods, derive } from '../src/shared/stats';
 import { TRAINERS } from '../src/shared/trainers';
 
@@ -29,6 +30,34 @@ test('闪光几率：基础 1/1000，研究所和训练家可以提高，最高 
     { id: 2, name: 'b', line: 'charmander', meta: {}, trainer: 'rocket' },
   ], 1);
   assert.equal(coop.shinyRate(), shinyRate(100), '联机时按队伍里最高的算');
+});
+
+test('闪耀护符：+50% 闪光几率，和其它加成合计后也不会超过 1/200', () => {
+  const charm = ITEMS.shiny_charm.mods?.shiny ?? 0;
+  assert.equal(charm, 50);
+  const plain = new GameSim([{ id: 1, name: 'a', line: 'squirtle', meta: {} }], 1);
+  giveItem(plain, plain.players[0], 'shiny_charm');
+  assert.equal(plain.players[0].d.shiny, 50);
+  assert.equal(plain.shinyRate(), SHINY_BASE * 1.5, '只有闪耀护符：1/667');
+  const rocket = new GameSim([{ id: 1, name: 'a', line: 'squirtle', meta: {}, trainer: 'rocket' }], 1);
+  giveItem(rocket, rocket.players[0], 'shiny_charm');
+  assert.equal(rocket.shinyRate(), shinyRate(150), '火箭队 + 闪耀护符：1/400');
+  // 研究所满级 + 火箭队已经是 1/200，再带闪耀护符也不会更高
+  const max = new GameSim([
+    { id: 1, name: 'a', line: 'squirtle', meta: MAX_LAB, trainer: 'rocket' },
+    { id: 2, name: 'b', line: 'charmander', meta: MAX_LAB, trainer: 'rocket' },
+  ], 1);
+  for (const p of max.players) giveItem(max, p, 'shiny_charm');
+  assert.equal(max.players[0].d.shiny, 450);
+  assert.equal(max.shinyRate(), SHINY_MAX);
+  assert.ok(max.shinyRate() <= 1 / 200);
+  let n = 0;
+  const N = 60000;
+  for (let i = 0; i < N; i++) {
+    if (max.spawnEnemy('rattata', 100, 100).shiny) n++;
+    if (max.enemies.length > 500) max.enemies = [];
+  }
+  assert.ok(n < N * SHINY_MAX * 1.25, `最终几率不超过 1/200：${n} / ${N}`);
 });
 
 test('每只宝可梦出现时按闪光几率判定（统计）', () => {
@@ -108,7 +137,7 @@ test('打倒闪光宝可梦：一定会崇拜你，和普通的分开算', () =>
   assert.ok(p.owned.has('rattata'));
 });
 
-test('闪光宝可梦：击败者已经有了就让给队友；首领要先拥有普通的才会崇拜', () => {
+test('闪光宝可梦：击败者已经有了就让给队友；首领和平时不会崇拜的宝可梦也 100% 得到', () => {
   const sim = new GameSim([
     { id: 1, name: 'a', line: 'charmander', meta: {}, ownedShiny: ['rattata'] },
     { id: 2, name: 'b', line: 'squirtle', meta: {} },
@@ -118,13 +147,49 @@ test('闪光宝可梦：击败者已经有了就让给队友；首领要先拥�
   sim.killEnemy(sim.spawnEnemy('rattata', b.x, b.y), a);
   assert.ok(b.ownedShiny.has('rattata'));
   assert.equal(a.stats.shinyRecruits.length, 0);
+  for (const [id, line] of [['mew', 'mew'], ['snorlax', 'snorlax'], ['w150', 'mewtwo']] as const) {
+    sim.forceShiny = 1;
+    sim.killEnemy(sim.spawnEnemy(id, 100, 100), a);
+    assert.ok(a.ownedShiny.has(line), `没有普通的${line}也会得到闪光的`);
+    assert.ok(!a.owned.has(line), '普通的不会顺带解锁');
+  }
+  // 普通的首领照旧不会崇拜
+  b.levelMods.recruit += 100000;
+  sim.recompute(b);
+  sim.killEnemy(sim.spawnEnemy('mew', 100, 100), b);
+  assert.ok(!b.owned.has('mew'));
+});
+
+test('闪光宝可梦被打倒却找不到是谁打的：交给离它最近的训练家', () => {
+  const sim = new GameSim([
+    { id: 1, name: 'a', line: 'charmander', meta: {} },
+    { id: 2, name: 'b', line: 'squirtle', meta: {} },
+  ], 6);
+  const [a, b] = sim.players;
+  a.x = 100; a.y = 100; b.x = 600; b.y = 400;
   sim.forceShiny = 1;
-  sim.killEnemy(sim.spawnEnemy('mew', 100, 100), a);
-  assert.ok(!a.ownedShiny.has('mew') && !b.ownedShiny.has('mew'), '没有梦幻的不会得到闪光梦幻');
-  a.owned.add('mew');
+  const e = sim.spawnEnemy('pidgey', 580, 410);
+  assert.equal(e.lastHit, -1);
+  sim.killEnemy(e, null);
+  assert.ok(b.ownedShiny.has('pidgey') && !a.ownedShiny.has('pidgey'));
+});
+
+test('闪光的自爆型宝可梦不会自爆，普通的照常自爆', () => {
+  const sim = new GameSim([{ id: 1, name: 'a', line: 'charmander', meta: {} }], 8);
+  const p = sim.players[0];
+  for (let i = 0; i < 90 && sim.phase !== 'wave'; i++) sim.step(1 / 30);
+  assert.equal(sim.phase, 'wave');
+  const tough = (e: ReturnType<GameSim['spawnEnemy']>) => { e.hp = e.maxHp = 1e7; return e; };
   sim.forceShiny = 1;
-  sim.killEnemy(sim.spawnEnemy('mew', 100, 100), a);
-  assert.ok(a.ownedShiny.has('mew'), '已经有梦幻了：闪光的首领也会崇拜');
+  const shiny = tough(sim.spawnEnemy('voltorb', p.x + 12, p.y));
+  const normal = tough(sim.spawnEnemy('voltorb', p.x - 12, p.y));
+  assert.ok(shiny.shiny && !normal.shiny);
+  for (let i = 0; i < 90; i++) {
+    p.invuln = 1;
+    sim.step(1 / 30);
+  }
+  assert.ok(normal.dead, '普通的霹雳电球靠近后自爆');
+  assert.ok(!shiny.dead && shiny.ai.state === 0, '闪光的一直不自爆');
 });
 
 test('闪光宝可梦的构筑：分别保存，对战里也是 +1%', () => {

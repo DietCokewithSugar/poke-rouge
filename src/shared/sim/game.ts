@@ -273,6 +273,10 @@ export class GameSim {
       credit.stats.killsBy[e.def.id] = (credit.stats.killsBy[e.def.id] ?? 0) + 1;
       credit.stats.rankKills[e.def.rank]++;
       if (!silent) this.rollRecruit(e, credit);
+    } else if (e.shiny && !silent) {
+      // 闪光宝可梦被打倒却找不到是谁打的：交给离它最近的训练家，保证一定有人得到
+      const near = this.nearestPlayer(e.x, e.y) ?? this.players[0];
+      if (near) this.rollRecruit(e, near);
     }
     if (e.def.rank === 'boss') {
       this.bossDown = true;
@@ -309,8 +313,7 @@ export class GameSim {
   /**
    * 崇拜（参考宝可梦不可思议的迷宫的"想成为伙伴"）：击败野生宝可梦时，有几率让它崇拜你，
    * 解锁这一整条进化线。击败者已经有了的话，让给附近还没有的队友。
-   * 闪光宝可梦一定会崇拜还没有这只闪光宝可梦的训练家（首领和不会崇拜的宝可梦，要先拥有普通的才行）；
-   * 大家都有了，就和普通的野生宝可梦一样判定。
+   * 打倒闪光宝可梦 100% 得到它（首领和平时不会崇拜的宝可梦也一样）；大家都有了，就和普通的野生宝可梦一样判定。
    */
   private rollRecruit(e: Enemy, killer: SimPlayer) {
     const line = LINE_OF_DEX[e.def.dex];
@@ -318,7 +321,7 @@ export class GameSim {
     if (!L) return;
     const open = L.unlock.recruit > 0 && e.def.rank !== 'boss';
     if (e.shiny) {
-      const q = this.recruitTarget(e, killer, (p) => !p.ownedShiny.has(line) && (open || p.owned.has(line)));
+      const q = this.recruitTarget(e, killer, (p) => !p.ownedShiny.has(line));
       if (q) {
         q.ownedShiny.add(line);
         q.stats.shinyRecruits.push(line);
