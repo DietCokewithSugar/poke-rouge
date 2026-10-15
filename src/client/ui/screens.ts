@@ -325,8 +325,8 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
     inp.addEventListener('input', () => set(key, Number(inp.value), false));
     return h('label', { class: 'set-row' }, h('span', null, uiIcon(icon, 2), ` ${label}`), inp);
   };
-  const toggle = (label: string, key: 'damageNumbers' | 'gbFilter' | 'shake') =>
-    h('div', { class: 'set-row' }, h('span', null, label), segmented(s[key], [[true, '开'], [false, '关']], (v) => set(key, v)));
+  const toggle = (label: string, key: 'damageNumbers' | 'gbFilter' | 'shake' | 'transitions', note = '') =>
+    h('div', { class: 'set-row' }, h('span', null, label, note ? h('small', { class: 'muted' }, ` ${note}`) : null), segmented(s[key], [[true, '开'], [false, '关']], (v) => set(key, v)));
   const scaleIdx = Math.max(0, UI_SCALES.findIndex((v) => Math.abs(v - s.uiScale) < 0.001));
   const scaleLabel = h('b', { class: 'set-val' }, `${Math.round(s.uiScale * 100)}%`);
   const scale = h('input', { type: 'range', min: 0, max: UI_SCALES.length - 1, step: 1, value: String(scaleIdx) }) as HTMLInputElement;
@@ -341,6 +341,7 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
       h('div', { class: 'set-row' }, h('span', null, '界面大小', h('small', { class: 'muted' }, ' 100% 时界面占画面的 90%')), h('div', { class: 'row' }, scale, scaleLabel)),
       h('div', { class: 'set-row' }, h('span', null, '帧率', h('small', { class: 'muted' }, ' 卡顿时选 30；120 需要高刷新率屏幕')), segmented<Profile['settings']['fps']>(s.fps, [[30, '30 帧'], [60, '60 帧'], [120, '120 帧']], (v) => set('fps', v))),
       h('div', { class: 'set-row' }, h('span', null, '画质', h('small', { class: 'muted' }, ' 流畅：高分屏上按一半分辨率渲染')), segmented<Profile['settings']['quality']>(s.quality, [['high', '高清'], ['smooth', '流畅']], (v) => set('quality', v))),
+      toggle('过场动画', 'transitions', '切换界面、对战开场的动画'),
       toggle('显示伤害数字', 'damageNumbers'),
       toggle('屏幕震动', 'shake'),
       toggle('初代 GB 绿屏滤镜', 'gbFilter'),

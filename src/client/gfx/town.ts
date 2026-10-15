@@ -9,7 +9,8 @@ export const TOWN_W = TOWN_COLS * CELL;
 export const TOWN_H = TOWN_ROWS * CELL;
 const MARGIN_PX = TOWN_MARGIN * CELL;
 
-export type PlaceId = 'home' | 'rival' | 'center' | 'battle' | 'lab' | 'route' | 'karp' | 'oak' | 'mom' | 'sign';
+/** 镇上能去的地方；gym（道馆挑战）在道馆建筑里，也可以从快捷栏直接打开 */
+export type PlaceId = 'home' | 'rival' | 'center' | 'battle' | 'gym' | 'lab' | 'route' | 'karp' | 'oak' | 'mom' | 'sign';
 
 export interface Rect { x: number; y: number; w: number; h: number }
 
@@ -25,7 +26,7 @@ export const BUILDINGS: { id: PlaceId; name: string; door: { x: number; y: numbe
   { id: 'rival', name: '小茂的家', door: TOWN_DOORS.rival },
   { id: 'lab', name: '大木研究所', door: TOWN_DOORS.lab },
   { id: 'center', name: '宝可梦中心', door: TOWN_DOORS.center },
-  { id: 'battle', name: '对战场', door: TOWN_DOORS.battle },
+  { id: 'battle', name: '道馆 · 对战场', door: TOWN_DOORS.battle },
 ];
 
 export const SPOTS: Spot[] = [
@@ -33,7 +34,7 @@ export const SPOTS: Spot[] = [
   { id: 'rival', label: '小茂的家', hint: '劲敌在对战场等你', ...cellRect(TOWN_DOORS.rival) },
   { id: 'lab', label: '大木研究所', hint: '研究、图鉴与成就', ...cellRect(TOWN_DOORS.lab) },
   { id: 'center', label: '宝可梦中心', hint: '联机冒险', ...cellRect(TOWN_DOORS.center) },
-  { id: 'battle', label: '对战场', hint: '宝可梦对战', ...cellRect(TOWN_DOORS.battle) },
+  { id: 'battle', label: '道馆 · 对战场', hint: '挑战道馆、排位对战', ...cellRect(TOWN_DOORS.battle) },
   { id: 'sign', label: '真新镇', hint: '看告示牌', ...cellRect(TOWN_DOORS.sign) },
   { id: 'route', label: '1号道路', hint: '出发冒险', x: TOWN_ROUTE.x0 * CELL, y: TOWN_ROUTE.y0 * CELL, w: (TOWN_ROUTE.x1 - TOWN_ROUTE.x0 + 1) * CELL, h: (TOWN_ROUTE.y1 - TOWN_ROUTE.y0 + 1) * CELL + 8 },
   { id: 'oak', label: '大木博士', hint: '和博士说话', ...npcSpot(TOWN_NPCS.oak) },

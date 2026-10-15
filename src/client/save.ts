@@ -1,5 +1,6 @@
-import { ACHIEVEMENTS, META_UPGRADES, metaCost, stardustFor, type LifetimeStats, type RunSummary } from '../shared/meta';
+import { ACHIEVEMENTS, META_UPGRADES, NO_RUN, metaCost, stardustFor, type GymOutcome, type LifetimeStats, type RunSummary } from '../shared/meta';
 import { DIFFICULTIES, type DifficultyId } from '../shared/difficulty';
+import { GYM_BY_ID, badgeKey } from '../shared/gyms';
 import { LINES, LINE_IDS, STARTERS, isLine, type LineId } from '../shared/pokemon';
 import { buildPower, validateBuild, type SavedBuild } from '../shared/pvp/build';
 import type { PvpMode } from '../shared/pvp/sim';
@@ -15,6 +16,8 @@ export interface Settings {
   fps: 30 | 60 | 120;
   /** 流畅：高分屏上按 1 倍像素渲染画面，减轻显卡负担 */
   quality: 'high' | 'smooth';
+  /** 切换界面时的过场动画 */
+  transitions: boolean;
 }
 
 export const PARTY_MAX = 6;
@@ -57,6 +60,12 @@ export interface Profile {
   pvpAuto: boolean;
   /** 冒险的 AI 辅助战斗（首次通关后解锁） */
   autoAssist: boolean;
+  /** 道馆徽章：道馆 → 拿到的时间 */
+  badges: Record<string, number>;
+  /** 打败过的道馆训练家（再来时直接挑战馆主） */
+  gymJunior: Record<string, number>;
+  /** 看过的新手引导 */
+  guide: Record<string, number>;
   /** 上次在真新镇里站的位置 */
   townPos: { x: number; y: number } | null;
 }
@@ -72,9 +81,9 @@ function fresh(): Profile {
     stardust: 0,
     upgrades: {},
     achievements: {},
-    stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 0 },
+    stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 0, badges: 0 },
     lastDifficulty: 'easy',
-    settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true, uiScale: defaultUiScale(), fps: 60, quality: 'high' },
+    settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true, uiScale: defaultUiScale(), fps: 60, quality: 'high', transitions: true },
     seenEnemies: [],
     party: [],
     pvpId: null,
@@ -83,8 +92,16 @@ function fresh(): Profile {
     pvpTeam: null,
     pvpAuto: false,
     autoAssist: false,
+    badges: {},
+    gymJunior: {},
+    guide: {},
     townPos: null,
   };
+}
+
+/** 徽章：和研究所强化一起发给服务器（badge_<道馆> = 1） */
+export function badgeMeta(p: Profile): Record<string, number> {
+  return Object.fromEntries(Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).map((id) => [badgeKey(id), 1]));
 }
 
 /** 冒险的 AI 辅助战斗：通关过一次才能用 */
@@ -264,15 +281,25 @@ export function applyRun(p: Profile, r: RunSummary): RunReward {
   p.stats.revives += r.revives;
   // 冒险中已经实时解锁过了；断线等情况下漏掉的在这里补上
   for (const id of r.recruits) if (!p.owned.includes(id)) addOwned(p, id, true);
-  p.stats.owned = unlockedLines(p).length;
-  let dust = stardustFor(r);
+  const got = evalAchievements(p, r);
+  const dust = stardustFor(r) + got.dust;
+  p.stardust += stardustFor(r);
+  saveProfile(p);
+  return { stardust: dust, newAchievements: got.fresh, recruits: r.recruits.slice() };
+}
+
+/** 判定成就并发放奖励（星之沙直接加到存档里）。冒险结算、赢了道馆之后都会调用 */
+export function evalAchievements(p: Profile, r: RunSummary = NO_RUN, g: GymOutcome | null = null) {
   const fresh: RunReward['newAchievements'] = [];
+  let dust = 0;
+  p.stats.badges = Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).length;
+  p.stats.owned = unlockedLines(p).length;
   // 成就可能会连锁（解锁新宝可梦让图鉴数达标），多判定几轮
   for (let round = 0; round < 3; round++) {
     let any = false;
     for (const a of ACHIEVEMENTS) {
       if (p.achievements[a.id]) continue;
-      if (a.check(r, p.stats)) {
+      if (a.check(r, p.stats, g)) {
         p.achievements[a.id] = Date.now();
         dust += a.reward;
         fresh.push({ id: a.id, name: a.name, reward: a.reward, unlocks: a.unlocks, trainer: a.trainer });
@@ -284,5 +311,21 @@ export function applyRun(p: Profile, r: RunSummary): RunReward {
   }
   p.stardust += dust;
   saveProfile(p);
-  return { stardust: dust, newAchievements: fresh, recruits: r.recruits.slice() };
+  return { dust, fresh };
+}
+
+export interface GymReward { badge: boolean; stardust: number; newAchievements: RunReward['newAchievements'] }
+
+/** 击败道馆馆主：第一次给徽章和星之沙，每次都判定道馆成就 */
+export function winGym(p: Profile, outcome: GymOutcome): GymReward {
+  const g = GYM_BY_ID[outcome.gym];
+  const first = !!g && !p.badges[g.id];
+  let dust = 0;
+  if (g && first) {
+    p.badges[g.id] = Date.now();
+    dust += g.reward;
+    p.stardust += g.reward;
+  }
+  const got = evalAchievements(p, NO_RUN, outcome);
+  return { badge: first, stardust: dust + got.dust, newAchievements: got.fresh };
 }

@@ -145,6 +145,31 @@ export const UI_ICONS: Record<string, Def> = {
   cross: { pal: { r: '#ff5f6d' }, rows: [
     '............', '....kkkk....', '....krrk....', '....krrk....', '.kkkkrrkkkk.', '.krrrrrrrrk.',
     '.krrrrrrrrk.', '.kkkkrrkkkk.', '....krrk....', '....krrk....', '....kkkk....', '............'] },
+  // ---------------- 道馆徽章 ----------------
+  badge_boulder: { pal: { w: '#f4f8ff', s: '#a8a8b8', d: '#686878' }, rows: [
+    '...kkkkkk...', '..kwwwsssk..', '.kwwsssssdk.', 'kwwssssssddk', 'kwsssssssddk', 'kssssssssddk',
+    'kssssssssddk', 'ksssssssdddk', '.ksssssdddk.', '..ksssdddk..', '...kkkkkk...', '............'] },
+  badge_cascade: { pal: { w: '#e0f4ff', b: '#58a8f8', d: '#2a6fb0' }, rows: [
+    '.....kk.....', '....kwbk....', '....kwbk....', '...kwbbbk...', '...kwbbbk...', '..kwbbbbbk..',
+    '.kwbbbbbbbk.', '.kwbbbbbbdk.', '.kbbbbbbddk.', '..kbbbbddk..', '...kkkkkk...', '............'] },
+  badge_thunder: { pal: { o: '#f8a040', d: '#a85818', y: '#ffe070' }, rows: [
+    '.....kk.....', '.k..kook..k.', '.kk.kook.kk.', '..kkooookk..', '.kkooddookk.', 'kooodyydoook',
+    'kooodyydoook', '.kkooddookk.', '..kkooookk..', '.kk.kook.kk.', '.k..kook..k.', '.....kk.....'] },
+  badge_rainbow: { pal: { r: '#f05050', o: '#f8a040', y: '#f8d030', g: '#58c858', b: '#4fb4ff', p: '#b070f0', w: '#fff8e0' }, rows: [
+    '...kkkkkk...', '..krrrooyk..', '.krrrrooyyk.', 'kprrkkkkyygk', 'kppkwwwwkggk', 'kppkwwwwkggk',
+    'kppkwwwwkggk', 'kppkkkkkkggk', '.kpbbbbbbgk.', '..kbbbbbbk..', '...kkkkkk...', '............'] },
+  badge_soul: { pal: { p: '#f080b8', w: '#ffe0f0', d: '#b04880' }, rows: [
+    '............', '.kkk....kkk.', 'kwppk..kpppk', 'kwpppkkppppk', 'kppppppppppk', 'kpppppppppdk',
+    '.kpppppppdk.', '..kppppdpk..', '...kppppk...', '....kppk....', '.....kk.....', '............'] },
+  badge_marsh: { pal: { y: '#f8d030', d: '#b08818', w: '#fff4b0' }, rows: [
+    '...kkkkkk...', '..kyyyyyyk..', '.kyyyyyyyyk.', 'kyyykkkkyyyk', 'kyykwwwwkyyk', 'kyykwkkwkyyk',
+    'kyykwkkwkyyk', 'kyykwwwwkyyk', 'kdyykkkkyydk', '.kddyyyyddk.', '..kkddddkk..', '....kkkk....'] },
+  badge_volcano: { pal: { r: '#e03828', o: '#f88030', y: '#f8d030', w: '#fff8e0' }, rows: [
+    '.....k......', '....krk.....', '....krrk....', '...krrrk.k..', '..krrorrkrk.', '.krroorrrrk.',
+    '.krooyyorrk.', 'krooyyyyorrk', 'kroyywwyyork', '.kroywwyork.', '..krooooork.', '...kkkkkk...'] },
+  badge_earth: { pal: { g: '#58b858', d: '#2f7a38', w: '#c8f8c8' }, rows: [
+    '.........kk.', '.......kkgk.', '.....kkgggk.', '....kggwggk.', '...kggwgggk.', '..kggwgggk..',
+    '..kgwgggdk..', '.kgwgggdk...', '.kwgggdk....', 'kkgddkk.....', 'kdkkk.......', 'kk..........'] },
   robot: { pal: { s: '#b9d4f0', b: '#2a6fb0', w: '#e6f4ff', y: '#ffd23f', d: '#7f93c0' }, rows: [
     '....kyyk....', '.....kk.....', '..kkkkkkkk..', '.kssssssssk.', '.ksbbssbbsk.', 'kksbwssbwskk',
     'kksssssssskk', '.ksskkkkssk.', '.kssssssssk.', '..kkkkkkkk..', '....kddk....', '..kkkkkkkk..'] },

@@ -148,7 +148,9 @@ export class LocalPvpTransport implements Transport {
     queueMicrotask(() => this.onMessage(m));
   };
 
-  constructor(mode: PvpMode, me: { name: string; team: SavedBuild[]; meta: Record<string, number>; trainer: string; auto?: boolean }, party: SavedBuild[]) {
+  /** opponent：指定的对手（道馆训练家与馆主），不指定时生成 AI 训练家 */
+  constructor(mode: PvpMode, me: { name: string; team: SavedBuild[]; meta: Record<string, number>; trainer: string; auto?: boolean }, party: SavedBuild[],
+    opponent?: { name: string; trainer: string; builds: SavedBuild[]; meta: Record<string, number> }) {
     const rng = new Rng((Math.random() * 2 ** 31) | 0);
     const M = PVP_MODES[mode];
     const names = rng.shuffle(NPC_NAMES.filter((n) => n !== me.name));
@@ -160,7 +162,8 @@ export class LocalPvpTransport implements Transport {
       const name = names.pop()!;
       return { id: id++, name, team, builds, meta: me.meta, trainer: npcTrainer(rng, name), conn: null, bot: true, rating: 1000 };
     };
-    if (M.size === 1) seats.push(bot(1, generateTeam(rng, lv, M.team)));
+    if (opponent) seats.push({ id: id++, name: opponent.name, team: 1, builds: opponent.builds, meta: opponent.meta, trainer: opponent.trainer, conn: null, bot: true, rating: 1000 });
+    else if (M.size === 1) seats.push(bot(1, generateTeam(rng, lv, M.team)));
     else {
       const near = party.filter((b) => !mine.includes(b) && Math.abs(b.level - lv) <= 6).sort((a, b) => Math.abs(a.level - lv) - Math.abs(b.level - lv));
       const allies = Array.from({ length: M.size - 1 }, (_, i) => near[i] ?? generateBuild(rng, lv + rng.int(-1, 1)));
