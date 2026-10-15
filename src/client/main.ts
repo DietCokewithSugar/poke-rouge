@@ -438,6 +438,15 @@ class App {
     if (!this.inter?.visible) setInputEnabled(true);
   }
 
+  /** 对局结束时菜单（或从菜单打开的设置）还开着：直接收起来，不再切换自动战斗 */
+  private dropGameMenu() {
+    if (this.menuAuto === null) return;
+    this.menuAuto = null;
+    this.accountOpen = false;
+    clear(this.screen);
+    this.screen.classList.add('hidden');
+  }
+
   /** 离开联机冒险：AI 先替你战斗，在真新镇或宝可梦中心随时可以回来 */
   private leaveCoop() {
     this.close();
@@ -1067,6 +1076,8 @@ class App {
 
   private onMessage(m: Incoming) {
     if (m instanceof ArrayBuffer) { this.view?.onSnapshot(m); return; }
+    // 菜单开着时对局结束：不收起来的话，下一局第一次 Esc 会去关一个看不见的菜单
+    if (m.t === 'end' || m.t === 'pvpEnd') this.dropGameMenu();
     switch (m.t) {
       case 'joined':
         this.you = m.you;
@@ -1396,6 +1407,7 @@ class App {
     this.me = null;
     this.pub = null;
     this.paused = false;
+    this.menuAuto = null;
     setInputEnabled(false);
     if (this.where === 'game') this.where = 'results';
   }
