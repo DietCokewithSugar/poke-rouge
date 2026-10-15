@@ -153,6 +153,9 @@ test('闪光宝可梦：击败者已经有了就让给队友；首领和平时�
     assert.ok(a.ownedShiny.has(line), `没有普通的${line}也会得到闪光的`);
     assert.ok(!a.owned.has(line), '普通的不会顺带解锁');
   }
+  sim.forceShiny = 1;
+  sim.spawnEnemy('snorlax', 300, 300);
+  assert.equal(sim.publicState().boss?.name, '闪光卡比兽', '首领血条上写明是闪光的');
   // 普通的首领照旧不会崇拜
   b.levelMods.recruit += 100000;
   sim.recompute(b);

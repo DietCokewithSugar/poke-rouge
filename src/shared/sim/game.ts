@@ -6,7 +6,7 @@ import { LINES, LINE_IDS, LINE_OF_DEX, formOf, isFinal, type LineId } from '../p
 import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
-import { SHINY_STAT, shinyRate } from '../shiny';
+import { SHINY_STAT, shinyName, shinyRate } from '../shiny';
 import { SKILLS, skillLevelCd } from '../skills';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
@@ -1083,7 +1083,7 @@ export class GameSim {
       dur: this.waveDur,
       biome: WAVES[Math.max(0, this.wave - 1)].biome,
       interLeft: this.players.length > 1 ? Math.max(0, Math.round(INTERMISSION_TIMEOUT - this.interT)) : -1,
-      boss: this.boss && !this.boss.dead ? { name: this.boss.def.name, hp: Math.max(0, Math.round(this.boss.hp)), max: this.boss.maxHp } : null,
+      boss: this.boss && !this.boss.dead ? { name: shinyName(this.boss.def.name, this.boss.shiny), hp: Math.max(0, Math.round(this.boss.hp)), max: this.boss.maxHp } : null,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, shiny: p.shiny || undefined, level: p.level,
         hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills, bot: p.bot || undefined, away: p.away || undefined,
