@@ -1,4 +1,4 @@
-import { ITEMS } from '../../shared/items';
+import { GROUP_NAME, ITEMS } from '../../shared/items';
 import { LINES } from '../../shared/pokemon';
 import { SKILLS } from '../../shared/skills';
 import type { Command, MeState, PublicState } from '../../shared/sim/game';
@@ -253,8 +253,14 @@ export class Intermission {
   private renderCrate(me: MeState, stage: HTMLElement) {
     const it = ITEMS[me.crate!];
     stage.appendChild(h('div', { class: 'stage-sub' }, h('span', { class: 'sub' }, `打开了精灵球，里面是……${me.cratesLeft > 1 ? `（还有 ${me.cratesLeft - 1} 个）` : ''}`)));
+    const lines = itemLines(it.id);
     stage.appendChild(h('div', { class: 'crate' },
-      h('div', { class: `card big tier${it.tier}` }, iconImg(it.icon, 5), itemInfo(it.id)),
+      h('div', { class: `card big tier${it.tier}` },
+        iconImg(it.icon, 5),
+        h('div', { class: 'card-title' }, it.name, ' ', tierBadge(it.tier)),
+        h('div', { class: 'muted small' }, GROUP_NAME[it.group]),
+        h('div', { class: 'card-body' }, lines.map((l) => h('div', { class: l.startsWith('-') || /-\d/.test(l) ? 'neg' : 'pos' }, l))),
+      ),
       h('div', { class: 'crate-btns' },
         h('button', { class: 'btn gold', onclick: () => { sfx('buy'); this.send({ t: 'crate', take: true }); } }, '收下'),
         h('button', { class: 'btn', onclick: () => { sfx('pickup'); this.send({ t: 'crate', take: false }); } }, `卖掉 +₽${me.crateSell}`),

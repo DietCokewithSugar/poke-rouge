@@ -13,7 +13,7 @@ import { trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
 import { buyUpgrade, defaultSettings, isDifficultyUnlocked, refundUpgrades, saveProfile, type Profile } from '../save';
 import { PAD_BTN, padState } from '../gamepad';
-import { clear, h, tip, toast } from './dom';
+import { clear, h, hideTip, tip, toast } from './dom';
 import { UI_SCALES, confirmButton, iconBtn, pager } from './layout';
 import { STAT_LABEL_6, skillIcon, skillInfo, typeBadge } from './describe';
 
@@ -23,6 +23,7 @@ import { STAT_LABEL_6, skillIcon, skillInfo, typeBadge } from './describe';
  */
 export function mount(root: HTMLElement, el: HTMLElement, key: string) {
   const same = root.dataset.screen === key && !!root.firstElementChild;
+  hideTip();
   clear(root);
   if (same) el.classList.add('no-anim');
   root.dataset.screen = key;
@@ -503,6 +504,9 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
           h('div', { class: 'set-row' },
             h('div', { class: 'set-label' }, h('span', null, '画质', infoTip('高清按屏幕的原生分辨率渲染；流畅在高分屏上按一半的分辨率渲染，像素减少到四分之一，显卡负担更小、更省电。')), note('流畅更省电、更不容易卡')),
             segmented<Profile['settings']['quality']>(s.quality, [['high', '高清', '原生分辨率'], ['smooth', '流畅', '降低分辨率']], (v) => set('quality', v), '画质')),
+          h('div', { class: 'set-row' },
+            h('div', { class: 'set-label' }, h('span', null, '全屏', infoTip('像全屏播放视频一样，占满整个浏览器。默认开启。按 Esc 可以退出全屏。')), note('占满屏幕，按 Esc 退出')),
+            switchBtn(!!s.fullscreen, '全屏', (v) => set('fullscreen', v))),
         ),
         section('pad', '手柄', padStatus, h('div', { class: 'pad-keys' }, keys.map((x) => x.el)), note('按一下手柄上的键，对应的格子会亮起来')),
       ),
@@ -544,6 +548,7 @@ const CREDIT_TABS: [string, () => Node][] = [
   ['操作', () => h('ul', { class: 'credit-list' },
     h('li', null, '键盘：WASD / 方向键移动，空格 / 回车与建筑互动，镇上 1~6 直接打开各个地方、M 快速前往，战斗中 T 切换自动战斗，Esc / P 暂停（联机时打开菜单），商店里 Z 撤销上一次购买；引导里空格 / 回车下一步、Esc 跳过。'),
     h('li', null, '手机：在屏幕任意位置拖动出现摇杆，点下方的提示进入建筑，右下角的按钮快速前往或切换自动战斗，需要横屏游玩。'),
+    h('li', null, '全屏：设置里默认开启，第一次点击或按键后像全屏播放视频一样占满浏览器。按 Esc 退出。'),
     h('li', null, '手柄（Xbox / PlayStation）：左摇杆或十字键移动与选择，A/× 确认与进入建筑，B/○ 返回，X/□ 刷新商店，Y/△ 出发（战斗中切换自动战斗、镇上快速前往），LB/RB 翻页，LT 撤销购买，Start 暂停（联机时打开菜单）。设置里能看到手柄有没有连上，按键时对应的格子会亮。'),
   )],
   ['致谢', () => h('div', { class: 'credit-list' },

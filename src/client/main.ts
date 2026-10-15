@@ -26,7 +26,7 @@ import {
   PARTY_BONUS_TIER, addOwned, applyRun, autoAssistUnlocked, badgeMeta, buildMon, isUnlocked, loadProfile, monKey, notePvpBest, ownsMon, partnerOf, partyMax, pvpIdentity,
   releaseFromParty, saveProfile, unlockedLines, winGym, type Mon, type PartyMon, type Profile, type Settings,
 } from './save';
-import { $, clear, h, toast } from './ui/dom';
+import { $, clear, h, hideTip, toast } from './ui/dom';
 import { Hud } from './ui/hud';
 import { Intermission } from './ui/intermission';
 import { BrowseScreen, creditsScreen, lobbyScreen, mount, pauseScreen, portraitSlot, settingsScreen } from './ui/screens';
@@ -166,9 +166,30 @@ class App {
     window.addEventListener('pointerdown', unlock);
     window.addEventListener('keydown', unlock);
     window.addEventListener('gamepadconnected', unlock);
+    const tryFullscreen = () => { if (this.profile.settings.fullscreen) this.enterFullscreen(); };
+    window.addEventListener('pointerdown', tryFullscreen);
+    window.addEventListener('keydown', tryFullscreen);
+    const onFs = () => {
+      // 玩家按 Esc 退出全屏后，不要下一次点击又强行进去
+      const el = document.fullscreenElement || (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement;
+      if (!el && this.profile.settings.fullscreen) {
+        this.profile.settings.fullscreen = false;
+        saveProfile(this.profile);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFs);
+    document.addEventListener('webkitfullscreenchange', onFs);
     window.addEventListener('keydown', (e) => {
-      if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && !e.repeat && this.where === 'game') this.pauseOrMenu();
-      if (e.code === 'KeyT' && !e.repeat && this.where === 'game' && !this.paused && this.menuAuto === null) this.toggleAuto();
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      const typing = (e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA';
+      if (typing) return;
+      const menuOpen = this.menuAuto !== null && !this.screen.classList.contains('hidden');
+      if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && this.where === 'game') {
+        // Esc 先交给浏览器退出全屏，不要同时把游戏暂停
+        if (e.key === 'Escape' && (document.fullscreenElement || (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement)) return;
+        this.pauseOrMenu();
+      }
+      if ((e.code === 'KeyT' || e.key === 't' || e.key === 'T') && this.where === 'game' && !this.paused && !menuOpen) this.toggleAuto();
     });
     window.addEventListener('beforeunload', (e) => { if (this.where === 'game' && !this.solo) e.preventDefault(); });
     // 真新镇里的快捷键：1~5 直接打开对应的地方，M 打开快速前往
@@ -206,6 +227,21 @@ class App {
     setTransitions(s.transitions);
     this.canvas.style.filter = s.gbFilter ? 'grayscale(1) sepia(1) hue-rotate(42deg) saturate(2.4) brightness(.8) contrast(1.2)' : '';
     if (this.view) { this.view.settings = s; this.view.resize(); }
+    if (s.fullscreen) this.enterFullscreen();
+    else if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+  }
+
+  /** 浏览器全屏（和全屏播放视频一样）。必须由点击或按键触发，静默调用会被浏览器拒绝 */
+  private enterFullscreen() {
+    const current = document.fullscreenElement || (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement;
+    if (current || !this.profile.settings.fullscreen) return;
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    const req = el.requestFullscreen?.bind(el);
+    if (req) {
+      Promise.resolve(req({ navigationUI: 'hide' })).catch(() => { try { el.webkitRequestFullscreen?.(); } catch { /* 这个浏览器不允许 */ } });
+      return;
+    }
+    try { el.webkitRequestFullscreen?.(); } catch { /* 不支持全屏 */ }
   }
 
   // ------------------------------------------------------------ 常驻联机连接
@@ -502,6 +538,7 @@ class App {
     this.townHud.show(true);
     setInputEnabled(true);
     playMusic('town');
+    hideTip();
     this.presence();
     if (!p.guide.town) window.setTimeout(() => this.townTour(), 700);
   }
@@ -1252,6 +1289,7 @@ class App {
   }
 
   private leaveGame() {
+    hideTip();
     window.clearInterval(this.pingTimer);
     this.view?.destroy();
     this.view = null;
