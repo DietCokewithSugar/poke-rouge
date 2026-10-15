@@ -1,14 +1,12 @@
 /**
  * 对战服务：匹配队列（优先匹配分数接近的玩家，等得越久范围越大，超时由 AI 训练家补位）、
- * Elo 积分与段位、排行榜，以及 JSON 文件持久化。
+ * Elo 积分与段位、排行榜。数据全部放在内存里，改动过的记录定时写进存储（Supabase 或 JSON 文件）。
  */
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import type { PvpBoardRow, PvpHistory, PvpRatingChange, PvpRecord, S2C } from '../shared/protocol';
+import type { PvpBoardRow, PvpRatingChange, PvpRecord, S2C } from '../shared/protocol';
 import { PROTOCOL_VERSION } from '../shared/protocol';
 import { GYMS } from '../shared/gyms';
-import { cleanRun, compareRuns, type RankKind, type RankRow, type RunRecord } from '../shared/ranks';
+import { cleanRun, compareRuns, type RankKind, type RankRow } from '../shared/ranks';
 import { Rng } from '../shared/rng';
 import { cleanMeta, cleanName, type Conn } from '../shared/room';
 import { NPC_NAMES, buildDex, fillTeam, generateTeam, npcTrainer, teamLevel, teamPower, validateBuild, validateTeam, type SavedBuild } from '../shared/pvp/build';
@@ -16,6 +14,7 @@ import { trainerOf } from '../shared/trainers';
 import { START_RATING, eloDelta, kFactor } from '../shared/pvp/rating';
 import { PvpRoom, type PvpSeat } from '../shared/pvp/room';
 import { PVP_MODES, PVP_MODE_IDS, type PvpMatchResult, type PvpMode } from '../shared/pvp/sim';
+import { FilePvpStore, ghostId, type Ghost, type ModeRec, type PvpData, type PvpStore, type StoredPlayer } from './pvpstore';
 
 export interface PvpClient {
   conn: Conn;
@@ -24,17 +23,6 @@ export interface PvpClient {
   send(msg: S2C): void;
 }
 
-interface ModeRec { rating: number; best: number; wins: number; losses: number; draws: number; streak: number; games: number; dex: number; shiny?: boolean }
-/** 道馆：徽章数，at 为拿到最后一枚的时间 */
-interface GymRec { badges: number; at: number; dex: number; shiny?: boolean }
-interface StoredPlayer {
-  pid: string; hash: string; name: string; created: number; last: number; modes: Partial<Record<PvpMode, ModeRec>>; history: PvpHistory[];
-  /** 冒险的最好成绩与达成时间 */
-  run?: RunRecord & { at: number };
-  gym?: GymRec;
-}
-/** 玩家用过的队伍（AI 训练家会用它们补位）；power 为平均每只的强度 */
-interface Ghost { pid: string; name: string; team: SavedBuild[]; meta: Record<string, number>; trainer?: string; rating: number; power: number; at: number }
 interface Entry { c: PvpClient; pid: string; name: string; team: SavedBuild[]; own: SavedBuild[]; auto: boolean; meta: Record<string, number>; trainer: string; rating: number; power: number; mode: PvpMode; at: number }
 
 const MAX_GHOSTS = 400;
@@ -48,52 +36,107 @@ export class PvpService {
   ghosts: Ghost[] = [];
   queue: Entry[] = [];
   rooms = new Set<PvpRoom>();
+  /** 读完存储里的数据后完成（文件存储是立刻完成的；读 Supabase 失败时每 30 秒重试） */
+  readonly ready: Promise<void>;
+  /** 数据读完之前不接受会写入的操作：否则写回去会覆盖数据库里原有的积分 */
+  private loaded = false;
+  private store: PvpStore;
   private rng = new Rng(Date.now() & 0x7fffffff);
-  private dirty = false;
+  /** 改动过、还没写回存储的训练家（pid）和 AI 构筑（id） */
+  private dirtyPlayers = new Set<string>();
+  private dirtyGhosts = new Set<string>();
+  private removedGhosts = new Set<string>();
+  private saving: Promise<void> | null = null;
   private lastSave = 0;
   private seq = 0;
   private boards = new Map<PvpMode, StoredPlayer[]>();
   /** 冒险与道馆排行榜的排序缓存（数据变化时清空） */
   private ranks = new Map<string, StoredPlayer[]>();
 
-  constructor(private file: string, private botAfter: Record<PvpMode, number>) {
-    this.load();
+  /** store：存储；传文件路径时存在 JSON 文件里 */
+  constructor(store: PvpStore | string, private botAfter: Record<PvpMode, number>) {
+    this.store = typeof store === 'string' ? new FilePvpStore(store) : store;
+    this.ready = this.load();
   }
 
   // ------------------------------------------------------------ 持久化
 
-  private load() {
+  private load(): Promise<void> {
+    let data: PvpData | Promise<PvpData>;
     try {
-      if (!fs.existsSync(this.file)) return;
-      const data = JSON.parse(fs.readFileSync(this.file, 'utf8')) as { players?: StoredPlayer[]; ghosts?: (Ghost & { build?: SavedBuild })[] };
-      for (const p of data.players ?? []) this.players.set(p.pid, p);
-      // 旧数据每个 AI 构筑只有一只宝可梦
-      this.ghosts = (data.ghosts ?? []).map(({ build, ...g }) => ({ ...g, team: Array.isArray(g.team) ? g.team : build ? [build] : [] }))
-        .filter((g) => g.team.length > 0 && g.team.every((b) => typeof validateBuild(b) !== 'string'));
-      console.log(`对战数据已载入：${this.players.size} 位训练家，${this.ghosts.length} 个 AI 构筑`);
+      data = this.store.load();
     } catch (err) {
+      // 文件坏了：从空的开始（和以前一样）
       console.error('对战数据读取失败', err);
+      data = { players: [], ghosts: [] };
     }
+    if (!(data instanceof Promise)) {
+      this.apply(data);
+      return Promise.resolve();
+    }
+    return data.then((d) => this.apply(d), (err) => {
+      console.error('对战数据读取失败（建好数据表了吗？），30 秒后重试：', err instanceof Error ? err.message : err);
+      return new Promise<void>((r) => setTimeout(r, 30_000).unref()).then(() => this.load());
+    });
   }
 
-  saveNow() {
-    if (!this.dirty) return;
-    this.dirty = false;
+  private apply(data: PvpData) {
+    this.loaded = true;
+    for (const p of data.players) this.players.set(p.pid, p);
+    // 旧数据每个 AI 构筑只有一只宝可梦，也没有 id
+    this.ghosts = (data.ghosts as (Ghost & { build?: SavedBuild })[]).map(({ build, ...g }) => {
+      const team = Array.isArray(g.team) ? g.team : build ? [build] : [];
+      return { ...g, team, id: g.id || ghostId(g.pid, team) };
+    }).filter((g) => g.team.length > 0 && g.team.every((b) => typeof validateBuild(b) !== 'string'));
+    console.log(`对战数据已从${this.store.name}载入：${this.players.size} 位训练家，${this.ghosts.length} 个 AI 构筑`);
+  }
+
+  get unsaved() { return this.dirtyPlayers.size + this.dirtyGhosts.size + this.removedGhosts.size > 0; }
+
+  /** 把改动写回存储；写入 Supabase 时返回 Promise，失败的改动留到下次再写 */
+  saveNow(): void | Promise<void> {
+    if (this.saving) return this.saving;
+    if (!this.unsaved || !this.loaded) return;
+    const pids = [...this.dirtyPlayers], gids = [...this.dirtyGhosts], removed = [...this.removedGhosts];
+    this.dirtyPlayers.clear(); this.dirtyGhosts.clear(); this.removedGhosts.clear();
     this.lastSave = Date.now();
+    const keep = new Set(gids);
+    const restore = (err: unknown) => {
+      console.error('对战数据保存失败，稍后再试', err);
+      for (const pid of pids) this.dirtyPlayers.add(pid);
+      for (const id of gids) if (!this.removedGhosts.has(id)) this.dirtyGhosts.add(id);
+      for (const id of removed) if (!this.dirtyGhosts.has(id)) this.removedGhosts.add(id);
+    };
     try {
-      fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      const tmp = `${this.file}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ v: 1, players: [...this.players.values()], ghosts: this.ghosts }));
-      fs.renameSync(tmp, this.file);
+      const r = this.store.save({
+        players: pids.map((pid) => this.players.get(pid)).filter((p): p is StoredPlayer => !!p),
+        ghosts: this.ghosts.filter((g) => keep.has(g.id)), removedGhosts: removed,
+        all: { players: [...this.players.values()], ghosts: this.ghosts },
+      });
+      if (r instanceof Promise) {
+        this.saving = r.catch(restore).finally(() => { this.saving = null; });
+        return this.saving;
+      }
     } catch (err) {
-      console.error('对战数据保存失败', err);
+      restore(err);
     }
   }
 
-  private touch() {
-    this.dirty = true;
+  /** 数据变了：排行榜缓存作废；p 为需要写回的训练家 */
+  private touch(p?: StoredPlayer) {
+    if (p) this.dirtyPlayers.add(p.pid);
     this.boards.clear();
     this.ranks.clear();
+  }
+
+  private touchGhost(g: Ghost) {
+    this.dirtyGhosts.add(g.id);
+    this.removedGhosts.delete(g.id);
+  }
+
+  private dropGhost(g: Ghost) {
+    this.dirtyGhosts.delete(g.id);
+    this.removedGhosts.add(g.id);
   }
 
   // ------------------------------------------------------------ 身份与战绩
@@ -103,13 +146,14 @@ export class PvpService {
     const p = this.players.get(pid);
     if (!p) {
       if (!create) return null;
+      if (!this.loaded) return '对战服务正在准备中，请稍后再试';
       const np: StoredPlayer = { pid, hash: hash(secret), name: cleanName(name), created: Date.now(), last: Date.now(), modes: {}, history: [] };
       this.players.set(pid, np);
-      this.touch();
+      this.touch(np);
       return np;
     }
     if (p.hash !== hash(secret)) return '对战身份校验失败';
-    if (name && cleanName(name) !== p.name) { p.name = cleanName(name); this.touch(); }
+    if (name && cleanName(name) !== p.name) { p.name = cleanName(name); this.touch(p); }
     return p;
   }
 
@@ -157,7 +201,7 @@ export class PvpService {
     if (p.run && compareRuns(run, p.run) >= 0) return null;
     p.run = { ...run, at: Date.now() };
     p.last = Date.now();
-    this.touch();
+    this.touch(p);
     return null;
   }
 
@@ -173,13 +217,13 @@ export class PvpService {
       if (p.gym.dex !== dex || p.gym.shiny !== shiny) {
         p.gym.dex = dex;
         p.gym.shiny = shiny;
-        this.touch();
+        this.touch(p);
       }
       return null;
     }
     p.gym = { badges, at: Date.now(), dex, shiny };
     p.last = Date.now();
-    this.touch();
+    this.touch(p);
     return null;
   }
 
@@ -246,10 +290,12 @@ export class PvpService {
 
   /** 只记下玩家自己的宝可梦（不含借来的） */
   private addGhost(e: Entry) {
-    const key = JSON.stringify(e.own);
-    this.ghosts = this.ghosts.filter((g) => !(g.pid === e.pid && JSON.stringify(g.team) === key));
-    this.ghosts.push({ pid: e.pid, name: e.name, team: e.own, meta: e.meta, trainer: e.trainer, rating: e.rating, power: avgPower(e.own), at: Date.now() });
-    if (this.ghosts.length > MAX_GHOSTS) this.ghosts.splice(0, this.ghosts.length - MAX_GHOSTS);
+    const id = ghostId(e.pid, e.own);
+    this.ghosts = this.ghosts.filter((g) => g.id !== id);
+    const g: Ghost = { id, pid: e.pid, name: e.name, team: e.own, meta: e.meta, trainer: e.trainer, rating: e.rating, power: avgPower(e.own), at: Date.now() };
+    this.ghosts.push(g);
+    this.touchGhost(g);
+    if (this.ghosts.length > MAX_GHOSTS) for (const old of this.ghosts.splice(0, this.ghosts.length - MAX_GHOSTS)) this.dropGhost(old);
     this.touch();
   }
 
@@ -286,7 +332,7 @@ export class PvpService {
     }
     if (Math.floor(now / 1000) !== Math.floor((now - 500) / 1000)) for (const e of this.queue) this.status(e, now);
     for (const r of this.rooms) if (r.ended) this.rooms.delete(r);
-    if (this.dirty && now - this.lastSave > 5000) this.saveNow();
+    if (this.unsaved && now - this.lastSave > 5000) void this.saveNow();
   }
 
   /** 选一个 AI 对手：优先用其他玩家放进队列过的队伍（强度接近），没有就现场生成 */
@@ -361,8 +407,8 @@ export class PvpService {
       const opp = room.seats.filter((x) => x.team !== s.team).map((x) => x.name).join('、');
       p.history.unshift({ at, mode, result: score === 1 ? 'win' : score === 0 ? 'loss' : 'draw', delta, dex: r.dex, shiny: r.shiny, opp });
       p.history.length = Math.min(p.history.length, 12);
-      for (const g of this.ghosts) if (g.pid === p.pid) g.rating = r.rating;
-      this.touch();
+      for (const g of this.ghosts) if (g.pid === p.pid) { g.rating = r.rating; this.touchGhost(g); }
+      this.touch(p);
       out.set(s.id, { mode, before, after: Math.round(r.rating), delta, record: this.record(p, mode) });
     }
     return out;

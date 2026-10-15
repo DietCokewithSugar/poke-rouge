@@ -24,8 +24,10 @@ import { initInput, setInputEnabled } from './input';
 import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
 import {
   PARTY_BONUS_TIER, addOwned, applyRun, autoAssistUnlocked, badgeMeta, buildMon, isUnlocked, loadProfile, monKey, notePvpBest, ownsMon, partnerOf, partyMax, pvpIdentity,
-  releaseFromParty, saveProfile, unlockedLines, winGym, type Mon, type PartyMon, type Profile, type Settings,
+  releaseFromParty, saveProfile, unlockedLines, watchProfile, winGym, type Mon, type PartyMon, type Profile, type Settings,
 } from './save';
+import { Cloud } from './cloud';
+import { accountScreen, conflictScreen } from './ui/account';
 import { $, clear, h, toast } from './ui/dom';
 import { Hud } from './ui/hud';
 import { Intermission } from './ui/intermission';
@@ -149,6 +151,12 @@ class App {
   private roomGone = false;
   /** 联机 / 对战的菜单打开中：打开前是不是自动战斗（null 表示没打开） */
   private menuAuto: boolean | null = null;
+  private cloud = new Cloud();
+  /** 云存档还在做第一次对齐，先别刷新标题把选择盖掉 */
+  private cloudBooting = true;
+  private accountOpen = false;
+  private accountBack: () => void = () => {};
+  private conflictOpen = false;
 
   start() {
     initInput(this.canvas);
@@ -189,12 +197,33 @@ class App {
     portrait.addEventListener('change', onOrient);
     $('#rotate-fs').addEventListener('click', () => mobileFullscreen());
     this.menu.start();
-    // 先读地址栏参数：标题界面会把 ?room= 邀请参数清掉
+    this.cloud.profile = this.profile;
+    this.cloud.gate = () => this.where !== 'game';
+    this.cloud.onChange = (kind) => {
+      if (this.accountOpen && kind === 'auth') this.openAccount(this.accountBack);
+      else if (kind === 'sync' && this.accountOpen) {
+        const el = document.getElementById('cloud-status');
+        if (el) el.textContent = this.cloud.statusLine();
+      } else if (kind === 'auth' && this.where === 'title' && !this.accountOpen && !this.conflictOpen && !this.cloudBooting) this.title(false);
+    };
+    this.cloud.onApplied = () => this.afterCloud();
+    this.cloud.onConflict = () => this.onCloudConflict();
+    watchProfile((p) => this.cloud.note(p));
+    window.addEventListener('pagehide', () => this.cloud.flushOnLeave());
+    // 先摘下邮件 / Google 跳回来的令牌，再读地址栏：标题界面会把 ?room= 清掉，也可能把 # 清掉
+    this.cloud.captureUrl();
     const params = new URLSearchParams(location.search);
     this.ensureWs();
     const room = params.get('room');
     if (room && /^\d{5}$/.test(room)) this.pendingRoom = room;
     this.title();
+    void this.cloud.boot(this.profile).then((mode) => {
+      this.cloudBooting = false;
+      if (this.where !== 'title' || this.accountOpen || this.conflictOpen) return;
+      if (mode === 'recovery') this.openAccount(() => this.title(false));
+      else if (this.cloud.decision && !this.cloud.held) this.presentConflict(() => this.title(false));
+      else this.title(false);
+    });
     if (params.has('debug')) Object.assign(window, { __send: (m: C2S) => this.send(m), __icons: { iconUrl, ITEMS, skillIconUrl, SKILLS }, __app: this });
     if (this.pendingRoom && this.profile.setup) this.play();
   }
@@ -353,7 +382,7 @@ class App {
       menu: true,
       note: '联机时游戏不会暂停。打开菜单期间，AI 会暂时替你战斗。',
       resume: () => this.closeGameMenu(),
-      settings: () => settingsScreen(this.screen, this.profile, () => this.applySettings(), () => this.renderGameMenu()),
+      settings: () => this.openSettings(() => this.renderGameMenu()),
       quit: pvp
         ? { label: pvp.practice || pvp.gym ? '离开这场练习' : '离开对战（本场判负）', confirm: '再点一次离开', run: () => { this.menuAuto = null; this.leavePvp(); } }
         : { label: '离开房间（AI 继续替你战斗，可以回来）', confirm: '再点一次离开', run: () => { this.menuAuto = null; this.leaveCoop(); } },
@@ -394,8 +423,10 @@ class App {
 
   // ------------------------------------------------------------ 标题与开场
 
-  title() {
+  title(autoConflict = true) {
     this.where = 'title';
+    this.accountOpen = false;
+    this.conflictOpen = false;
     this.browser = null;
     this.pvpUi = null;
     this.hideTown();
@@ -405,11 +436,60 @@ class App {
     playMusic('shop');
     titleScreen(this.screen, this.profile, {
       play: () => this.play(),
-      settings: () => settingsScreen(this.screen, this.profile, () => this.applySettings(), () => this.title()),
-      credits: () => creditsScreen(this.screen, () => this.title()),
-    }, this.stats);
+      account: () => this.openAccount(() => this.title(false)),
+      settings: () => this.openSettings(() => this.title(false)),
+      credits: () => creditsScreen(this.screen, () => this.title(false)),
+    }, this.stats, this.cloud.menuHint());
     this.presence();
     this.ws?.send({ t: 'stats' });
+    this.cloud.poke();
+    if (autoConflict && !this.cloudBooting && this.cloud.decision && !this.cloud.held) this.presentConflict(() => this.title(false));
+  }
+
+  private openSettings(onBack: () => void) {
+    settingsScreen(this.screen, this.profile, () => this.applySettings(), onBack, () => this.openAccount(() => this.openSettings(onBack)));
+  }
+
+  private openAccount(onBack: () => void) {
+    this.accountBack = onBack;
+    this.accountOpen = true;
+    this.conflictOpen = false;
+    this.screen.classList.remove('hidden');
+    void this.cloud.ensure();
+    accountScreen(this.screen, this.cloud, {
+      back: () => { this.accountOpen = false; onBack(); },
+      applied: () => this.afterCloud(),
+    });
+  }
+
+  private presentConflict(onBack: () => void) {
+    if (!this.cloud.decision) { onBack(); return; }
+    this.conflictOpen = true;
+    this.accountOpen = false;
+    this.screen.classList.remove('hidden');
+    conflictScreen(this.screen, this.cloud, {
+      back: () => { this.conflictOpen = false; onBack(); },
+      applied: () => this.afterCloud(),
+    });
+  }
+
+  private onCloudConflict() {
+    if (this.cloudBooting || this.cloud.held || !this.cloud.decision) return;
+    if (this.accountOpen) { this.openAccount(this.accountBack); return; }
+    if (this.where === 'game') { toast('云端进度和这台设备不一样。这局结束后再到账号里选择保留哪一份', 'info', 5000); return; }
+    if (this.where === 'title') this.presentConflict(() => this.title(false));
+    else if (this.where === 'town') this.presentConflict(() => { this.conflictOpen = false; this.enterTown(); });
+  }
+
+  /** 云端进度写回之后：刷新训练家、把对战身份报给服务器 */
+  private afterCloud() {
+    this.applySettings();
+    const p = this.profile;
+    this.town?.setIdentity(p.trainer, this.name(), partnerDex(p), p.partnerShiny);
+    this.townHud?.refresh();
+    this.presence();
+    this.reportProgress();
+    if (this.pvpUi) for (const mode of PVP_MODE_IDS) this.requestBoard(mode);
   }
 
   /** 开始游戏：第一次先走开场，之后直接进真新镇 */
@@ -503,6 +583,12 @@ class App {
     setInputEnabled(true);
     playMusic('town');
     this.presence();
+    this.cloud.poke();
+    if (!this.cloudBooting && this.cloud.decision && !this.cloud.held && !this.conflictOpen) {
+      setInputEnabled(false);
+      this.presentConflict(() => this.enterTown());
+      return;
+    }
     if (!p.guide.town) window.setTimeout(() => this.townTour(), 700);
   }
 
@@ -598,7 +684,7 @@ class App {
       // 走进道馆的门先遇到道馆向导；快捷栏的「对战」直接去对战场
       case 'battle': if (via === 'door') this.gymGuide(); else this.pvpCenter(); break;
       case 'gym': this.gymCenter(); break;
-      case 'settings': settingsScreen(this.screen, p, () => this.applySettings(), close); break;
+      case 'settings': this.openSettings(close); break;
       case 'help': creditsScreen(this.screen, close); break;
     }
   }
@@ -1209,7 +1295,7 @@ class App {
       this.screen.classList.remove('hidden');
       pauseScreen(this.screen, {
         resume: () => this.setPause(false),
-        settings: () => settingsScreen(this.screen, this.profile, () => this.applySettings(), () => this.renderPause()),
+        settings: () => this.openSettings(() => this.renderPause()),
         quit: { label: '放弃本局，回到真新镇', confirm: '再点一次确认放弃', run: () => { this.close(); this.backToTown(); } },
       });
     } else {

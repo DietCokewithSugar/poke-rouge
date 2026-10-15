@@ -220,36 +220,60 @@ export function releaseFromParty(p: Profile, uid: string) {
   saveProfile(p);
 }
 
+/** 把读到的存档整理成完整的 Profile（缺的字段补默认，坏掉的字段丢掉） */
+export function normalizeProfile(raw: (Partial<Profile> & { lastLine?: string }) | null | undefined): Profile {
+  const p = raw ?? {};
+  const f = fresh();
+  const party = Array.isArray(p.party) ? p.party.filter((m) => m && typeof validateBuild(m.build) !== 'string').slice(0, PARTY_LIMIT) : [];
+  const out: Profile = { ...f, ...p, party, stats: { ...f.stats, ...p.stats }, settings: { ...f.settings, ...p.settings } };
+  // 旧存档：以前御三家一开始就能用，保留下来；需要重新走一遍开场选训练家
+  if (!Array.isArray(p.owned)) out.owned = (p.stats?.runs ?? 0) > 0 ? [...STARTERS] : [];
+  out.owned = out.owned.filter(isLine);
+  out.shiny = [...new Set((Array.isArray(out.shiny) ? out.shiny : []).filter(isLine))];
+  out.trainers = (Array.isArray(out.trainers) ? out.trainers : []).filter((t) => TRAINERS[t]);
+  if (!TRAINERS[out.trainer]) out.trainer = 'ash';
+  if (!isLine(out.partner)) out.partner = isLine(p.lastLine) ? p.lastLine : 'charmander';
+  out.partnerShiny = out.partnerShiny === true;
+  if (out.setup && !ownsMon(out, partnerOf(out))) { out.partner = unlockedLines(out)[0] ?? 'charmander'; out.partnerShiny = false; }
+  out.stats.owned = unlockedLines(out).length;
+  out.stats.shinies = out.shiny.length;
+  out.pvpBest = Number.isFinite(out.pvpBest) ? out.pvpBest : 0;
+  out.bestRun = cleanRun(out.bestRun);
+  if (!out.gymLog || typeof out.gymLog !== 'object') out.gymLog = {};
+  return out;
+}
+
 export function loadProfile(): Profile {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return fresh();
-    const p = JSON.parse(raw) as Partial<Profile> & { lastLine?: string };
-    const f = fresh();
-    const party = Array.isArray(p.party) ? p.party.filter((m) => m && typeof validateBuild(m.build) !== 'string').slice(0, PARTY_LIMIT) : [];
-    const out: Profile = { ...f, ...p, party, stats: { ...f.stats, ...p.stats }, settings: { ...f.settings, ...p.settings } };
-    // 旧存档：以前御三家一开始就能用，保留下来；需要重新走一遍开场选训练家
-    if (!Array.isArray(p.owned)) out.owned = (p.stats?.runs ?? 0) > 0 ? [...STARTERS] : [];
-    out.owned = out.owned.filter(isLine);
-    out.shiny = [...new Set((Array.isArray(out.shiny) ? out.shiny : []).filter(isLine))];
-    out.trainers = (Array.isArray(out.trainers) ? out.trainers : []).filter((t) => TRAINERS[t]);
-    if (!TRAINERS[out.trainer]) out.trainer = 'ash';
-    if (!isLine(out.partner)) out.partner = isLine(p.lastLine) ? p.lastLine : 'charmander';
-    out.partnerShiny = out.partnerShiny === true;
-    if (out.setup && !ownsMon(out, partnerOf(out))) { out.partner = unlockedLines(out)[0] ?? 'charmander'; out.partnerShiny = false; }
-    out.stats.owned = unlockedLines(out).length;
-    out.stats.shinies = out.shiny.length;
-    out.pvpBest = Number.isFinite(out.pvpBest) ? out.pvpBest : 0;
-    out.bestRun = cleanRun(out.bestRun);
-    if (!out.gymLog || typeof out.gymLog !== 'object') out.gymLog = {};
-    return out;
+    return normalizeProfile(JSON.parse(raw) as Partial<Profile> & { lastLine?: string });
   } catch {
     return fresh();
   }
 }
 
+let watcher: ((p: Profile) => void) | null = null;
+/** 每次写入本机存档后通知云同步（没登录时什么都不做） */
+export function watchProfile(fn: ((p: Profile) => void) | null) { watcher = fn; }
+
 export function saveProfile(p: Profile) {
   try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* 隐私模式等情况下无法保存 */ }
+  watcher?.(p);
+}
+
+/**
+ * 用云端进度替换本机进度。音量、界面缩放、帧率、画质仍用这台设备自己的。
+ * 直接改原来的对象，游戏里拿着的引用不用换。
+ */
+export function adoptCloud(p: Profile, data: unknown) {
+  const settings: Settings = { ...p.settings };
+  const src: Record<string, unknown> = data && typeof data === 'object' ? { ...(data as object) } : {};
+  delete src.settings;
+  const next = normalizeProfile({ ...src, settings } as Partial<Profile>);
+  Object.assign(p, next);
+  p.settings = settings;
+  saveProfile(p);
 }
 
 export function isUnlocked(p: Profile, line: LineId): boolean {
