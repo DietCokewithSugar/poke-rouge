@@ -307,7 +307,7 @@ class App {
     this.townHud.refresh();
     this.townHud.show(true);
     setInputEnabled(true);
-    playMusic('shop');
+    playMusic('town');
     this.presence();
   }
 

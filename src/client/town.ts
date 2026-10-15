@@ -237,7 +237,7 @@ export class TownScene {
       list.push({ y: w.my, draw: () => { shadow(ctx, w.mx, w.my); w.mon.draw(ctx, w.mx, w.my, 1, 0, alpha); } });
       list.push({ y: w.y, draw: () => { shadow(ctx, w.x, w.y); drawTrainer(ctx, trainer, w.x, w.y, w.dir, walkFrame(w.t, w.moving), 1, alpha); } });
     };
-    for (const q of this.peers.values()) if (q.w === 0) pushWalker(q, q.trainer, 0.92);
+    for (const q of this.peers.values()) if (q.w === 0 && q.x >= 0) pushWalker(q, q.trainer, 0.92);
     pushWalker(this.me, this.trainer);
     list.sort((a, b) => a.y - b.y);
     for (const d of list) d.draw();
@@ -258,7 +258,7 @@ export class TownScene {
     };
     for (const b of BUILDINGS) label(b.name, b.door, b.y - 2, '#ffe070');
     label('1号道路 ▲', 384, 34, '#c8ffb0');
-    for (const q of this.peers.values()) if (q.w === 0) label(q.name, q.x, q.y - 24, '#e8f0ff');
+    for (const q of this.peers.values()) if (q.w === 0 && q.x >= 0) label(q.name, q.x, q.y - 24, '#e8f0ff');
     label(this.name || '训练家', this.me.x, this.me.y - 24, '#ffffff', 'rgba(40,80,200,.75)');
     if (this.spot && this.active) {
       const bob = Math.round(Math.sin(t * 6) * 1.5);
