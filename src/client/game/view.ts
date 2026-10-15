@@ -88,11 +88,13 @@ export class GameView {
   canMove = () => true;
   /** 自己是不是已经有这条进化线：没有的野生宝可梦头上画一颗爱心 */
   isOwned: (line: string) => boolean = () => true;
-  /** 对战：每位玩家的队伍 */
-  private pvp: { teams: Map<number, number>; myTeam: number } | null = null;
+  /** 对战：每位玩家的队伍；revive 为倒下后能不能被救起（单挑倒下就退场） */
+  private pvp: { teams: Map<number, number>; myTeam: number; revive: boolean } | null = null;
+  /** 自己的宝可梦由服务器上的 AI 操作：画面跟随服务器位置，不再上报 */
+  private auto = false;
 
-  setPvp(seats: PvpSeatInfo[]) {
-    this.pvp = { teams: new Map(seats.map((s) => [s.id, s.team])), myTeam: seats.find((s) => s.id === this.you)?.team ?? 0 };
+  setPvp(seats: PvpSeatInfo[], revive: boolean) {
+    this.pvp = { teams: new Map(seats.map((s) => [s.id, s.team])), myTeam: seats.find((s) => s.id === this.you)?.team ?? 0, revive };
   }
 
   private isFoe(id: number) { return !!this.pvp && this.pvp.teams.get(id) !== this.pvp.myTeam; }
@@ -156,7 +158,7 @@ export class GameView {
     if (s.tick % 30 === 0) for (const [id, v] of this.enemyVis) if (this.time - v.seen > 2) this.enemyVis.delete(id);
     if (this.snaps.length > 12) this.snaps.shift();
     const mine = ts.players.get(this.you);
-    if (mine) {
+    if (mine && !(mine.flags & 64)) {
       const d = Math.hypot(mine.x - this.local.x, mine.y - this.local.y);
       if (!this.local.synced || d > 140 || (mine.flags & 1) || s.phase !== 0) {
         this.local.x = mine.x;
@@ -400,6 +402,29 @@ export class GameView {
     const mine = last?.players.get(this.you);
     const inWave = last?.s.phase === 0;
     const down = !!mine && (mine.flags & 1) !== 0;
+    const auto = !!mine && (mine.flags & 64) !== 0;
+    if (auto !== this.auto) {
+      this.auto = auto;
+      // 切回手动：从服务器的最新位置接着走
+      if (!auto) this.local.synced = false;
+    }
+    if (auto) {
+      const ip = this.interp();
+      const pb = ip?.b.players.get(this.you);
+      if (ip && pb) {
+        const pa = ip.a.players.get(this.you);
+        this.local.x = pa ? pa.x + (pb.x - pa.x) * ip.f : pb.x;
+        this.local.y = pa ? pa.y + (pb.y - pa.y) * ip.f : pb.y;
+        this.local.dir = pb.dir;
+        this.local.moving = (pb.flags & 8) !== 0;
+        this.local.synced = true;
+      }
+      if (this.lastTick >= 0 && now - this.lastAck >= 100) {
+        this.lastAck = now;
+        this.sendAck(this.lastTick);
+      }
+      return;
+    }
     const mv = inWave && !down && this.canMove() ? moveVector() : { x: 0, y: 0 };
     const speed = this.me?.speed ?? 100;
     this.local.moving = !!(mv.x || mv.y);
@@ -588,7 +613,7 @@ export class GameView {
         if (p.id === this.you) continue;
         const foe = this.isFoe(p.id);
         const down = (p.flags & 1) !== 0;
-        if (foe ? down : !down) continue;
+        if (foe ? down : !down || (this.pvp && !this.pvp.revive)) continue;
         const sx = (p.x - cx) * S, sy = (p.y - 10 - cy) * S;
         const W = this.canvas.width, H = this.canvas.height, m = 28 * S;
         if (sx >= 0 && sy >= 0 && sx <= W && sy <= H) continue;
@@ -685,7 +710,8 @@ export class GameView {
     const ctx = this.ctx;
     const mine = p.id === this.you;
     const foe = this.isFoe(p.id);
-    if (p.flags & 1 && this.names.size > 1) {
+    const canRevive = this.names.size > 1 && (!this.pvp || this.pvp.revive);
+    if (p.flags & 1 && canRevive) {
       // 救援圈：队友站进圈里就能把它救起来；对手的救援圈是红色的，靠近就能打断
       const col = foe ? '#ff6a6a' : '#78f878';
       ctx.globalAlpha = Math.floor(t * 4) % 2 ? 0.9 : 0.6;
@@ -737,10 +763,10 @@ export class GameView {
     ctx.fillStyle = foe ? '#f85050' : frac > 0.5 ? '#58d858' : frac > 0.2 ? '#f8c838' : '#f84848';
     ctx.fillRect(bx, by, Math.round(w * frac), 2);
     if (p.flags & 1) {
-      const label = this.names.size <= 1 ? '濒死' : foe ? (p.revive > 0 ? '对手救援中！靠近打断' : '倒下') : mine ? '等待救援…' : p.revive > 0 ? `救援中 ${Math.round(p.revive * 100)}%` : '站上来救援！';
+      const label = this.names.size <= 1 ? '濒死' : !canRevive ? '退场' : foe ? (p.revive > 0 ? '对手救援中！靠近打断' : '倒下') : mine ? '等待救援…' : p.revive > 0 ? `救援中 ${Math.round(p.revive * 100)}%` : '站上来救援！';
       ctx.fillStyle = '#101018';
       ctx.fillText(label, Math.round(x) + 1, ny - 9);
-      ctx.fillStyle = mine || foe || this.names.size <= 1 ? '#ff8c8c' : '#78f878';
+      ctx.fillStyle = mine || foe || !canRevive ? '#ff8c8c' : '#78f878';
       ctx.fillText(label, Math.round(x), ny - 10);
       if (p.revive > 0) {
         ctx.strokeStyle = foe ? '#ff6a6a' : '#78f878';

@@ -3,7 +3,7 @@ import { ENEMIES } from '../shared/enemies';
 import { LINES, formOf, type LineId } from '../shared/pokemon';
 import type { DifficultyId } from '../shared/difficulty';
 import { PROTOCOL_VERSION, type BoardEntry, type C2S, type LobbyPlayer, type PvpRatingChange, type PvpSeatInfo, type ServerStats } from '../shared/protocol';
-import { PVP_MODE_IDS, type PvpMatchResult, type PvpMode } from '../shared/pvp/sim';
+import { PVP_MODES, PVP_MODE_IDS, type PvpMatchResult, type PvpMode } from '../shared/pvp/sim';
 import type { MeState, PublicState } from '../shared/sim/game';
 import { BIOMES, WAVES } from '../shared/waves';
 import { TRAINERS } from '../shared/trainers';
@@ -21,7 +21,7 @@ import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
 import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
 import {
-  addOwned, applyRun, isUnlocked, loadProfile, pvpIdentity, releaseFromParty, saveProfile, unlockedLines, type PartyMon, type Profile, type Settings,
+  addOwned, applyRun, autoAssistUnlocked, isUnlocked, loadProfile, pvpIdentity, releaseFromParty, saveProfile, unlockedLines, type PartyMon, type Profile, type Settings,
 } from './save';
 import { $, clear, toast } from './ui/dom';
 import { Hud } from './ui/hud';
@@ -32,7 +32,8 @@ import { resultsScreen } from './ui/results';
 import { PvpScreen, pvpResultsScreen } from './ui/pvp';
 import { TownScene } from './town';
 
-interface PvpMatch { mode: PvpMode; uid: string; practice: boolean; seats: PvpSeatInfo[] }
+/** uids：出战的背包宝可梦（第一只是队长） */
+interface PvpMatch { mode: PvpMode; uids: string[]; practice: boolean; seats: PvpSeatInfo[] }
 
 type Where = 'title' | 'setup' | 'town' | 'place' | 'browse' | 'lobby' | 'game' | 'results' | 'pvp';
 
@@ -103,6 +104,8 @@ class App {
   private pvpMatch: PvpMatch | null = null;
   /** 邀请链接里的房间号：完成开场后自动加入 */
   private pendingRoom: string | null = null;
+  /** 自己的宝可梦现在是不是由 AI 操作（以服务器状态为准） */
+  private autoOn = false;
 
   start() {
     initInput(this.canvas);
@@ -122,6 +125,7 @@ class App {
     window.addEventListener('gamepadconnected', unlock);
     window.addEventListener('keydown', (e) => {
       if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && this.where === 'game' && this.solo && this.pub?.phase === 'wave') this.setPause(!this.paused);
+      if (e.code === 'KeyT' && !e.repeat && this.where === 'game' && !this.paused) this.toggleAuto();
     });
     window.addEventListener('beforeunload', (e) => { if (this.where === 'game' && !this.solo) e.preventDefault(); });
     // 真新镇里的快捷键：1~5 直接打开对应的地方，M 打开快速前往
@@ -436,14 +440,14 @@ class App {
     this.screen.classList.remove('hidden');
     const ws = this.ensureWs();
     this.pvpUi = new PvpScreen(this.screen, this.profile, {
-      queue: (mode, mon) => this.pvpQueue(mode, mon),
+      queue: (mode, team) => this.pvpQueue(mode, team),
       cancel: () => {
         this.ws?.send({ t: 'pvpCancel' });
         this.pvpUi?.setQueued(null);
         this.pvpMatch = null;
         if (this.t === this.ws) this.t = null;
       },
-      practice: (mode, mon) => this.pvpPractice(mode, mon),
+      practice: (mode, team) => this.pvpPractice(mode, team),
       release: (uid) => releaseFromParty(this.profile, uid),
       board: (mode) => { saveProfile(this.profile); this.requestBoard(mode); },
       partner: (mon) => { this.setPartner(mon.build.line); this.profile.pvpPick = mon.uid; saveProfile(this.profile); },
@@ -457,29 +461,32 @@ class App {
     this.ws?.send({ t: 'pvpBoard', mode, ...pvpIdentity(this.profile) });
   }
 
-  private pvpQueue(mode: PvpMode, mon: PartyMon) {
+  private pvpQueue(mode: PvpMode, team: PartyMon[]) {
     mobileFullscreen();
     this.close();
     this.solo = false;
     this.t = this.ensureWs();
     this.profile.pvpMode = mode;
-    this.profile.pvpPick = mon.uid;
+    this.profile.pvpPick = team[0].uid;
     saveProfile(this.profile);
-    this.pvpMatch = { mode, uid: mon.uid, practice: false, seats: [] };
-    this.send({ t: 'pvpQueue', mode, build: mon.build, name: this.name(), meta: this.meta(), v: PROTOCOL_VERSION, trainer: this.profile.trainer, ...pvpIdentity(this.profile) });
+    this.pvpMatch = { mode, uids: team.map((m) => m.uid), practice: false, seats: [] };
+    this.send({
+      t: 'pvpQueue', mode, team: team.map((m) => m.build), name: this.name(), meta: this.meta(), v: PROTOCOL_VERSION,
+      trainer: this.profile.trainer, auto: this.profile.pvpAuto || undefined, ...pvpIdentity(this.profile),
+    });
   }
 
-  private pvpPractice(mode: PvpMode, mon: PartyMon) {
+  private pvpPractice(mode: PvpMode, team: PartyMon[]) {
     mobileFullscreen();
     if (this.pvpUi?.isQueued) this.ws?.send({ t: 'pvpCancel' });
     this.close();
     this.solo = false;
     this.profile.pvpMode = mode;
-    this.profile.pvpPick = mon.uid;
+    this.profile.pvpPick = team[0].uid;
     saveProfile(this.profile);
-    this.pvpMatch = { mode, uid: mon.uid, practice: true, seats: [] };
-    const allies = this.profile.party.filter((m) => m.uid !== mon.uid).map((m) => m.build);
-    const t = new LocalPvpTransport(mode, { name: this.name(), build: mon.build, meta: this.meta(), trainer: this.profile.trainer }, allies);
+    this.pvpMatch = { mode, uids: team.map((m) => m.uid), practice: true, seats: [] };
+    const others = this.profile.party.filter((m) => !team.includes(m)).map((m) => m.build);
+    const t = new LocalPvpTransport(mode, { name: this.name(), team: team.map((m) => m.build), meta: this.meta(), trainer: this.profile.trainer, auto: this.profile.pvpAuto }, others);
     this.t = t;
     t.onMessage = (m) => this.onMessage(m);
   }
@@ -497,11 +504,13 @@ class App {
     this.pvpMatch = null;
     const me = res.players.find((p) => p.id === you);
     const outcome = !me || res.winner < 0 ? 'draw' : res.winner === me.team ? 'win' : 'loss';
-    const mon = match ? this.profile.party.find((m) => m.uid === match.uid) : undefined;
-    if (mon && match && !match.practice) {
-      if (outcome === 'win') mon.pvp.wins++;
-      else if (outcome === 'loss') mon.pvp.losses++;
-      else mon.pvp.draws++;
+    const team = (match?.uids ?? []).map((u) => this.profile.party.find((m) => m.uid === u)).filter((m): m is PartyMon => !!m);
+    if (match && !match.practice && team.length) {
+      for (const mon of team) {
+        if (outcome === 'win') mon.pvp.wins++;
+        else if (outcome === 'loss') mon.pvp.losses++;
+        else mon.pvp.draws++;
+      }
       saveProfile(this.profile);
     }
     const t = this.t;
@@ -516,10 +525,10 @@ class App {
     pvpResultsScreen(this.screen, res, you, rating, match?.seats ?? [], !!match?.practice, {
       again: () => {
         this.pvpCenter();
-        const again = match && this.profile.party.find((m) => m.uid === match.uid);
-        if (!match || !again) return;
-        if (match.practice) this.pvpPractice(match.mode, again);
-        else if (this.ws?.connected) { this.pvpUi?.setWaiting(); this.pvpQueue(match.mode, again); }
+        // 放生过的不再上场；队长没了就留在对战中心重新选
+        if (!match || !team.length || team[0].uid !== match.uids[0]) return;
+        if (match.practice) this.pvpPractice(match.mode, team);
+        else if (this.ws?.connected) { this.pvpUi?.setWaiting(); this.pvpQueue(match.mode, team); }
       },
       back: () => this.pvpCenter(),
       home: () => { this.place = 'battle'; this.enterTown('battle'); },
@@ -702,14 +711,26 @@ class App {
     this.view.sendAck = (k) => { if (this.t === this.ws) this.send({ t: 'ack', k }); };
     this.view.canMove = () => !this.paused && !(this.inter?.visible ?? false);
     const mine = players.find((p) => p.id === this.you);
+    this.autoOn = false;
     if (pvpSeats) {
+      const mode = this.pvpMatch?.mode ?? (pvpSeats.length > 6 ? '4v4' : '1v1');
+      const M = PVP_MODES[mode];
       if (this.pvpMatch) this.pvpMatch.seats = pvpSeats;
-      this.view.setPvp(pvpSeats);
+      // 单挑时同一位训练家的三只头上显示宝可梦的名字，团战显示训练家的名字
+      if (M.team > 1) for (const s of pvpSeats) this.view.names.set(s.id, LINES[s.line]?.forms.find((f) => f.dex === s.dex)?.name ?? s.name);
+      this.view.setPvp(pvpSeats, M.revive);
       this.hud = new Hud(this.ui, null, () => this.leavePvp(), this.pvpMatch?.practice ? '再按一次离开' : '离开会判负，再按一次');
-      this.hud.setPvp(pvpSeats, this.you);
+      this.hud.setPvp(mode, pvpSeats, this.you);
+      this.hud.enableAuto(() => this.toggleAuto(), M.team > 1
+        ? '交给 AI 操作你的队长（另外两只一直由 AI 操作），可以随时切回手动。对战比的是构筑和阵容，网络不好时也可以放心交给 AI。'
+        : '交给 AI 操作你的宝可梦，可以随时切回手动。');
     } else {
       this.hud = new Hud(this.ui, this.solo ? () => this.setPause(true) : null);
       this.inter = new Intermission(this.ui, (c) => this.send(c));
+      if (autoAssistUnlocked(this.profile)) {
+        this.hud.enableAuto(() => this.toggleAuto(), 'AI 替你走位、躲开攻击、捡糖果和救队友；技能照常自动释放，商店和升级仍由你来选。');
+        if (this.profile.autoAssist) this.setAutoLocal(true);
+      }
     }
     this.hud.setTrainer(mine?.trainer ?? this.profile.trainer, mine?.name ?? this.name());
     setInputEnabled(true);
@@ -729,9 +750,34 @@ class App {
     this.hud?.announce(`野生的${formOf(line, LINES[line].forms.findIndex((f) => f.dex === dex)).name}崇拜了你！`, isNew ? `${name}成为了你的伙伴！回到真新镇可以让它跟着你` : '');
   }
 
+  /** 切换自动战斗（对战随时可用；冒险要先通关一次） */
+  private toggleAuto() {
+    if (this.where !== 'game' || !this.hud) return;
+    if (!this.pvpMatch && !autoAssistUnlocked(this.profile)) {
+      toast('首次通关后解锁 AI 辅助战斗', 'info');
+      return;
+    }
+    const on = !this.autoOn;
+    this.setAutoLocal(on);
+    sfx('click');
+    if (!this.pvpMatch) { this.profile.autoAssist = on; saveProfile(this.profile); }
+    this.hud.message(on ? 'AI 自动战斗：开（按 T 切回手动）' : '切换为手动操作');
+  }
+
+  private autoAt = 0;
+  private setAutoLocal(on: boolean) {
+    this.autoOn = on;
+    this.autoAt = performance.now();
+    this.hud?.setAuto(on);
+    this.send({ t: 'auto', on });
+  }
+
   private onPublic(s: PublicState) {
     this.pub = s;
     if (this.view) { this.view.pub = s; this.view.biome = s.biome; }
+    // 刚切换时服务器的状态可能还没跟上，过一会儿再以服务器为准
+    const bot = !!s.players.find((p) => p.id === this.you)?.bot;
+    if (bot !== this.autoOn && performance.now() - this.autoAt > 1000) { this.autoOn = bot; this.hud?.setAuto(bot); }
     this.hud?.update(this.me, s, this.you);
     if (!this.inter) return;
     if (s.phase === 'inter' && !this.inter.visible) {

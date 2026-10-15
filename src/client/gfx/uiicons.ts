@@ -145,6 +145,9 @@ export const UI_ICONS: Record<string, Def> = {
   cross: { pal: { r: '#ff5f6d' }, rows: [
     '............', '....kkkk....', '....krrk....', '....krrk....', '.kkkkrrkkkk.', '.krrrrrrrrk.',
     '.krrrrrrrrk.', '.kkkkrrkkkk.', '....krrk....', '....krrk....', '....kkkk....', '............'] },
+  robot: { pal: { s: '#b9d4f0', b: '#2a6fb0', w: '#e6f4ff', y: '#ffd23f', d: '#7f93c0' }, rows: [
+    '....kyyk....', '.....kk.....', '..kkkkkkkk..', '.kssssssssk.', '.ksbbssbbsk.', 'kksbwssbwskk',
+    'kksssssssskk', '.ksskkkkssk.', '.kssssssssk.', '..kkkkkkkk..', '....kddk....', '..kkkkkkkk..'] },
   plus: { pal: { g: '#5fe08a' }, rows: [
     '............', '....kkkk....', '....kggk....', '....kggk....', '.kkkkggkkkk.', '.kggggggggk.',
     '.kggggggggk.', '.kkkkggkkkk.', '....kggk....', '....kggk....', '....kkkk....', '............'] },

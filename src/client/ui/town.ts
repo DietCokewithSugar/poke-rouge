@@ -16,7 +16,7 @@ import { trainerFull, trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
 import { iconImg } from '../gfx/icons';
 import {
-  buyLine, buyTrainer, isDifficultyUnlocked, isTrainerUnlocked, isUnlocked, saveProfile, unlockedLines, type Profile,
+  autoAssistUnlocked, buyLine, buyTrainer, isDifficultyUnlocked, isTrainerUnlocked, isUnlocked, saveProfile, unlockedLines, type Profile,
 } from '../save';
 import { clear, h, tip, toast } from './dom';
 import { typeBadge } from './describe';
@@ -316,11 +316,28 @@ export function routeScreen(root: HTMLElement, p: Profile, a: RouteActions) {
           iconBtn('swap', '换伙伴', () => { sfx('click'); a.partner(); }, { cls: 'small', text: '换伙伴' })),
       ),
       difficultyPicker(p, diff, (d) => { diff = d; render(); }),
-      h('p', { class: 'small muted' }, '一路上会有野生宝可梦乱入，击败它们，也许它们会崇拜你、成为新的伙伴。'),
-      h('div', { class: 'row end' }, h('button', { class: 'btn gold big go', 'data-key': 'y', onclick: () => { p.lastDifficulty = diff; saveProfile(p); sfx('wave'); a.go(diff); } }, `出发！`)),
+      h('div', { class: 'row between route-foot' },
+        assistToggle(p, render),
+        h('button', { class: 'btn gold big go', 'data-key': 'y', onclick: () => { p.lastDifficulty = diff; saveProfile(p); sfx('wave'); a.go(diff); } }, `出发！`),
+      ),
     ), 'route');
   };
   render();
+}
+
+/** AI 辅助战斗开关：首次通关后解锁 */
+function assistToggle(p: Profile, render: () => void) {
+  const open = autoAssistUnlocked(p);
+  const on = open && p.autoAssist;
+  return h('div', { class: 'route-assist' },
+    h('button', {
+      class: `btn small route-auto ${on ? 'on' : ''}`, disabled: !open,
+      onclick: () => { sfx('click'); p.autoAssist = !p.autoAssist; saveProfile(p); render(); },
+    }, uiIcon(open ? 'robot' : 'lock', 2), h('span', null, `AI 辅助战斗${open ? (on ? '：开' : '：关') : ''}`)),
+    h('div', { class: 'small muted' }, open
+      ? 'AI 替你走位、躲招、捡糖果，你专心挑技能和道具；战斗中按 T 随时切换。'
+      : '首次通关后解锁：AI 替你走位，你专心构筑。'),
+  );
 }
 
 // ---------------------------------------------------------------- NPC 对话

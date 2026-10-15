@@ -4,7 +4,7 @@
  *   A / ×             确认（点击选中的按钮）
  *   B / ○             返回、取消（例如取消进化）—— 带 data-back 的按钮
  *   X / □             刷新（商店、升级）—— data-key="x"
- *   Y / △             出发 / 开始 —— data-key="y"
+ *   Y / △             出发 / 开始 —— data-key="y"；战斗中切换 AI 自动战斗
  *   LB / RB (L1 / R1) 翻页、切换标签 —— data-key="lb" / "rb"
  *   LT (L2)           撤销上一次购买 —— data-key="lt"
  *   Start / Options   暂停 / 继续 —— data-key="start"
@@ -107,10 +107,11 @@ function poll(now: number) {
     }
   } else {
     setFocus(null);
+    const hud = document.getElementById('hud');
     if (down(BTN.A)) hooks.action?.();
-    if (down(BTN.Y)) hooks.menu?.();
+    // 战斗中 Y 切换自动战斗，真新镇里打开快速前往
+    if (down(BTN.Y) && !(hud && !hud.classList.contains('hidden') && clickKey(hud, 'y'))) hooks.menu?.();
     if (down(BTN.START)) {
-      const hud = document.getElementById('hud');
       if (!(hud && clickKey(hud, 'start'))) hooks.pause();
     }
   }
