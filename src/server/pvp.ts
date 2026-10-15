@@ -168,13 +168,16 @@ export class PvpService {
     const p = this.auth(msg.pid, msg.secret, String(msg.name ?? ''), true);
     if (!p || typeof p === 'string') return p ?? '对战身份无效';
     const dex = Number.isInteger(msg.dex) && (msg.dex as number) >= 1 && (msg.dex as number) <= 151 ? (msg.dex as number) : 25;
+    const shiny = msg.shiny === true || undefined;
     if (p.gym && badges <= p.gym.badges) {
-      p.gym.dex = dex;
-      p.gym.shiny = msg.shiny === true || undefined;
-      this.touch();
+      if (p.gym.dex !== dex || p.gym.shiny !== shiny) {
+        p.gym.dex = dex;
+        p.gym.shiny = shiny;
+        this.touch();
+      }
       return null;
     }
-    p.gym = { badges, at: Date.now(), dex, shiny: msg.shiny === true || undefined };
+    p.gym = { badges, at: Date.now(), dex, shiny };
     p.last = Date.now();
     this.touch();
     return null;
