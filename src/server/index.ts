@@ -13,16 +13,23 @@ import { trainerOf } from '../shared/trainers';
 import type { PvpRoom } from '../shared/pvp/room';
 import type { PvpMode } from '../shared/pvp/sim';
 import { TICK_RATE } from '../shared/sim/game';
+import { accountRoutes } from './account';
 import { PvpService } from './pvp';
+import { FilePvpStore, SupabasePvpStore } from './pvpstore';
+import { Supabase, supabaseConfig } from './supabase';
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 const MAX_ROOMS = Number(process.env.MAX_ROOMS || 300);
-/** 对战数据（积分、排行榜、AI 构筑池）保存位置 */
+/** 账号、云存档与对战数据：配置了 SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY 时存在 Supabase */
+const sbConfig = supabaseConfig();
+const sb = sbConfig ? new Supabase(sbConfig) : null;
+/** 没有配置 Supabase 时，对战数据（积分、排行榜、AI 构筑池）存在这个文件里 */
 const PVP_DATA = process.env.PVP_DATA || path.resolve(process.cwd(), 'data/pvp.json');
 /** 匹配多久没找到真人对手就由 AI 训练家补位（秒） */
 const BOT_AFTER = process.env.PVP_BOT_AFTER ? Number(process.env.PVP_BOT_AFTER) : null;
-const pvp = new PvpService(PVP_DATA, { '1v1': BOT_AFTER ?? 12, '4v4': BOT_AFTER ?? 18 });
+const pvp = new PvpService(sb ? new SupabasePvpStore(sb) : new FilePvpStore(PVP_DATA), { '1v1': BOT_AFTER ?? 12, '4v4': BOT_AFTER ?? 18 });
+const account = accountRoutes(sb, { publicUrl: process.env.PUBLIC_URL });
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = process.env.STATIC_DIR
   || [path.resolve(here, '../dist'), path.resolve(here, '../../dist')].find((d) => fs.existsSync(path.join(d, 'index.html')))
@@ -50,6 +57,10 @@ function openRoom(code: string): Room {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || '/', 'http://x');
+  if (url.pathname === '/api/config' || url.pathname === '/api/save' || url.pathname.startsWith('/api/auth/')) {
+    void account(req, res, url);
+    return;
+  }
   if (url.pathname === '/healthz' || url.pathname === '/api/stats' || url.pathname === '/api/rooms' || url.pathname === '/api/pvp/leaderboard') {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
     const body = url.pathname === '/api/rooms' ? { stats: stats(), rooms: publicRooms() }
@@ -391,7 +402,11 @@ setInterval(() => {
 // 对战匹配
 setInterval(() => pvp.tick(), 500);
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(sig, () => { pvp.saveNow(); process.exit(0); });
+  process.on(sig, () => {
+    // 重新部署时先把还没写回的对战数据写完（最多等 5 秒）
+    const done = Promise.resolve(pvp.saveNow()).catch(() => null);
+    void Promise.race([done, new Promise((r) => setTimeout(r, 5000))]).then(() => process.exit(0));
+  });
 }
 
 function log(s: string) {
@@ -399,5 +414,5 @@ function log(s: string) {
 }
 
 server.listen(PORT, HOST, () => {
-  console.log(`宝可肉鸽服务器已启动：http://localhost:${PORT}  （静态目录 ${STATIC_DIR}）`);
+  console.log(`宝可肉鸽服务器已启动：http://localhost:${PORT}  （静态目录 ${STATIC_DIR}；${sb ? '账号与云存档：Supabase' : '没有配置 Supabase：只用本机存档'}）`);
 });
