@@ -248,6 +248,7 @@ export class PvpSim extends GameSim {
     p.bot = on;
     if (on) this.initBot(p);
     else p.moving = false;
+    this.dirty.add(id);
   }
 
   private credit(p: SimPlayer, t: SimPlayer, dealt: number, key: string) {

@@ -595,7 +595,7 @@ button.card:hover { transform: translateY(-0.1875rem); background: rgba(255, 255
 .pvp-chip-body { width: 100%; min-width: 0; display: grid; gap: 0.125rem; }
 .pvp-mid { text-align: center; min-width: 6rem; }
 /* 自动战斗开关（右下角） */
-.hud-auto { position: absolute; right: 0.625rem; bottom: 0.75rem; display: flex; align-items: center; gap: 0.3125rem; padding: 0.3125rem 0.625rem; }
+#hud > .hud-auto { position: absolute; right: 0.625rem; bottom: 0.75rem; left: auto; top: auto; display: flex; align-items: center; gap: 0.3125rem; padding: 0.3125rem 0.625rem; z-index: 2; }
 .hud-auto.on { border-color: var(--gold); color: var(--gold); background: rgba(70, 52, 8, .85); }
 .hud-auto.on .uico { animation: auto-bob 0.8s steps(2) infinite; }
 @keyframes auto-bob { 50% { transform: translateY(-0.125rem); } }
@@ -793,6 +793,7 @@ label.set-row .set-label { display: flex; align-items: center; gap: 0.375rem; }
 .card-body { font-size: 0.75rem; line-height: 1.05rem; overflow: hidden; min-height: 0; }
 .card .buy { flex: none; }
 .card.big { height: auto; max-height: 100%; width: 22rem; font-size: 0.8125rem; line-height: 1.25; }
+.card.big .card-title { height: auto; display: flex; align-items: center; justify-content: center; gap: 0.375rem; flex-wrap: wrap; -webkit-line-clamp: unset; }
 .card.big .info { gap: 0.125rem; }
 .card.big .info > div { font-size: 0.8125rem; }
 .card.big img.ico { width: 3rem; height: 3rem; }
@@ -1044,7 +1045,7 @@ body.pad-ps {
   --g-a: '✕'; --g-b: '○'; --g-x: '□'; --g-y: '△'; --g-lb: 'L1'; --g-rb: 'R1'; --g-lt: 'L2'; --g-start: '≡';
   --c-a: #4d7ee0; --c-b: #e04f5a; --c-x: #c66ac8; --c-y: #2fb38f;
 }
-body.pad :is([data-key], [data-back], .pad-focus):not(.hud-pause):not(.lock) { position: relative; }
+body.pad :is([data-key], [data-back], .pad-focus):not(.hud-pause):not(.hud-auto):not(.lock) { position: relative; }
 body.pad :is([data-key], [data-back], .pad-focus)::after {
   position: absolute; top: -0.4375rem; right: -0.4375rem; z-index: 3; pointer-events: none;
   min-width: 1.25rem; height: 1.25rem; padding: 0 0.1875rem; border-radius: 0.625rem;

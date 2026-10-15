@@ -46,28 +46,73 @@ export function toast(text: string, kind: 'info' | 'error' | 'gold' = 'info', ms
 }
 
 let tipEl: HTMLElement | null = null;
-/** 鼠标悬停提示 */
-export function tip(el: HTMLElement, content: () => Node | string) {
-  el.addEventListener('mouseenter', (e) => {
-    tipEl ??= $('#tooltip');
-    clear(tipEl);
-    const c = content();
-    tipEl.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
-    tipEl.classList.remove('hidden');
-    place(e as MouseEvent);
-  });
-  el.addEventListener('mousemove', (e) => place(e as MouseEvent));
-  el.addEventListener('mouseleave', () => tipEl?.classList.add('hidden'));
+/** 当前这张提示是从哪个元素冒出来的。元素被拆掉（关掉界面、对战结束）时提示也要一起消失 */
+let tipOwner: HTMLElement | null = null;
+let tipRaf = 0;
+
+function canHover() {
+  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 }
 
-export function hideTip() { tipEl?.classList.add('hidden'); }
-
-function place(e: MouseEvent) {
+function placeAt(x: number, y: number) {
   if (!tipEl) return;
   const w = tipEl.offsetWidth, hh = tipEl.offsetHeight;
-  let x = e.clientX + 16, y = e.clientY + 16;
-  if (x + w > window.innerWidth - 8) x = e.clientX - w - 12;
-  if (y + hh > window.innerHeight - 8) y = window.innerHeight - hh - 8;
-  tipEl.style.left = `${x}px`;
-  tipEl.style.top = `${y}px`;
+  let left = x + 16, top = y + 16;
+  if (left + w > window.innerWidth - 8) left = x - w - 12;
+  if (top + hh > window.innerHeight - 8) top = window.innerHeight - hh - 8;
+  // 坐标是 0 时不要贴到左上角（触屏有时会给出 0,0）
+  if (x < 2 && y < 2 && tipOwner) {
+    const r = tipOwner.getBoundingClientRect();
+    left = Math.min(window.innerWidth - w - 8, Math.max(8, r.left));
+    top = Math.min(window.innerHeight - hh - 8, Math.max(8, r.bottom + 8));
+  }
+  tipEl.style.left = `${Math.max(8, left)}px`;
+  tipEl.style.top = `${Math.max(8, top)}px`;
+}
+
+function watchTip() {
+  tipRaf = 0;
+  if (!tipEl || tipEl.classList.contains('hidden')) return;
+  if (!tipOwner?.isConnected) { hideTip(); return; }
+  tipRaf = requestAnimationFrame(watchTip);
+}
+
+function showTip(el: HTMLElement, content: () => Node | string, x: number, y: number) {
+  tipEl ??= $('#tooltip');
+  clear(tipEl);
+  const c = content();
+  tipEl.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  tipEl.classList.remove('hidden');
+  tipOwner = el;
+  placeAt(x, y);
+  if (!tipRaf) tipRaf = requestAnimationFrame(watchTip);
+}
+
+/** 鼠标悬停提示。触屏没有悬停，点一下在按钮旁边显示，点别处或界面关掉就收起 */
+export function tip(el: HTMLElement, content: () => Node | string) {
+  el.addEventListener('mouseenter', (e) => {
+    if (!canHover()) return;
+    showTip(el, content, e.clientX, e.clientY);
+  });
+  el.addEventListener('mousemove', (e) => { if (tipOwner === el && canHover()) placeAt(e.clientX, e.clientY); });
+  el.addEventListener('mouseleave', () => { if (tipOwner === el) hideTip(); });
+  el.addEventListener('pointerup', (e) => {
+    if (e.pointerType === 'mouse' || canHover()) return;
+    if (tipOwner === el && tipEl && !tipEl.classList.contains('hidden')) { hideTip(); return; }
+    const r = el.getBoundingClientRect();
+    showTip(el, content, r.left + r.width / 2, r.bottom);
+  });
+}
+
+export function hideTip() {
+  tipEl?.classList.add('hidden');
+  tipOwner = null;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('pointerdown', (e) => {
+    if (!tipOwner) return;
+    if (e.target instanceof Node && tipOwner.contains(e.target)) return;
+    hideTip();
+  }, true);
 }

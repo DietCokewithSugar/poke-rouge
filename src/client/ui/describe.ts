@@ -62,11 +62,12 @@ export function skillInfo(id: string, lv = 1, line?: LineId) {
 export function itemLines(id: string): string[] {
   const it = ITEMS[id];
   const out: string[] = [];
-  if (it.mods) for (const [k, v] of Object.entries(it.mods)) if (k !== 'slots' && v) out.push(fmtMod(k as ModKey, v));
-  if (it.mods?.slots) out.push(`技能栏位 ${it.mods.slots > 0 ? '+' : ''}${it.mods.slots}`);
-  if (it.typeMods) for (const [t, v] of Object.entries(it.typeMods)) out.push(`${TYPE_NAME[t as PType]}系技能伤害 +${v}%`);
-  if (it.desc) out.push(it.desc);
-  if (it.max) out.push(`最多持有 ${it.max} 个`);
+  const add = (s: string) => { if (s && !out.includes(s)) out.push(s); };
+  if (it.mods) for (const [k, v] of Object.entries(it.mods)) if (k !== 'slots' && v) add(fmtMod(k as ModKey, v));
+  if (it.mods?.slots) add(`技能栏位 ${it.mods.slots > 0 ? '+' : ''}${it.mods.slots}`);
+  if (it.typeMods) for (const [t, v] of Object.entries(it.typeMods)) add(`${TYPE_NAME[t as PType]}系技能伤害 +${v}%`);
+  if (it.desc) add(it.desc);
+  if (it.max) add(`最多持有 ${it.max} 个`);
   return out;
 }
 

@@ -5,6 +5,7 @@ import { REVIVE_RADIUS, type Ev, type MeState, type PublicState } from '../../sh
 import { sfx } from '../audio';
 import { FxLayer, drawPickup, drawProj, drawZone, pxCircle, pxRing, twinkle } from '../gfx/fx';
 import { vis, type Trail } from '../gfx/vfx';
+import { shownAmount } from '../../shared/stats';
 import { TYPES } from '../../shared/types';
 import { Animator, dirRow, preload, shadowSize } from '../gfx/sprites';
 import { LINE_OF_DEX } from '../../shared/pokemon';
@@ -197,11 +198,12 @@ export class GameView {
         const v = this.enemyVis.get(id);
         // 受击闪白要有间隔，否则持续挨打的首领会一直是白色剪影
         if (v && v.flash < -0.14) v.flash = 0.08;
-        if (f & 8) { this.fx.text(x, y - 18, String(dmg), '#d890f0', 10, 0.6); break; }
+        if (f & 8) { this.fx.text(x, y - 18, shownAmount(dmg), '#d890f0', 10, 0.6); break; }
         const crit = !!(f & 1);
         this.fx.hit(x, y - 8 * (v?.scale ?? 1), TYPES[n(6)] ?? 'normal', crit);
         const col = crit ? '#ffd23f' : f & 2 ? '#ff8c5a' : f & 4 ? '#a0a8b8' : '#ffffff';
-        this.fx.text(x, y - 20, crit ? `${dmg}!` : String(dmg), col, crit ? 13 : 11, 0.7);
+        const dmgText = shownAmount(dmg);
+        this.fx.text(x, y - 20, crit ? `${dmgText}!` : dmgText, col, crit ? 13 : 11, 0.7);
         if (f & 2 && this.time - this.superEffAt > 2.5) {
           this.superEffAt = this.time;
           this.fx.text(x, y - 34, '效果拔群！', '#ff8c5a', 10, 0.9);
@@ -220,19 +222,20 @@ export class GameView {
           // 对战中打到对手：和打野生宝可梦一样显示伤害数字
           const v = this.playerVis.get(pid);
           if (v && v.flash <= 0) v.flash = 0.1;
-          if (hf & 16) { this.fx.text(pos.x, pos.y - 26, `-${dmg}`, '#d070ff', 10, 0.6); break; }
-          if (hf & 8) { this.fx.text(pos.x, pos.y - 22, String(dmg), '#d890f0', 10, 0.6); break; }
+          const dmgText = shownAmount(dmg);
+          if (hf & 16) { this.fx.text(pos.x, pos.y - 26, `-${dmgText}`, '#d070ff', 10, 0.6); break; }
+          if (hf & 8) { this.fx.text(pos.x, pos.y - 22, dmgText, '#d890f0', 10, 0.6); break; }
           const crit = !!(hf & 1);
           this.fx.hit(pos.x, pos.y - 8, 'normal', crit);
           const col = crit ? '#ffd23f' : hf & 2 ? '#ff8c5a' : hf & 4 ? '#a0a8b8' : '#ffffff';
-          this.fx.text(pos.x, pos.y - 24, crit ? `${dmg}!` : String(dmg), col, crit ? 13 : 11, 0.7);
+          this.fx.text(pos.x, pos.y - 24, crit ? `${dmgText}!` : dmgText, col, crit ? 13 : 11, 0.7);
           if (hf & 2 && by === this.you && this.time - this.superEffAt > 2.5) {
             this.superEffAt = this.time;
             this.fx.text(pos.x, pos.y - 38, '效果拔群！', '#ff8c5a', 10, 0.9);
           }
           if (by === this.you) sfx(crit ? 'crit' : 'hit');
         } else {
-          this.fx.text(pos.x, pos.y - 26, `-${dmg}`, hf & 16 ? '#d070ff' : '#ff5f6d', 12);
+          this.fx.text(pos.x, pos.y - 26, `-${shownAmount(dmg)}`, hf & 16 ? '#d070ff' : '#ff5f6d', 12);
           const v = this.playerVis.get(pid);
           if (v) { v.flash = 0.25; v.anim.play('Hurt'); }
           if (pid === this.you) {
@@ -245,7 +248,7 @@ export class GameView {
       }
       case 'heal': {
         const pos = this.playerPos(n(1));
-        if (pos) this.fx.text(pos.x, pos.y - 26, `+${n(2)}`, '#78f878', 11);
+        if (pos) this.fx.text(pos.x, pos.y - 26, `+${shownAmount(n(2))}`, '#78f878', 11);
         if (n(1) === this.you) sfx('heal');
         break;
       }

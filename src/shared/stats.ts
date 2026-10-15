@@ -164,3 +164,12 @@ export function fmtMod(k: ModKey, v: number): string {
   const n = Number.isInteger(v) ? String(v) : v.toFixed(1);
   return `${MOD_LABEL[k]} ${sign}${n}${PCT_KEYS.has(k) ? '%' : ''}`;
 }
+
+/** 飘字用的整数。20.00000000001 这种浮点误差显示成 20 */
+export function shownAmount(n: number): string {
+  if (!Number.isFinite(n)) return '0';
+  const r = Math.round(n);
+  if (r === 0 && n > 0) return '1';
+  if (r === 0 && n < 0) return '-1';
+  return String(r);
+}
