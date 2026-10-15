@@ -11,7 +11,7 @@ import { TRAINERS, TRAINER_LIST, trainerOf } from '../../shared/trainers';
 import { TYPE_NAME, type PType } from '../../shared/types';
 import type { DifficultyId } from '../../shared/difficulty';
 import { sfx } from '../audio';
-import type { PlaceId, Spot } from '../gfx/town';
+import type { Spot } from '../gfx/town';
 import { trainerFull, trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
 import { iconImg } from '../gfx/icons';
@@ -439,4 +439,3 @@ export class TownHud {
   }
 }
 
-export type { PlaceId };

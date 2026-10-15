@@ -184,10 +184,7 @@ export class BrowseScreen {
     code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 5); });
     const join = () => { if (code.value.length !== 5) { toast('请输入 5 位房间号', 'error'); return; } sfx('click'); a.join(code.value); };
     code.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
-    const pubBtn = iconBtn('eye', '公开房间会出现在列表里；私密房间只能用房间号加入', () => {
-      this.isPublic = !this.isPublic;
-      pubBtn.replaceWith(this.pubButton(pubBtn));
-    }, { cls: 'small', text: '公开房间' });
+    const pubBtn = this.pubButton();
     mount(root, h('div', { class: 'box panel browse' },
       h('div', { class: 'panel-head' },
         h('div', { class: 'row' }, uiIcon('cross', 3), h('h2', null, '宝可梦中心 · 联机冒险'), this.statsEl),
@@ -203,12 +200,12 @@ export class BrowseScreen {
     this.setRooms([]);
   }
 
-  private pubButton(old: HTMLButtonElement) {
+  /** 公开 / 私密切换：点一下换成另一种状态的按钮 */
+  private pubButton(): HTMLButtonElement {
     const b = iconBtn(this.isPublic ? 'eye' : 'lock', '公开房间会出现在列表里；私密房间只能用房间号加入', () => {
       this.isPublic = !this.isPublic;
-      b.replaceWith(this.pubButton(b));
+      b.replaceWith(this.pubButton());
     }, { cls: `small ${this.isPublic ? '' : 'ghost'}`, text: this.isPublic ? '公开房间' : '私密房间' });
-    void old;
     return b;
   }
 

@@ -2,7 +2,7 @@
  * 训练家像素形象：按 TrainerLook（发型、帽子、衣服颜色……）程序化画出 16×24 的行走图，
  * 4 个方向 × 3 帧（站立、迈左脚、迈右脚），自动描边，和宝可梦精灵的画风一致。
  */
-import { TRAINERS, trainerOf, type TrainerLook } from '../../shared/trainers';
+import { trainerOf, type TrainerLook } from '../../shared/trainers';
 import { grid, type Grid } from './vfx';
 
 export const TW = 16;
@@ -226,4 +226,3 @@ export function trainerFull(id: string, scale = 3, cls = 'tfull'): HTMLCanvasEle
   return c;
 }
 
-export const TRAINER_COUNT = Object.keys(TRAINERS).length;
