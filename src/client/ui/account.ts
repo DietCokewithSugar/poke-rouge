@@ -124,12 +124,13 @@ function homeScreen(root: HTMLElement, cloud: Cloud, a: { back(): void; applied(
         h('span', { class: 'small muted' }, `通过${provider}登录`),
       ),
       h('div', { class: 'auth-note', id: 'cloud-status' }, v.status),
-      h('p', { class: 'auth-note' }, '会同步：宝可梦、背包、星之沙、研究所、成就、徽章、训练家、对战身份。音量、界面缩放、帧率和画质只留在这台设备。'),
+      h('p', { class: 'auth-note' }, '会同步宝可梦、背包、星之沙、研究所、成就、徽章、训练家和对战身份。音量、界面缩放、帧率和画质只留在这台设备。'),
       h('h3', { class: 'account-sub' }, '修改密码'),
       passwordFields(cloud, false),
-      h('div', { class: 'account-actions' },
-        h('button', { class: 'btn ghost', onclick: () => { sfx('click'); void cloud.logout().then(() => { toast('已退出登录，进度还在这台设备上'); a.applied(); accountScreen(root, cloud, a); }); } }, '退出登录'),
-      ),
+    ),
+    h('div', { class: 'panel-foot' },
+      h('span', { class: 'set-note' }, '退出后，这台设备上的进度还在'),
+      h('button', { class: 'btn ghost small', onclick: () => { sfx('click'); void cloud.logout().then(() => { toast('已退出登录，进度还在这台设备上'); a.applied(); accountScreen(root, cloud, a); }); } }, '退出登录'),
     ),
   ), 'account');
 }
