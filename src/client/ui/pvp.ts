@@ -401,7 +401,7 @@ export class PvpScreen {
         h('div', { class: 'grow' },
           h('div', { class: 'pvp-score' }, h('b', null, rating), h('span', { class: 'muted small' }, rec?.rank ? ` 第 ${rec.rank} 名` : rec?.games ? '' : ' 定级中')),
           h('div', { class: 'tier-bar' }, h('div', { style: `width:${Math.round(T.progress * 100)}%;background:${T.tier.color}` })),
-          h('div', { class: 'small muted' }, T.next ? `距离${T.next.name}还差 ${T.next.min - rating} 分` : '最高段位'),
+          h('div', { class: 'small muted' }, T.next ? `离${T.next.name}还差 ${T.next.min - rating} 分` : '最高段位'),
           h('div', { class: 'small' }, rec?.games ? `${rec.wins} 胜 ${rec.losses} 负${rec.draws ? ` ${rec.draws} 平` : ''}${rec.streak > 1 ? ` · ${rec.streak} 连胜` : ''}` : '还没有排位记录'),
         ),
       ),
