@@ -680,24 +680,27 @@ export class GameView {
         ctx.fillText(label, ex, ey + 18 * S * k);
       }
     }
-    // 屏幕层：画面外的闪光宝可梦，在画面边上用一颗星指出方向
+    // 屏幕层：画面外的闪光宝可梦，在画面边上用一颗星指出方向（上下留出 HUD 的位置）
     if (ip) {
-      const W = this.canvas.width, H = this.canvas.height, m = 16 * S;
+      const W = this.canvas.width, H = this.canvas.height;
+      const mx = Math.max(16 * S, W * 0.06), top = Math.max(16 * S, H * 0.2), bottom = Math.max(16 * S, H * 0.18);
+      const k = S + 1;
       for (const e of ip.b.s.enemies) {
         if (!this.isShiny(e.id, e.kind)) continue;
         const sx = (e.x - cx) * S, sy = (e.y - 10 - cy) * S;
         if (sx >= 0 && sy >= 0 && sx <= W && sy <= H) continue;
-        const ex = Math.max(m, Math.min(W - m, sx)), ey = Math.max(m, Math.min(H - m, sy));
+        const ex = Math.max(mx, Math.min(W - mx, sx)), ey = Math.max(top, Math.min(H - bottom, sy));
         const a = Math.atan2(sy - ey, sx - ex);
         ctx.save();
         ctx.translate(Math.round(ex), Math.round(ey));
-        ctx.scale(S, S);
+        ctx.scale(k, k);
         ctx.globalAlpha = Math.floor(t * 4) % 2 ? 1 : 0.7;
+        const ux = Math.cos(a), uy = Math.sin(a);
         ctx.fillStyle = '#9ae6ff';
         ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * 10, Math.sin(a) * 10);
-        ctx.lineTo(Math.cos(a + 0.5) * 6, Math.sin(a + 0.5) * 6);
-        ctx.lineTo(Math.cos(a - 0.5) * 6, Math.sin(a - 0.5) * 6);
+        ctx.moveTo(ux * 15, uy * 15);
+        ctx.lineTo(ux * 6 - uy * 3, uy * 6 + ux * 3);
+        ctx.lineTo(ux * 6 + uy * 3, uy * 6 - ux * 3);
         ctx.closePath();
         ctx.fill();
         star(ctx, 0, 0);

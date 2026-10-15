@@ -915,7 +915,7 @@ class App {
       const M = PVP_MODES[mode];
       if (this.pvpMatch) this.pvpMatch.seats = pvpSeats;
       // 单挑时同一位训练家的三只头上显示宝可梦的名字，团战显示训练家的名字
-      if (M.team > 1) for (const s of pvpSeats) this.view.names.set(s.id, LINES[s.line]?.forms.find((f) => f.dex === s.dex)?.name ?? s.name);
+      if (M.team > 1) for (const s of pvpSeats) this.view.names.set(s.id, shinyName(LINES[s.line]?.forms.find((f) => f.dex === s.dex)?.name ?? s.name, s.shiny));
       this.view.setPvp(pvpSeats, M.revive);
       this.hud = new Hud(this.ui, null, () => this.leavePvp(), this.pvpMatch?.practice ? '再按一次离开' : '离开会判负，再按一次');
       this.hud.setPvp(mode, pvpSeats, this.you);
