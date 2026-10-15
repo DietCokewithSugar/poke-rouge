@@ -133,7 +133,8 @@ export function setupScreen(root: HTMLElement, p: Profile, onDone: (trainer: str
     if (step === 2) {
       const input = h('input', { class: 'field setup-input', maxlength: 12, placeholder: TRAINERS[trainer].name, value: name }) as HTMLInputElement;
       input.addEventListener('input', () => { name = input.value.trim().slice(0, 12); });
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(3); });
+      // 阻止默认行为：否则回车会接着点到下一步新出现的按钮，一下跳过两步
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(3); } });
       requestAnimationFrame(() => input.focus({ preventScroll: true }));
       return h('div', { class: 'setup-step setup-name' },
         h('div', { class: 'setup-preview' }, trainerFull(trainer, 2)),
@@ -468,8 +469,7 @@ export class TownHud {
     this.goal.addEventListener('click', () => { sfx('click'); a.go(nextGoal(this.p).place); });
     this.onlineBtn = iconBtn('friends', '在线玩家', () => { sfx('click'); this.onlineList.classList.toggle('hidden'); this.renderOnline(); }, { cls: 'small th-btn', text: '1' });
     this.root = h('div', { id: 'town-hud' },
-      this.card,
-      this.goal,
+      h('div', { class: 'th-left' }, this.card, this.goal),
       h('div', { class: 'th-top' },
         this.onlineBtn,
         iconBtn('gear', '设置', () => { sfx('click'); a.settings(); }, { cls: 'small th-btn' }),
