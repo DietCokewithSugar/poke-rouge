@@ -65,7 +65,7 @@ export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stat
         h('span', { class: 'mi-text' }, p.setup ? '继续游戏' : '开始游戏',
           h('small', null, p.setup ? `${p.name || '训练家'} · ${TRAINERS[p.trainer]?.name ?? ''} · 伙伴 ${partnerName(p)} · 已有 ${owned} 种宝可梦` : '选择训练家与第一只宝可梦，从真新镇出发'))),
       h('button', { class: 'menu-item', onclick: () => { sfx('click'); a.settings(); } },
-        h('span', { class: 'mi-ico' }, uiIcon('gear', 3)), h('span', { class: 'mi-text' }, '设置', h('small', null, '音量、界面大小、帧率与画质'))),
+        h('span', { class: 'mi-ico' }, uiIcon('gear', 3)), h('span', { class: 'mi-text' }, '设置', h('small', null, '音量、界面缩放、帧率与画质、手柄'))),
       h('button', { class: 'menu-item', onclick: () => { sfx('click'); a.credits(); } },
         h('span', { class: 'mi-ico' }, uiIcon('book', 3)), h('span', { class: 'mi-text' }, '说明与致谢', h('small', null, '玩法、操作、素材来源'))),
       h('div', { class: 'small muted title-online', id: 'title-online' }, onlineText(stats)),

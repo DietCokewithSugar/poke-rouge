@@ -13,7 +13,7 @@ const KEY = 'poke-rouge-save-v1';
 
 export interface Settings {
   volume: number; music: number; damageNumbers: boolean; gbFilter: boolean; shake: boolean;
-  /** 界面大小：100% 时最大的界面占画面 90% */
+  /** 界面缩放：100% 时最大的界面占画面 90% */
   uiScale: number;
   fps: 30 | 60 | 120;
   /** 流畅：高分屏上按 1 倍像素渲染画面，减轻显卡负担 */

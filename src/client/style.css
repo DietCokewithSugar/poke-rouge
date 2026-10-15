@@ -24,7 +24,7 @@
 * { box-sizing: border-box; }
 .hidden { display: none !important; }
 html, body { height: 100%; margin: 0; }
-/* 整个界面以 rem 为单位；根字号由 ui/layout.ts 按窗口大小与「界面大小」设置计算，所有卡片界面等比缩放 */
+/* 整个界面以 rem 为单位；根字号由 ui/layout.ts 按窗口大小与「界面缩放」设置计算，所有卡片界面等比缩放 */
 html { font-size: 16px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   background: #050914;
