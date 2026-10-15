@@ -9,7 +9,6 @@ import { Animator } from '../gfx/sprites';
 import { trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
 import { clear, h, tip } from './dom';
-import { confirmButton } from './layout';
 import { skillIcon, skillInfo } from './describe';
 
 export class Hud {
@@ -52,11 +51,11 @@ export class Hud {
   private lastCount = -1;
   private autoBtn: HTMLButtonElement | null = null;
 
-  constructor(parent: HTMLElement, onPause: (() => void) | null, onLeave?: () => void, leaveConfirm = '再按一次离开') {
-    this.pauseBtn = onLeave
-      ? confirmButton('离开', leaveConfirm, 'btn small hud-pause', onLeave, { 'data-key': 'start' }, 'door')
-      : h('button', { class: 'btn small icon hud-pause', 'data-key': 'start', title: '暂停', 'aria-label': '暂停', onclick: () => onPause?.() }, uiIcon('pause', 2));
-    if (!onPause && !onLeave) this.pauseBtn.classList.add('hidden');
+  /** onMenu：单人是暂停（pause），联机和对战是菜单（menu：设置、离开） */
+  constructor(parent: HTMLElement, onMenu: (() => void) | null, kind: 'pause' | 'menu' = 'pause') {
+    const label = kind === 'pause' ? '暂停' : '菜单（设置、离开）';
+    this.pauseBtn = h('button', { class: 'btn small icon hud-pause', 'data-key': 'start', title: label, 'aria-label': label, onclick: () => onMenu?.() }, uiIcon(kind, 2));
+    if (!onMenu) this.pauseBtn.classList.add('hidden');
     this.root = h('div', { id: 'hud' },
       h('div', { class: 'hud-me box tight' },
         this.me.trainer,
@@ -263,7 +262,8 @@ export class Hud {
         const row = this.team.querySelector(`[data-id="${p.id}"]`) as HTMLElement | null;
         if (!row) continue;
         (row.querySelector('.bar-fill') as HTMLElement).style.width = `${(p.hp / Math.max(1, p.maxHp)) * 100}%`;
-        set(row.querySelector('.team-status') as HTMLElement, p.down ? '濒死！靠近它来救援' : pub.phase === 'inter' ? (p.ready ? '已准备' : '购物中…') : `Lv${p.level} · 击败 ${p.kills}`);
+        set(row.querySelector('.team-status') as HTMLElement, p.down ? '濒死！靠近它来救援' : p.away ? '离开了 · AI 代打中' : pub.phase === 'inter' ? (p.ready ? '已准备' : '购物中…') : `Lv${p.level} · 击败 ${p.kills}`);
+        row.classList.toggle('away', !!p.away);
         row.classList.toggle('down', p.down);
       }
     }

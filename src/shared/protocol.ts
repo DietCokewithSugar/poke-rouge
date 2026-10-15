@@ -56,6 +56,8 @@ export interface JoinIdentity { trainer?: string; line?: LineId; shiny?: boolean
 export type C2S =
   | ({ t: 'create'; name: string; meta: Record<string, number>; v: number; public?: boolean } & JoinIdentity)
   | ({ t: 'join'; code: string; name: string; meta: Record<string, number>; v: number } & JoinIdentity)
+  /** 回到正在进行的联机冒险（离开或断线后，AI 一直在替你战斗）；token 是加入房间时服务器给的 */
+  | { t: 'rejoin'; code: string; token: string; v: number }
   | { t: 'pick'; line: LineId; shiny?: boolean }
   | { t: 'ready'; on: boolean }
   | { t: 'start' }
@@ -65,7 +67,7 @@ export type C2S =
   | { t: 'visibility'; public: boolean }
   | { t: 'browse'; on: boolean }
   | { t: 'stats' }
-  | { t: 'debug'; cmd: 'down' | 'endWave' | 'xp' | 'shiny' }
+  | { t: 'debug'; cmd: 'down' | 'downAll' | 'endWave' | 'xp' | 'shiny' }
   /** k：客户端收到的最新快照编号（顺便确认收到，服务器据此估计网络排队） */
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number; k?: number }
   | { t: 'ack'; k: number }
@@ -85,7 +87,10 @@ export type C2S =
   | Command;
 
 export type S2C =
-  | { t: 'joined'; code: string; you: number; solo: boolean }
+  /** token：离开或断线后用来回到这局冒险 */
+  | { t: 'joined'; code: string; you: number; solo: boolean; token?: string }
+  /** 回不去了（这局已经结束、房间不在了） */
+  | { t: 'rejoinFail'; msg: string }
   | { t: 'error'; msg: string; fatal?: boolean }
   | { t: 'lobby'; code: string; players: LobbyPlayer[]; inGame: boolean; difficulty: DifficultyId; public: boolean }
   | { t: 'rooms'; stats: ServerStats; rooms: RoomInfo[] }

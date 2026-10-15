@@ -489,7 +489,7 @@ export function quickMenu(root: HTMLElement, go: (id: PlaceId) => void, back: ()
 
 // ---------------------------------------------------------------- 镇上的 HUD
 
-export interface TownHudActions { card(): void; settings(): void; help(): void; title(): void; interact(): void; go(id: PlaceId, tab?: number): void }
+export interface TownHudActions { card(): void; settings(): void; help(): void; title(): void; interact(): void; go(id: PlaceId, tab?: number): void; rejoin(): void }
 
 const WHERE_NAME: Record<string, string> = { town: '在真新镇', menu: '在标题界面', room: '在联机房间', game: '冒险中', pvp: '对战中' };
 
@@ -501,6 +501,8 @@ export class TownHud {
   private prompt = h('button', { class: 'th-prompt box tight hidden' });
   private dust = h('div', { class: 'th-dust box tight' });
   private goal = h('button', { class: 'th-goal box tight' });
+  /** 进行中的联机冒险：离开或断线后从这里回去 */
+  private rejoinBtn = h('button', { class: 'th-rejoin box tight hidden' });
   private peers: OnlinePeer[] = [];
   private total = 1;
 
@@ -508,9 +510,10 @@ export class TownHud {
     this.card.addEventListener('click', () => { sfx('click'); a.card(); });
     this.prompt.addEventListener('click', () => a.interact());
     this.goal.addEventListener('click', () => { sfx('click'); a.go(nextGoal(this.p).place); });
+    this.rejoinBtn.addEventListener('click', () => a.rejoin());
     this.onlineBtn = iconBtn('friends', '在线玩家', () => { sfx('click'); this.onlineList.classList.toggle('hidden'); this.renderOnline(); }, { cls: 'small th-btn', text: '1' });
     this.root = h('div', { id: 'town-hud' },
-      h('div', { class: 'th-left' }, this.card, this.goal),
+      h('div', { class: 'th-left' }, this.card, this.goal, this.rejoinBtn),
       h('div', { class: 'th-top' },
         this.onlineBtn,
         iconBtn('gear', '设置', () => { sfx('click'); a.settings(); }, { cls: 'small th-btn' }),
@@ -561,6 +564,15 @@ export class TownHud {
     clear(this.goal);
     this.goal.append(h('span', { class: 'th-goal-tag' }, '目标'), uiIcon(g.icon, 1), h('span', { class: 'th-goal-text' }, g.text), h('span', { class: 'th-goal-go' }, '▶'));
     this.goal.title = `下一步：${g.text}（点一下直接前往）`;
+  }
+
+  /** 有进行中的联机冒险时显示「回到冒险」 */
+  setRejoin(s: { code: string } | null) {
+    this.rejoinBtn.classList.toggle('hidden', !s);
+    clear(this.rejoinBtn);
+    if (!s) return;
+    this.rejoinBtn.append(uiIcon('cross', 2), h('span', { class: 'th-rejoin-text' }, h('b', null, '回到联机冒险'), h('small', null, `房间 ${s.code} · AI 正在替你战斗`)), h('span', { class: 'th-goal-go' }, '▶'));
+    this.rejoinBtn.title = '回到离开或断线的那局联机冒险';
   }
 
   setOnline(peers: OnlinePeer[], total?: number) {

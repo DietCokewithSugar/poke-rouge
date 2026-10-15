@@ -171,7 +171,7 @@ export function lobbyScreen(root: HTMLElement, p: Profile, code: string, you: nu
 
 // ---------------------------------------------------------------- 宝可梦中心：联机房间列表
 
-export interface BrowseActions { create(isPublic: boolean): void; join(code: string): void; back(): void }
+export interface BrowseActions { create(isPublic: boolean): void; join(code: string): void; back(): void; rejoin(): void }
 
 const ROOMS_PER_PAGE = 4;
 
@@ -179,21 +179,29 @@ export class BrowseScreen {
   private list = h('div', { class: 'room-area' });
   private statsEl = h('div', { class: 'browse-stats' });
   private isPublic = true;
+  /** 每页几个房间：上面有「回到冒险」时少一个，界面高度不变 */
+  private per = ROOMS_PER_PAGE;
   private rooms: RoomInfo[] = [];
   private page = 0;
-  constructor(root: HTMLElement, private a: BrowseActions, connected: boolean) {
+  /** rejoinCode：有进行中的联机冒险（离开或断线了）时，最上面显示「回到冒险」 */
+  constructor(root: HTMLElement, private a: BrowseActions, connected: boolean, rejoinCode: string | null = null) {
     const code = h('input', { class: 'field code', maxlength: 5, inputmode: 'numeric', placeholder: '房间号' }) as HTMLInputElement;
     code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 5); });
     const join = () => { if (code.value.length !== 5) { toast('请输入 5 位房间号', 'error'); return; } sfx('click'); a.join(code.value); };
     code.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
     const pubBtn = this.pubButton();
+    if (rejoinCode) this.per = ROOMS_PER_PAGE - 1;
     mount(root, h('div', { class: 'box panel browse' },
       h('div', { class: 'panel-head' },
         h('div', { class: 'row' }, uiIcon('cross', 3), h('h2', null, '宝可梦中心 · 联机冒险'), this.statsEl),
         iconBtn('back', '回到真新镇', a.back, { attrs: { 'data-back': '1' }, cls: 'ghost small', text: '出门' }),
       ),
+      rejoinCode ? h('div', { class: 'browse-rejoin' },
+        h('div', null, h('b', null, `你在房间 ${rejoinCode} 的冒险还在继续`), h('div', { class: 'small muted' }, '离开期间 AI 一直在替你战斗，回去就能接着玩。')),
+        h('button', { class: 'btn gold', 'data-key': 'y', onclick: () => { sfx('click'); a.rejoin(); } }, '回到冒险'),
+      ) : null,
       h('div', { class: 'browse-actions' },
-        h('div', { class: 'row' }, h('button', { class: 'btn gold', 'data-key': 'y', onclick: () => { sfx('click'); a.create(this.isPublic); } }, uiIcon('plus', 2), ' 创建房间'), pubBtn),
+        h('div', { class: 'row' }, h('button', { class: `btn ${rejoinCode ? '' : 'gold'}`, 'data-key': rejoinCode ? undefined : 'y', onclick: () => { sfx('click'); a.create(this.isPublic); } }, uiIcon('plus', 2), ' 创建房间'), pubBtn),
         h('div', { class: 'row' }, code, iconBtn('next', '加入房间', join, { text: '加入' })),
       ),
       this.list,
@@ -229,7 +237,7 @@ export class BrowseScreen {
 
   private renderRooms() {
     clear(this.list);
-    const pg = pager(this.rooms, ROOMS_PER_PAGE, this.page, (r) => this.roomCard(r), {
+    const pg = pager(this.rooms, this.per, this.page, (r) => this.roomCard(r), {
       cls: 'room-list',
       empty: () => h('div', { class: 'muted' }, '还没有公开房间，创建一个等朋友加入吧！'),
       filler: () => h('div', { class: 'room-card filler' }),
@@ -413,13 +421,23 @@ export function creditsScreen(root: HTMLElement, onBack: () => void, tab = 0) {
   ), 'credits');
 }
 
-export function pauseScreen(root: HTMLElement, onResume: () => void, onSettings: () => void, onQuit: () => void) {
+/** 暂停（单人）/ 菜单（联机、对战：游戏不会暂停） */
+export interface PauseOpts {
+  menu?: boolean;
+  note?: string;
+  resume(): void;
+  settings(): void;
+  quit: { label: string; confirm: string; run(): void };
+}
+
+export function pauseScreen(root: HTMLElement, o: PauseOpts) {
   mount(root, h('div', { class: 'box pause' },
-    h('h2', null, uiIcon('pause', 3), ' 暂停'),
+    h('h2', null, uiIcon(o.menu ? 'menu' : 'pause', 3), o.menu ? ' 菜单' : ' 暂停'),
+    o.note ? h('p', { class: 'pause-note' }, o.note) : null,
     h('div', { class: 'menu-list' },
-      h('button', { class: 'menu-item play', 'data-key': 'start', onclick: onResume }, h('span', { class: 'mi-ico' }, uiIcon('play', 3)), h('span', { class: 'mi-text' }, '继续')),
-      h('button', { class: 'menu-item', onclick: onSettings }, h('span', { class: 'mi-ico' }, uiIcon('gear', 3)), h('span', { class: 'mi-text' }, '设置')),
-      confirmButton('放弃本局，回到真新镇', '再点一次确认放弃', 'menu-item', onQuit, {}, 'door'),
+      h('button', { class: 'menu-item play', 'data-key': 'start', 'data-back': '1', onclick: o.resume }, h('span', { class: 'mi-ico' }, uiIcon('play', 3)), h('span', { class: 'mi-text' }, '继续')),
+      h('button', { class: 'menu-item', onclick: o.settings }, h('span', { class: 'mi-ico' }, uiIcon('gear', 3)), h('span', { class: 'mi-text' }, '设置')),
+      confirmButton(o.quit.label, o.quit.confirm, 'menu-item', o.quit.run, {}, 'door'),
     ),
   ), 'pause');
 }

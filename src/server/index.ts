@@ -36,6 +36,17 @@ const MIME: Record<string, string> = {
 
 const rooms = new Map<string, Room>();
 Room.allowDebug = process.env.POKE_DEBUG === '1';
+/** 对局结束时还没回来的玩家的结算（token → 消息）：回来时补发，保留 30 分钟 */
+const awayResults = new Map<string, { msg: string; at: number }>();
+const AWAY_RESULT_TTL = 30 * 60 * 1000;
+
+function openRoom(code: string): Room {
+  const room = new Room(code);
+  room.onEmpty = () => rooms.delete(room.code);
+  room.onAwayEnd = (token, msg) => awayResults.set(token, { msg, at: Date.now() });
+  rooms.set(code, room);
+  return room;
+}
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url || '/', 'http://x');
@@ -209,10 +220,27 @@ wss.on('connection', (ws: WebSocket) => {
       return;
     }
     if (msg.t === 'leave') {
-      c.room?.leave(c.id);
+      c.room?.leave(c.id, conn);
       c.room = null;
       leavePvp();
       sendJson(c, { t: 'left' });
+      return;
+    }
+    if (msg.t === 'rejoin') {
+      c.room?.leave(c.id, conn);
+      c.room = null;
+      leavePvp();
+      const token = String(msg.token ?? '');
+      const room = rooms.get(String(msg.code ?? '').trim());
+      const res = room ? room.rejoin(conn, token, msg.v) : '这局冒险已经结束了';
+      if (typeof res === 'number' && room) {
+        c.room = room; c.id = res; c.browsing = false;
+        log(`房间 ${room.code} 有人回来了`);
+        return;
+      }
+      const done = token ? awayResults.get(token) : undefined;
+      if (done) { awayResults.delete(token); conn.send(done.msg); return; }
+      sendJson(c, { t: 'rejoinFail', msg: String(res) });
       return;
     }
     if (c.pvp && !c.pvp.ended) { c.pvp.handle(c.pvpId, msg); return; }
@@ -220,12 +248,10 @@ wss.on('connection', (ws: WebSocket) => {
       if ((msg.t === 'create' || msg.t === 'join') && pvp.queued(c)) pvp.cancel(c);
       if (msg.t === 'create') {
         if (rooms.size >= MAX_ROOMS) return fail('服务器房间已满，请稍后再试');
-        const room = new Room(newCode());
+        const room = openRoom(newCode());
         room.isPublic = msg.public !== false;
-        room.onEmpty = () => rooms.delete(room.code);
         const res = room.join(conn, msg.name, msg.meta, msg.v, msg);
-        if (typeof res === 'string') return fail(res);
-        rooms.set(room.code, room);
+        if (typeof res === 'string') { rooms.delete(room.code); return fail(res); }
         c.room = room; c.id = res; c.browsing = false;
         log(`房间 ${room.code} 创建`);
       } else if (msg.t === 'join') {
@@ -240,7 +266,7 @@ wss.on('connection', (ws: WebSocket) => {
     c.room.handle(c.id, msg);
   });
   ws.on('close', () => {
-    c.room?.leave(c.id);
+    c.room?.leave(c.id, conn);
     c.room = null;
     leavePvp();
   });
@@ -298,6 +324,12 @@ setInterval(() => {
 
 // 消息额度：每秒恢复，防止刷屏
 setInterval(() => { for (const c of clients) c.budget = Math.min(200, c.budget + 120); }, 1000);
+
+// 过期的暂存结算
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, r] of awayResults) if (now - r.at > AWAY_RESULT_TTL) awayResults.delete(token);
+}, 60 * 1000);
 
 // 心跳
 setInterval(() => {

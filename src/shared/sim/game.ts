@@ -12,6 +12,7 @@ import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, 
 import type { PType } from '../types';
 import { updateEnemy } from './ai';
 import { autopilot } from './autopilot';
+import { autoShop } from './autoshop';
 import { PLAYER_R, beamHit, healMult, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
 import {
@@ -102,7 +103,7 @@ export interface PublicState {
   biome: number;
   interLeft: number;
   boss: { name: string; hp: number; max: number } | null;
-  players: { id: number; name: string; trainer: string; line: LineId; dex: number; shiny?: boolean; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean }[];
+  players: { id: number; name: string; trainer: string; line: LineId; dex: number; shiny?: boolean; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean; away?: boolean }[];
   /** 对战模式的额外信息 */
   pvp?: PvpPublic;
 }
@@ -547,6 +548,12 @@ export class GameSim {
     this.time += dt;
     if (this.phase === 'inter') {
       this.interT += dt;
+      // 离开房间的玩家由 AI 替他选升级、逛商店，然后准备出发（每秒最多试一次）
+      for (const p of this.players) {
+        if (!p.away || p.ready || this.time - p.autoShopAt < 1) continue;
+        p.autoShopAt = this.time;
+        autoShop(this, p);
+      }
       const allReady = this.players.every((p) => p.ready);
       if (allReady || (this.players.length > 1 && this.interT > INTERMISSION_TIMEOUT)) this.startWave();
       return;
@@ -937,9 +944,20 @@ export class GameSim {
   /** AI 辅助战斗：由服务器替这位玩家走位（客户端不再上报位置） */
   setAuto(id: number, on: boolean) {
     const p = this.players.find((q) => q.id === id);
-    if (!p || p.bot === on) return;
+    if (!p || p.bot === on || p.away) return;
     p.bot = on;
     p.moving = false;
+  }
+
+  /** 联机时玩家离开 / 回到房间：离开期间走位和商店都交给 AI */
+  setAway(id: number, away: boolean) {
+    const p = this.players.find((q) => q.id === id);
+    if (!p || p.away === away) return;
+    p.away = away;
+    p.bot = away;
+    p.moving = false;
+    this.emit(['msg', away ? `${p.name} 离开了，AI 先替 TA 战斗` : `${p.name} 回来了！`]);
+    this.dirty.add(p.id);
   }
 
   setPlayerPos(id: number, x: number, y: number, moving: boolean, dir: number) {
@@ -1063,7 +1081,7 @@ export class GameSim {
       boss: this.boss && !this.boss.dead ? { name: this.boss.def.name, hp: Math.max(0, Math.round(this.boss.hp)), max: this.boss.maxHp } : null,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, shiny: p.shiny || undefined, level: p.level,
-        hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills, bot: p.bot || undefined,
+        hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills, bot: p.bot || undefined, away: p.away || undefined,
       })),
     };
   }

@@ -3,7 +3,7 @@ import { DIFFICULTY_IDS, type DifficultyId } from './difficulty';
 import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type JoinIdentity, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
 import { trainerOf } from './trainers';
 import { PeerSync, cullEvents, type Conn } from './netsync';
-import { GameSim, TICK_RATE } from './sim/game';
+import { GameSim, TICK_RATE, type Ev } from './sim/game';
 
 export type { Conn } from './netsync';
 
@@ -20,10 +20,20 @@ interface Member {
   ready: boolean;
   joinedAt: number;
   sync: PeerSync;
+  /** 对局中离开或断线后，凭它回到这局冒险 */
+  token: string;
 }
 
 const SNAPSHOT_EVERY = 2;
 const STATE_EVERY = 6;
+/** 对局中所有人都离开了：模拟暂停，这么久（毫秒）还没人回来就结束这局 */
+export const AWAY_TTL = 5 * 60 * 1000;
+
+function newToken(): string {
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c?.randomUUID) return c.randomUUID().replace(/-/g, '');
+  return Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 10)).join('');
+}
 
 export function cleanName(name: unknown): string {
   const s = String(name ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 12);
@@ -59,7 +69,13 @@ export class Room {
   private tick = 0;
   private lastPhase = '';
   private joinSeq = 0;
+  /** 对局中离开房间的玩家：AI 替他继续战斗，凭 token 回来 */
+  away = new Map<number, Member>();
+  /** 所有人都离开的时间（期间模拟暂停） */
+  private emptySince = 0;
   onEmpty?: () => void;
+  /** 对局结束时还没回来的玩家：把结算消息交给服务器暂存，回来时再发给他 */
+  onAwayEnd?: (token: string, msg: string) => void;
 
   constructor(code: string, solo = false) {
     this.code = code;
@@ -83,29 +99,87 @@ export class Room {
   /** 加入房间，返回房间内的玩家编号（1~4），失败时返回错误信息。 */
   join(conn: Conn, name: string, meta: unknown, v: number, ident: JoinIdentity = {}): number | string {
     if (v !== PROTOCOL_VERSION) return '客户端版本与服务器不一致，请刷新页面';
-    if (this.members.size >= (this.solo ? 1 : MAX_PLAYERS)) return '房间已满（最多 4 人）';
+    if (this.members.size + this.away.size >= (this.solo ? 1 : MAX_PLAYERS)) return '房间已满（最多 4 人）';
     if (this.sim) return '该房间正在游戏中，请等待本局结束';
     let id = 1;
-    while (this.members.has(id)) id++;
+    while (this.members.has(id) || this.away.has(id)) id++;
     const line = isLine(ident.line) ? ident.line : null;
+    const token = newToken();
     this.members.set(id, {
       conn, name: cleanName(name), meta: cleanMeta(meta), trainer: trainerOf(ident.trainer).id,
       owned: cleanOwned(ident.owned), ownedShiny: cleanOwned(ident.ownedShiny),
-      line, shiny: !!line && ident.shiny === true, ready: false, joinedAt: ++this.joinSeq, sync: new PeerSync(),
+      line, shiny: !!line && ident.shiny === true, ready: false, joinedAt: ++this.joinSeq, sync: new PeerSync(), token,
     });
-    this.send(conn, { t: 'joined', code: this.code, you: id, solo: this.solo });
+    this.send(conn, { t: 'joined', code: this.code, you: id, solo: this.solo, token });
     this.sendLobby();
     return id;
   }
 
-  leave(id: number) {
-    if (!this.members.delete(id)) return;
-    if (this.sim) {
-      this.sim.removePlayer(id);
+  /** 离开房间。conn：只有当前连接才算数（重连后旧连接才断开时不影响新连接） */
+  leave(id: number, conn?: Conn) {
+    const m = this.members.get(id);
+    if (!m || (conn && m.conn !== conn)) return;
+    this.members.delete(id);
+    const sim = this.sim;
+    if (sim && !this.solo && sim.phase !== 'over' && sim.phase !== 'won' && sim.players.some((p) => p.id === id)) {
+      // 对局中离开：AI 先替他战斗，可以凭 token 回来
+      this.away.set(id, m);
+      sim.setAway(id, true);
+      if (!this.members.size) this.emptySince = performance.now();
+      return;
+    }
+    if (sim) {
+      sim.removePlayer(id);
       if (!this.members.size) this.sim = null;
     }
     if (!this.members.size) { this.onEmpty?.(); return; }
     this.sendLobby();
+  }
+
+  /** 回到正在进行的冒险：返回玩家编号，失败时返回原因 */
+  rejoin(conn: Conn, token: string, v: number): number | string {
+    if (v !== PROTOCOL_VERSION) return '客户端版本与服务器不一致，请刷新页面';
+    if (!token) return '这局冒险已经结束了';
+    // 断线后服务器还没发现：旧连接还挂着，直接换成新连接
+    for (const [id, m] of this.members) {
+      if (m.token !== token) continue;
+      m.conn = conn;
+      m.sync = new PeerSync();
+      this.resync(id, m);
+      return id;
+    }
+    const sim = this.sim;
+    for (const [id, m] of this.away) {
+      if (m.token !== token || !sim) continue;
+      this.away.delete(id);
+      m.conn = conn;
+      m.sync = new PeerSync();
+      this.members.set(id, m);
+      sim.setAway(id, false);
+      this.resync(id, m);
+      return id;
+    }
+    return '这局冒险已经结束了';
+  }
+
+  /** 回到对局：重新发开局信息和现在的状态（地上的掉落物、场上的闪光宝可梦） */
+  private resync(id: number, m: Member) {
+    this.send(m.conn, { t: 'joined', code: this.code, you: id, solo: this.solo, token: m.token });
+    const sim = this.sim;
+    if (!sim) { this.sendLobby(); return; }
+    this.send(m.conn, { t: 'start', w: sim.w, h: sim.h, players: this.startPlayers() });
+    const ev: Ev[] = [];
+    for (const pk of sim.pickups) ev.push(['drop', pk.id, pk.kind === 'candy' ? 0 : pk.kind === 'berry' ? 1 : 2, Math.round(pk.x), Math.round(pk.y), Math.round(pk.value * 10) / 10]);
+    for (const e of sim.enemies) if (e.shiny && !e.dead) ev.push(['shiny', e.id, e.kind, Math.round(e.x), Math.round(e.y)]);
+    if (ev.length) this.send(m.conn, { t: 'ev', e: ev });
+    this.send(m.conn, { t: 'st', s: sim.publicState() });
+    if (this.paused) this.send(m.conn, { t: 'paused', on: true });
+    sim.dirty.add(id);
+    this.flushPrivate();
+  }
+
+  private startPlayers() {
+    return this.sim!.players.map((p) => ({ id: p.id, name: p.name, trainer: p.trainer, line: p.line, shiny: p.shiny || undefined }));
   }
 
   lobbyPlayers(): LobbyPlayer[] {
@@ -122,7 +196,7 @@ export class Room {
     return {
       code: this.code,
       host: host?.name ?? '',
-      players: [...this.members.values()].map((m) => ({ name: m.name, trainer: m.trainer, line: m.line, shiny: m.shiny || undefined })),
+      players: [...this.members.values(), ...this.away.values()].map((m) => ({ name: m.name, trainer: m.trainer, line: m.line, shiny: m.shiny || undefined })),
       max: MAX_PLAYERS,
       inGame: this.inGame,
       wave: this.sim?.wave ?? 0,
@@ -175,6 +249,7 @@ export class Room {
         const p = sim?.players.find((q) => q.id === id);
         if (!Room.allowDebug || !sim || !p) return;
         if (msg.cmd === 'down') sim.downPlayer(p);
+        else if (msg.cmd === 'downAll') for (const q of sim.players) sim.downPlayer(q);
         else if (msg.cmd === 'endWave') sim.waveT = sim.waveDur;
         else if (msg.cmd === 'xp') sim.debugXp(p, 400);
         else if (msg.cmd === 'shiny') sim.forceShiny += 3;
@@ -204,6 +279,7 @@ export class Room {
         return;
       case 'create':
       case 'join':
+      case 'rejoin':
       case 'pvpQueue':
       case 'pvpCancel':
       case 'pvpBoard':
@@ -247,6 +323,11 @@ export class Room {
   update() {
     const sim = this.sim;
     if (!sim || this.paused) return;
+    if (!this.members.size) {
+      // 所有人都离开了：暂停等人回来，太久没人回来就结束这局（结算照样留给他们）
+      if (performance.now() - this.emptySince > AWAY_TTL) this.endGame();
+      return;
+    }
     sim.step(1 / TICK_RATE);
     this.tick++;
     const phaseChanged = sim.phase !== this.lastPhase;
@@ -311,13 +392,20 @@ export class Room {
       id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, shiny: p.shiny || undefined, level: p.level,
       kills: p.stats.kills, damage: Math.round(p.stats.damage), taken: Math.round(p.stats.taken), revives: p.stats.revives,
     }));
+    const end = (id: number) => {
+      const p = sim.players.find((q) => q.id === id);
+      return JSON.stringify({ t: 'end', victory: sim.phase === 'won', summary: p ? sim.summary(p) : null, board } satisfies S2C);
+    };
     for (const [id, m] of this.members) {
       const p = sim.players.find((q) => q.id === id);
       if (p) { m.owned = [...p.owned]; m.ownedShiny = [...p.ownedShiny]; }
-      this.send(m.conn, { t: 'end', victory: sim.phase === 'won', summary: p ? sim.summary(p) : null, board });
+      m.conn.send(end(id));
     }
+    for (const [id, m] of this.away) this.onAwayEnd?.(m.token, end(id));
+    this.away.clear();
     this.sim = null;
     for (const m of this.members.values()) m.ready = false;
+    if (!this.members.size) { this.onEmpty?.(); return; }
     this.sendLobby();
   }
 }

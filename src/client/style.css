@@ -1029,6 +1029,10 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 .title-wrap .title-menu .menu-item { padding: 0.375rem 0.625rem 0.375rem 1.875rem; }
 .title-online { text-align: center; margin-top: 0.25rem; }
 .box.pause h2 { display: flex; align-items: center; gap: 0.5rem; }
+.pause-note { margin: 0 0 0.625rem; font-size: 0.875rem; line-height: 1.4; color: #c8d2ec; }
+.box.pause.reconnect { width: 26rem; }
+.browse-rejoin { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem; background: rgba(255, 210, 63, .1); border: 1px solid rgba(255, 210, 63, .55); }
+.team-row.away { opacity: .75; }
 
 /* 训练家卡片 */
 .tcard {
@@ -1231,6 +1235,11 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 .th-goal-tag { flex: none; font-size: 0.6875rem; padding: 0 0.3125rem; border-radius: 0.25rem; background: var(--gold); color: #3a2300; text-shadow: none; }
 .th-goal-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .th-goal-go { flex: none; color: var(--gold); animation: goal-nudge 1s ease-in-out infinite; }
+.th-rejoin { display: flex; align-items: center; gap: 0.5rem; max-width: 22rem; cursor: pointer; appearance: none; color: inherit; font: inherit; text-align: left; border-color: var(--gold) !important; box-shadow: 0 0 0 1px rgba(255, 210, 63, .35); }
+.th-rejoin:hover { filter: brightness(1.12); }
+.th-rejoin-text { display: grid; line-height: 1.2; }
+.th-rejoin-text b { font-size: 0.875rem; color: var(--gold); }
+.th-rejoin-text small { font-size: 0.75rem; color: #c8d2ec; }
 @keyframes goal-nudge { 50% { transform: translateX(0.1875rem); } }
 .th-prompt { position: absolute; left: 50%; bottom: 3.375rem; transform: translateX(-50%); display: flex; align-items: center; gap: 0.5rem; cursor: pointer; appearance: none; color: inherit; font: inherit; padding: 0.375rem 0.875rem; white-space: nowrap; }
 .th-key { display: inline-flex; min-width: 1.5rem; height: 1.5rem; padding: 0 0.25rem; align-items: center; justify-content: center; border-radius: 0.75rem; background: #3cb371; color: #fff; font-size: 0.75rem; text-shadow: none; }
