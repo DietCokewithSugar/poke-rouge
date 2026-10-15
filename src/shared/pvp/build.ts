@@ -147,11 +147,15 @@ const BOT_LINES: LineId[] = LINE_IDS.flatMap((id) => {
   return Array.from({ length: n }, () => id);
 });
 
-/** 生成一个指定等级附近的构筑（AI 训练家用） */
+/** 生成一个指定等级附近的构筑（AI 训练家用，最高 40 级） */
 export function generateBuild(rng: Rng, level: number): SavedBuild {
-  const line = rng.pick(BOT_LINES);
+  return buildFor(rng, rng.pick(BOT_LINES), Math.min(40, level));
+}
+
+/** 指定宝可梦的构筑：用它在这个等级前学会的招式、随机的道具与升级强化 */
+export function buildFor(rng: Rng, line: LineId, level: number): SavedBuild {
   const L = LINES[line];
-  level = Math.max(2, Math.min(40, Math.round(level)));
+  level = Math.max(2, Math.min(MAX_BUILD_LEVEL, Math.round(level)));
   const stage = L.stones ? (level >= 12 ? rng.int(1, L.forms.length - 1) : 0) : maxStage(line, level);
   const form = formOf(line, stage);
   const pool = [...L.start, ...L.learnset.filter((e) => e.lv <= level).map((e) => e.skill)];

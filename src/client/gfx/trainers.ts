@@ -2,7 +2,13 @@
  * 训练家形象：行走图来自火红/叶绿（16×32，9 帧：下、上、左站立 + 各两帧走路，右边由左边镜像），
  * 正面立绘来自 PokéRogue。素材由 tools/import-trainers.mjs 导入到 public/trainers/。
  */
-import { trainerOf } from '../../shared/trainers';
+import { GYMS } from '../../shared/gyms';
+import { TRAINERS, trainerOf } from '../../shared/trainers';
+
+/** 不是可选训练家、但有立绘的人：道馆馆主、道馆训练家、大木博士 */
+const EXTRA_ART = new Set(['oak', ...GYMS.flatMap((g) => [g.leader.art, g.junior.art])]);
+/** 立绘文件名：可选训练家或者上面这些人，其它的按训练家处理（默认小智） */
+const artId = (id: string) => (TRAINERS[id] || EXTRA_ART.has(id) ? id : trainerOf(id).id);
 
 export const TW = 16;
 export const TH = 32;
@@ -47,7 +53,7 @@ export function drawTrainer(ctx: CanvasRenderingContext2D, id: string, x: number
   drawSheet(ctx, image(`${trainerOf(id).id}_ow.png`), x, y, dir, frame, scale, alpha);
 }
 
-/** 镇上的 NPC（大木博士、鲤鱼王推销员、妈妈） */
+/** 镇上的 NPC（大木博士、鲤鱼王推销员、妈妈、道馆向导） */
 export function drawNpc(ctx: CanvasRenderingContext2D, key: string, x: number, y: number, dir: TDir) {
   drawSheet(ctx, image(`npc_${key}_ow.png`), x, y, dir, 0, 1, 1);
 }
@@ -55,7 +61,7 @@ export function drawNpc(ctx: CanvasRenderingContext2D, key: string, x: number, y
 /** 提前加载行走图（进镇之前调用，避免第一帧看不到人） */
 export function preloadTrainers(ids: string[]) {
   for (const id of ids) image(`${trainerOf(id).id}_ow.png`);
-  for (const k of ['oak', 'karp', 'mom']) image(`npc_${k}_ow.png`);
+  for (const k of ['oak', 'karp', 'mom', 'guide']) image(`npc_${k}_ow.png`);
 }
 
 /** 走路动画的帧：站立 → 左脚 → 站立 → 右脚 */
@@ -80,28 +86,55 @@ function whenReady(img: HTMLImageElement, fn: () => void) {
   else img.addEventListener('load', fn, { once: true });
 }
 
-/** 全身立绘（训练家卡片）：按 scale 放大，高度按 80 像素对齐，矮的立绘脚底对齐 */
-export function trainerFull(id: string, scale = 1, cls = 'tfull'): HTMLCanvasElement {
-  const img = image(`${trainerOf(id).id}.png`);
+/** 画在固定大小（W×H）画布上的立绘：按 scale 放大，脚底对齐，比画布宽的立绘居中裁掉两边 */
+function framedArt(file: string, W: number, H: number, scale: number, cls: string): HTMLCanvasElement {
+  const img = image(file);
   const c = document.createElement('canvas');
   c.className = cls;
-  const H = 80;
-  c.width = 64 * scale;
+  c.width = W * scale;
   c.height = H * scale;
-  c.style.setProperty('--pw', `${(64 * scale) / 16}rem`);
+  c.style.setProperty('--pw', `${(W * scale) / 16}rem`);
   c.style.setProperty('--ph', `${(H * scale) / 16}rem`);
   whenReady(img, () => {
     const x = c.getContext('2d')!;
     x.imageSmoothingEnabled = false;
-    const w = Math.min(64, img.naturalWidth), h = Math.min(H, img.naturalHeight);
-    x.drawImage(img, 0, 0, w, h, Math.round((64 - w) / 2) * scale, (H - h) * scale, w * scale, h * scale);
+    const w = Math.min(W, img.naturalWidth), h = Math.min(H, img.naturalHeight);
+    const sx = Math.floor((img.naturalWidth - w) / 2);
+    x.drawImage(img, sx, 0, w, h, Math.round((W - w) / 2) * scale, (H - h) * scale, w * scale, h * scale);
+  });
+  return c;
+}
+
+/** 全身立绘（训练家卡片）：64×80，矮的立绘脚底对齐 */
+export function trainerFull(id: string, scale = 1, cls = 'tfull'): HTMLCanvasElement {
+  return framedArt(`${artId(id)}.png`, 64, 80, scale, cls);
+}
+
+/** 大立绘（对话、对战开场）：80×96，放得下最宽的阿桔和最高的大木博士 */
+export function artFull(id: string, scale = 1, cls = 'tart'): HTMLCanvasElement {
+  return framedArt(`${artId(id)}.png`, 80, 96, scale, cls);
+}
+
+/** 只有行走图的 NPC（道馆向导等）：面朝下站着的那一帧放大 */
+export function npcArt(key: string, scale = 3, cls = 'tart npc'): HTMLCanvasElement {
+  const img = image(`npc_${key}_ow.png`);
+  const c = document.createElement('canvas');
+  c.className = cls;
+  c.width = TW * scale;
+  c.height = TH * scale;
+  c.style.setProperty('--pw', `${(TW * scale) / 16}rem`);
+  c.style.setProperty('--ph', `${(TH * scale) / 16}rem`);
+  whenReady(img, () => {
+    const x = c.getContext('2d')!;
+    x.imageSmoothingEnabled = false;
+    x.drawImage(img, 0, 0, TW, TH, 0, 0, TW * scale, TH * scale);
   });
   return c;
 }
 
 /** 头像：立绘最上面的一块（头和肩膀），正方形，按 scale 放大 */
 export function trainerPortrait(id: string, scale = 1, cls = 'tportrait'): HTMLCanvasElement {
-  const img = image(`${trainerOf(id).id}.png`);
+  const img = image(`${artId(id)}.png`);
   const S = 36;
   const c = document.createElement('canvas');
   c.className = cls;

@@ -4,6 +4,7 @@
  *   正面立绘：PokéRogue（pagefaultgames/pokerogue-assets，CC BY-NC-SA 4.0）的 images/trainer/*，取第一帧
  *   行走图：火红/叶绿（pret/pokefirered）的人物行走图，按游戏里的调色板上色；
  *           道馆馆主在原作里只有站立的 3 帧，这里补出走路的帧（身体下沉 1 像素、一只脚抬起）
+ *   道馆馆主与道馆训练家只要立绘；大木博士的立绘取自火红/叶绿的开场
  * 输出 public/trainers/<id>.png（立绘）与 public/trainers/<id>_ow.png（9 帧行走图，16×32）。
  *
  * 用法： node tools/import-trainers.mjs /path/to/pokefirered /path/to/pokerogue-assets
@@ -36,6 +37,13 @@ const NPCS = {
   npc_oak: { ow: 'prof_oak', pal: 'npc_white' },
   npc_karp: { ow: 'fat_man', pal: 'npc_white' },
   npc_mom: { ow: 'mom', pal: 'npc_blue' },
+  npc_guide: { ow: 'gym_guy', pal: 'npc_pink' },
+};
+/** 道馆馆主与道馆训练家：只要立绘（对话与对战开场用） */
+const ART = {
+  surge: 'lt_surge', erika: 'erika', koga: 'koga', blaine: 'blaine',
+  camper: 'camper_m', swimmer: 'swimmer_f', rocker: 'guitarist', beauty: 'beauty',
+  janine: 'janine', psychic: 'psychic_m', scientist: 'scientist_m', blackbelt: 'black_belt_m',
 };
 
 const FW = 16, FH = 32;
@@ -115,6 +123,22 @@ function front(name) {
   return { w, h, rgba };
 }
 
+/**
+ * 大木博士的立绘：火红/叶绿开场「欢迎来到宝可梦的世界」那张（graphics/oak_speech/oak/），
+ * 图片里的颜色序号从某个 16 色调色板开始，按最小的非零序号对齐到 pal.pal。
+ */
+function oakPic() {
+  const dir = path.join(FRLG, 'graphics/oak_speech/oak');
+  if (!fs.existsSync(path.join(dir, 'pic.png'))) return null;
+  const img = decodePng(fs.readFileSync(path.join(dir, 'pic.png')));
+  const colors = readJasc(fs.readFileSync(path.join(dir, 'pal.pal'), 'utf8'));
+  let base = Infinity;
+  for (const ix of img.index) if (ix % 16) base = Math.min(base, ix - (ix % 16));
+  const rgba = new Uint8Array(img.width * img.height * 4);
+  img.index.forEach((ix, i) => { if (ix % 16 && colors[ix - base]) rgba.set([...colors[ix - base], 255], i * 4); });
+  return { w: img.width, h: img.height, rgba };
+}
+
 for (const [id, t] of Object.entries(TRAINERS)) {
   fs.writeFileSync(path.join(out, `${id}_ow.png`), encodePng(FW * 9, FH, overworld(t.ow, t.pal)));
   const f = front(t.front);
@@ -122,3 +146,11 @@ for (const [id, t] of Object.entries(TRAINERS)) {
   console.log(`${id}: 行走图 ${t.ow}，立绘 ${t.front} ${f.w}×${f.h}`);
 }
 for (const [id, t] of Object.entries(NPCS)) fs.writeFileSync(path.join(out, `${id}_ow.png`), encodePng(FW * 9, FH, overworld(t.ow, t.pal)));
+for (const [id, name] of Object.entries(ART)) {
+  const f = front(name);
+  fs.writeFileSync(path.join(out, `${id}.png`), encodePng(f.w, f.h, f.rgba));
+  console.log(`${id}: 立绘 ${name} ${f.w}×${f.h}`);
+}
+const oak = oakPic();
+if (oak) fs.writeFileSync(path.join(out, 'oak.png'), encodePng(oak.w, oak.h, oak.rgba));
+else console.log('没有找到 graphics/oak_speech/oak/pic.png，跳过大木博士的立绘');

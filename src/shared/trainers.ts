@@ -23,7 +23,7 @@ export const TRAINER_LIST: TrainerDef[] = [
   }),
   T({
     id: 'brock', name: '小刚', title: '坚如磐石', desc: '深灰道馆的馆主，岩石般可靠的大哥哥。',
-    mods: { defPct: 10, maxHp: 10 }, typeMods: { rock: 10 }, unlock: { cost: 400 },
+    mods: { defPct: 10, maxHp: 10 }, typeMods: { rock: 10 }, unlock: { cost: 400, ach: 'badge_1' },
   }),
   T({
     id: 'gary', name: '小茂', title: '劲敌', desc: '大木博士的孙子，总是比你快一步的天才训练家。',
@@ -39,7 +39,7 @@ export const TRAINER_LIST: TrainerDef[] = [
   }),
   T({
     id: 'sabrina', name: '娜姿', title: '超能力少女', desc: '金黄道馆的馆主，能用超能力预知未来。',
-    mods: { spaPct: 8, haste: 6 }, typeMods: { psychic: 10 }, unlock: { cost: 900 },
+    mods: { spaPct: 8, haste: 6 }, typeMods: { psychic: 10 }, unlock: { cost: 900, ach: 'badge_6' },
   }),
   T({
     id: 'lance', name: '渡', title: '龙使', desc: '四天王之首，驾驭龙之宝可梦的强者。',

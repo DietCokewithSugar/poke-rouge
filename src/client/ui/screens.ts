@@ -325,8 +325,8 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
     inp.addEventListener('input', () => set(key, Number(inp.value), false));
     return h('label', { class: 'set-row' }, h('span', null, uiIcon(icon, 2), ` ${label}`), inp);
   };
-  const toggle = (label: string, key: 'damageNumbers' | 'gbFilter' | 'shake') =>
-    h('div', { class: 'set-row' }, h('span', null, label), segmented(s[key], [[true, '开'], [false, '关']], (v) => set(key, v)));
+  const toggle = (label: string, key: 'damageNumbers' | 'gbFilter' | 'shake' | 'transitions', note = '') =>
+    h('div', { class: 'set-row' }, h('span', null, label, note ? h('small', { class: 'muted' }, ` ${note}`) : null), segmented(s[key], [[true, '开'], [false, '关']], (v) => set(key, v)));
   const scaleIdx = Math.max(0, UI_SCALES.findIndex((v) => Math.abs(v - s.uiScale) < 0.001));
   const scaleLabel = h('b', { class: 'set-val' }, `${Math.round(s.uiScale * 100)}%`);
   const scale = h('input', { type: 'range', min: 0, max: UI_SCALES.length - 1, step: 1, value: String(scaleIdx) }) as HTMLInputElement;
@@ -341,6 +341,7 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
       h('div', { class: 'set-row' }, h('span', null, '界面大小', h('small', { class: 'muted' }, ' 100% 时界面占画面的 90%')), h('div', { class: 'row' }, scale, scaleLabel)),
       h('div', { class: 'set-row' }, h('span', null, '帧率', h('small', { class: 'muted' }, ' 卡顿时选 30；120 需要高刷新率屏幕')), segmented<Profile['settings']['fps']>(s.fps, [[30, '30 帧'], [60, '60 帧'], [120, '120 帧']], (v) => set('fps', v))),
       h('div', { class: 'set-row' }, h('span', null, '画质', h('small', { class: 'muted' }, ' 流畅：高分屏上按一半分辨率渲染')), segmented<Profile['settings']['quality']>(s.quality, [['high', '高清'], ['smooth', '流畅']], (v) => set('quality', v))),
+      toggle('过场动画', 'transitions', '切换界面、对战开场的动画'),
       toggle('显示伤害数字', 'damageNumbers'),
       toggle('屏幕震动', 'shake'),
       toggle('初代 GB 绿屏滤镜', 'gbFilter'),
@@ -350,7 +351,7 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
 
 const CREDIT_TABS: [string, () => Node][] = [
   ['玩法', () => h('ul', { class: 'credit-list' },
-    h('li', null, '在真新镇里走动：北边的 1 号道路出发冒险，宝可梦中心和朋友联机，对战场和其他训练家对战，大木研究所做研究、看图鉴和成就，我的家换训练家与跟随的伙伴。'),
+    h('li', null, '在真新镇里走动：北边的 1 号道路出发冒险，宝可梦中心和朋友联机，道馆挑战馆主、在对战场和其他训练家对战，大木研究所做研究、看图鉴和成就，我的家换训练家与跟随的伙伴。不知道做什么时，看左上角的「目标」。'),
     h('li', null, '普通波次 30~60 秒，撑到倒计时结束就算过关；第 10 波和第 20 波是 90 秒的首领波。技能会自动瞄准最近的敌人释放。'),
     h('li', null, '物理技能吃「物攻」（偏近身），特殊技能吃「特攻」（偏远程）；接触伤害由「物防」减免，弹幕与爆炸由「特防」减免。属性克制只多/少 10%，本系技能 1.5 倍。'),
     h('li', null, '冒险中会有野生宝可梦乱入。击败野生宝可梦时它有几率崇拜你，成为新的伙伴（整条进化线都能用）。研究所的「友情缎带」、精灵球类道具和小智都能提高崇拜几率。'),
@@ -361,16 +362,17 @@ const CREDIT_TABS: [string, () => Node][] = [
     h('li', null, '训练家各有加成：小智更容易让宝可梦崇拜、小霞擅长水系、火箭队赚得多但宝可梦不太信任他们……其他训练家靠成就或星之沙解锁。'),
     h('li', null, '联机时倒下的队友身边会出现绿色救援圈，站进去就能把它救起来。首次通关后可以开启 AI 辅助战斗，由 AI 替你走位。'),
     h('li', null, '冒险结束后可以把宝可梦放进背包，在对战场里排位：单挑是三只同时上场（你操作队长），团战四人各一只；每场 60 秒，也可以整场交给 AI。'),
+    h('li', null, '道馆：关都八个道馆按顺序挑战，先打道馆训练家再打馆主。每枚徽章永久提升一项能力和对应属性的技能伤害；打败小刚、娜姿还能解锁他们当你的训练家。'),
     h('li', null, '香水会吸引更多敌人（收获也更多），喷雾、玻璃哨和洁净之符能减少敌人；限持一个的道具拿到后不会再出现。'),
   )],
   ['操作', () => h('ul', { class: 'credit-list' },
-    h('li', null, '键盘：WASD / 方向键移动，空格 / 回车与建筑互动，镇上 1~5 直接打开各个地方、M 快速前往，战斗中 T 切换自动战斗，Esc / P 暂停（单人），商店里 Z 撤销上一次购买。'),
+    h('li', null, '键盘：WASD / 方向键移动，空格 / 回车与建筑互动，镇上 1~6 直接打开各个地方、M 快速前往，战斗中 T 切换自动战斗，Esc / P 暂停（单人），商店里 Z 撤销上一次购买；引导里空格 / 回车下一步、Esc 跳过。'),
     h('li', null, '手机：在屏幕任意位置拖动出现摇杆，点下方的提示进入建筑，右下角的按钮快速前往或切换自动战斗，需要横屏游玩。'),
     h('li', null, '手柄（Xbox / PlayStation）：左摇杆或十字键移动与选择，A/× 确认与进入建筑，B/○ 返回，X/□ 刷新商店，Y/△ 出发（战斗中切换自动战斗、镇上快速前往），LB/RB 翻页，LT 撤销购买，Start 暂停。'),
   )],
   ['致谢', () => h('div', { class: 'credit-list' },
     h('p', { class: 'small' }, '宝可梦像素精灵：PMDCollab / SpriteCollab 的众多画师（CC BY-NC 4.0，非商业使用），通过 JPTER78/pokesurvivor 整理导入，完整名单见仓库 CREDITS.md。'),
-    h('p', { class: 'small' }, '真新镇图块与训练家行走图：《宝可梦 火红 / 叶绿》（通过 pret/pokefirered 导入）；训练家立绘：PokéRogue（CC BY-NC-SA 4.0）。'),
+    h('p', { class: 'small' }, '真新镇图块、行走图与大木博士的立绘：《宝可梦 火红 / 叶绿》（通过 pret/pokefirered 导入）；训练家与道馆馆主的立绘：PokéRogue（CC BY-NC-SA 4.0）。'),
     h('p', { class: 'small' }, '界面风格与部分界面图标（齿轮、声音、奖杯、硬币、星星、王冠等）来自 JPTER78/pokesurvivor（MIT）。字体：缝合像素字体 Fusion Pixel Font（OFL 1.1）。'),
     h('p', { class: 'small muted' }, 'Pokémon 及相关名称为 Nintendo / Creatures Inc. / GAME FREAK / The Pokémon Company 的商标。本作为非营利粉丝作品。'),
   )],

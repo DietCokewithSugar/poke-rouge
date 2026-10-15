@@ -12,7 +12,10 @@ import { TYPE_NAME, type PType } from '../../shared/types';
 import type { DifficultyId } from '../../shared/difficulty';
 import { sfx } from '../audio';
 import type { PlaceId, Spot } from '../gfx/town';
-import { trainerFull, trainerPortrait } from '../gfx/trainers';
+import { artFull, trainerFull, trainerPortrait } from '../gfx/trainers';
+import { Animator } from '../gfx/sprites';
+import { nextGoal, talk, typeText } from './guide';
+import { GYMS, GYM_BY_ID } from '../../shared/gyms';
 import { uiIcon } from '../gfx/uiicons';
 import { iconImg } from '../gfx/icons';
 import {
@@ -85,48 +88,104 @@ function starterCard(line: LineId, on: boolean, onClick: () => void) {
   );
 }
 
+/** 开场的步骤：大木博士一步一步地问 */
+const SETUP_STEPS = ['欢迎', '训练家', '名字', '伙伴', '出发'] as const;
+const NAME_IDEAS = ['小赤', '小智', '阿红', '小蓝', '小遥', '小光', '阿亮', '小悠'];
+
+/**
+ * 开场：大木博士站在左边，下面的对话框一句一句地说明现在要做什么，
+ * 右边只显示这一步要选的东西（训练家 → 名字 → 第一只宝可梦 → 确认），可以随时返回上一步。
+ */
 export function setupScreen(root: HTMLElement, p: Profile, onDone: (trainer: string, starter: LineId, name: string) => void) {
   let trainer = isTrainerUnlocked(p, p.trainer) ? p.trainer : 'ash';
   let starter: LineId = STARTERS.includes(p.partner) ? p.partner : 'charmander';
   let name = p.name || '';
-  const render = () => {
-    const input = h('input', { class: 'field', maxlength: 12, placeholder: TRAINERS[trainer].name, value: name }) as HTMLInputElement;
-    input.addEventListener('input', () => { name = input.value.trim().slice(0, 12); });
-    const L = LINES[starter];
-    const done = () => {
-      sfx('wave');
-      onDone(trainer, starter, (name || TRAINERS[trainer].name).slice(0, 12));
-    };
-    mount(root, h('div', { class: 'box panel setup' },
-      h('div', { class: 'panel-head' },
-        h('div', null,
-          h('h2', null, '欢迎来到宝可梦的世界！'),
-          h('div', { class: 'sub small' }, p.stats.runs ? '我是大木博士。你以前的研究、成就和背包都还在，重新告诉我你是谁吧。' : '我是大木博士。在出发之前，先告诉我你是谁、想和哪只宝可梦一起冒险吧。'),
-        ),
-      ),
-      h('div', { class: 'setup-body' },
-        h('div', { class: 'setup-col' },
-          h('h3', null, '1. 你是？'),
-          (() => {
-            const list = TRAINER_LIST.filter((t) => isTrainerUnlocked(p, t.id));
-            return h('div', { class: 'setup-trainers' }, list.map((t) => trainerCard(t.id, { on: trainer === t.id, compact: list.length > 2, onClick: () => { sfx('click'); trainer = t.id; render(); } })));
-          })(),
-          h('div', { class: 'small muted' }, '其他训练家可以在冒险中达成成就，或者用星之沙在「我的家」招募。'),
-        ),
-        h('div', { class: 'setup-col' },
-          h('h3', null, '2. 选择第一只宝可梦'),
-          h('div', { class: 'setup-starters' }, STARTERS.map((s) => starterCard(s, starter === s, () => { sfx('click'); starter = s; render(); }))),
-          h('div', { class: 'small setup-flavor' }, L.flavor),
-          h('div', { class: 'small muted' }, '其他宝可梦要在冒险中结交：击败野生宝可梦时，它有几率崇拜你、成为你的伙伴。'),
-        ),
-        h('div', { class: 'setup-col setup-name' },
-          h('h3', null, '3. 你的名字'),
+  let step = 0;
+  const who = () => name || TRAINERS[trainer].name;
+  const say = (): string => {
+    switch (step) {
+      case 0: return p.stats.runs
+        ? '又见面了！你以前的研究、成就和背包都还在。不过这个世界变了不少，我们重新登记一下吧。'
+        : '你好！欢迎来到宝可梦的世界！我叫大木，大家都叫我宝可梦博士。这个世界上到处都住着叫做「宝可梦」的生物……';
+      case 1: return '首先，请告诉我：你是哪一位训练家？每位训练家都有自己擅长的东西。';
+      case 2: return `原来是${TRAINERS[trainer].title}啊！那么，你的名字是？`;
+      case 3: return `${who()}！我这里有三只宝可梦，选一只作为你的第一个伙伴吧！`;
+      default: return `${who()}和${LINES[starter].name}……真是好搭档！你的宝可梦传说就要开始了，梦想与冒险的世界在等着你！`;
+    }
+  };
+  const go = (n: number) => { sfx('click'); step = Math.max(0, Math.min(SETUP_STEPS.length - 1, n)); render(); };
+  const finish = () => { sfx('wave'); onDone(trainer, starter, who().slice(0, 12)); };
+
+  const stage = (): Node => {
+    if (step === 0) {
+      return h('div', { class: 'setup-hello' },
+        h('div', { class: 'setup-hello-mons' }, [25, 1, 4, 7].map((d, i) => h('div', { class: 'setup-hello-mon', style: `--d:${i}` }, Animator.portrait(d, 3)))),
+        h('p', { class: 'small muted' }, '在这里，你要和宝可梦一起冒险、结交新的伙伴、挑战道馆，成为最强的训练家。'),
+      );
+    }
+    if (step === 1) {
+      const list = TRAINER_LIST.filter((t) => isTrainerUnlocked(p, t.id));
+      return h('div', { class: 'setup-step' },
+        h('div', { class: 'setup-trainers' }, list.map((t) => trainerCard(t.id, { on: trainer === t.id, compact: list.length > 2, onClick: () => { sfx('click'); trainer = t.id; render(); } }))),
+        h('div', { class: 'small muted' }, '其他训练家可以在冒险或道馆中达成成就，或者用星之沙在「我的家」招募。'),
+      );
+    }
+    if (step === 2) {
+      const input = h('input', { class: 'field setup-input', maxlength: 12, placeholder: TRAINERS[trainer].name, value: name }) as HTMLInputElement;
+      input.addEventListener('input', () => { name = input.value.trim().slice(0, 12); });
+      // 阻止默认行为：否则回车会接着点到下一步新出现的按钮，一下跳过两步
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(3); } });
+      requestAnimationFrame(() => input.focus({ preventScroll: true }));
+      return h('div', { class: 'setup-step setup-name' },
+        h('div', { class: 'setup-preview' }, trainerFull(trainer, 2)),
+        h('div', { class: 'setup-name-form' },
           input,
-          h('div', { class: 'setup-preview' }, trainerFull(trainer, 2), portraitSlot(L.forms[0].dex, 3, 'setup-mon')),
-          h('button', { class: 'btn gold big go', 'data-key': 'y', onclick: done }, '出发！'),
+          h('div', { class: 'small muted' }, '不填就用训练家原来的名字。也可以选一个：'),
+          h('div', { class: 'setup-ideas' }, NAME_IDEAS.map((n) => h('button', { class: `btn tiny ${name === n ? 'gold' : 'ghost'}`, onclick: () => { sfx('click'); name = n; render(); } }, n))),
+        ),
+      );
+    }
+    if (step === 3) {
+      const L = LINES[starter];
+      return h('div', { class: 'setup-step' },
+        h('div', { class: 'setup-starters' }, STARTERS.map((s) => starterCard(s, starter === s, () => { sfx('click'); starter = s; render(); }))),
+        h('div', { class: 'small setup-flavor' }, L.flavor),
+        h('div', { class: 'small muted' }, '其他宝可梦要在冒险中结交：击败野生宝可梦时，它有几率崇拜你、成为你的伙伴。'),
+      );
+    }
+    const L = LINES[starter];
+    return h('div', { class: 'setup-step setup-confirm' },
+      h('div', { class: 'setup-preview' }, trainerFull(trainer, 2), portraitSlot(L.forms[0].dex, 3, 'setup-mon')),
+      h('div', { class: 'setup-summary' },
+        h('div', null, h('span', { class: 'muted' }, '训练家 '), h('b', null, `${who()}（${TRAINERS[trainer].name}）`)),
+        h('div', { class: 'small pos' }, trainerBonus(trainer).join(' · ')),
+        h('div', null, h('span', { class: 'muted' }, '第一个伙伴 '), h('b', null, L.name), ' ', ...L.forms[0].types.map(typeBadge)),
+      ),
+    );
+  };
+
+  const render = () => {
+    const text = h('p', { class: 'setup-say' });
+    const last = step === SETUP_STEPS.length - 1;
+    mount(root, h('div', { class: 'box panel setup' },
+      h('div', { class: 'setup-steps' }, SETUP_STEPS.slice(1).map((s, i) => h('div', { class: `setup-dot ${step === i + 1 ? 'on' : step > i + 1 ? 'done' : ''}` }, h('i', null, step > i + 1 ? '✓' : i + 1), s))),
+      h('div', { class: 'setup-body' },
+        h('div', { class: 'setup-oak' }, artFull('oak', 2)),
+        h('div', { class: 'setup-stage' }, stage()),
+      ),
+      h('div', { class: 'setup-dialog' },
+        h('div', { class: 'talk-name' }, '大木博士'),
+        text,
+        h('div', { class: 'row end setup-nav' },
+          step > 0 ? h('button', { class: 'btn ghost', 'data-back': '1', onclick: () => go(step - 1) }, '返回') : null,
+          h('button', { class: `btn ${last ? 'gold big go' : 'gold'}`, 'data-key': 'y', onclick: () => (last ? finish() : go(step + 1)) },
+            step === 0 ? '下一步' : step === 3 ? `就决定是你了，${LINES[starter].name}！` : last ? '出发！' : '确定'),
         ),
       ),
     ), 'setup');
+    const done = typeText(text, say());
+    text.addEventListener('click', done);
+    if (step !== 2) (root.querySelector('.setup-nav .btn.gold') as HTMLElement | null)?.focus({ preventScroll: true });
   };
   render();
 }
@@ -343,18 +402,16 @@ function assistToggle(p: Profile, render: () => void) {
 
 // ---------------------------------------------------------------- NPC 对话
 
-export function npcDialog(root: HTMLElement, speaker: string, text: string, buttons: [string, () => void, string?][]) {
-  mount(root, h('div', { class: 'box dialog' },
-    h('div', { class: 'dialog-who' }, speaker),
-    h('p', { class: 'dialog-text' }, text),
-    h('div', { class: 'row end' }, buttons.map(([label, fn, cls], i) => h('button', { class: `btn ${cls ?? ''}`, 'data-back': i === buttons.length - 1 ? '1' : undefined, onclick: () => { sfx('click'); fn(); } }, label))),
-  ), 'dialog');
+/** 镇上的人说话：有立绘的显示立绘，只有行走图的把行走图放大 */
+export function npcDialog(root: HTMLElement, speaker: string, text: string, buttons: [string, () => void, string?][], who: { art?: string; npc?: string } = {}) {
+  talk(root, { name: speaker, text, buttons, ...who });
 }
 
 export function karpDialog(root: HTMLElement, p: Profile, done: (bought: boolean) => void) {
   const cost = LINES.magikarp.unlock.cost ?? 300;
+  const who = { npc: 'karp' };
   if (isUnlocked(p, 'magikarp')) {
-    npcDialog(root, '鲤鱼王推销员', '上次那只鲤鱼王还好吗？只要耐心培养，它可是会变成很厉害的宝可梦哦。', [['好的', () => done(false)]]);
+    npcDialog(root, '鲤鱼王推销员', '上次那只鲤鱼王还好吗？只要耐心培养，它可是会变成很厉害的宝可梦哦。', [['好的', () => done(false)]], who);
     return;
   }
   npcDialog(root, '鲤鱼王推销员', `嘿，训练家！要不要来一只鲤鱼王？现在只要 ${cost} 星之沙！（你有 ${p.stardust} 星之沙）`, [
@@ -363,16 +420,17 @@ export function karpDialog(root: HTMLElement, p: Profile, done: (bought: boolean
       else { sfx('error'); toast('星之沙不够', 'error'); }
     }, 'gold'],
     ['算了', () => done(false), 'ghost'],
-  ]);
+  ], who);
 }
 
 // ---------------------------------------------------------------- 快速前往
 
-/** 不用走到建筑门口也能直接打开的地方（数字键 1~5） */
+/** 不用走到建筑门口也能直接打开的地方（数字键 1~6） */
 export const QUICK: { id: PlaceId; icon: string; name: string; hint: string }[] = [
   { id: 'route', icon: 'sign', name: '冒险', hint: '1号道路 · 带着伙伴出发' },
   { id: 'center', icon: 'cross', name: '联机', hint: '宝可梦中心 · 和朋友一起冒险' },
   { id: 'battle', icon: 'sword', name: '对战', hint: '对战场 · 排位赛与练习赛' },
+  { id: 'gym', icon: 'badge_boulder', name: '道馆', hint: '道馆挑战 · 收集八枚徽章' },
   { id: 'lab', icon: 'flask', name: '研究所', hint: '大木研究所 · 研究、图鉴、成就' },
   { id: 'home', icon: 'home', name: '我的家', hint: '换训练家、换伙伴、改名' },
 ];
@@ -390,7 +448,7 @@ export function quickMenu(root: HTMLElement, go: (id: PlaceId) => void, back: ()
 
 // ---------------------------------------------------------------- 镇上的 HUD
 
-export interface TownHudActions { card(): void; settings(): void; help(): void; title(): void; interact(): void; go(id: PlaceId): void }
+export interface TownHudActions { card(): void; settings(): void; help(): void; title(): void; interact(): void; go(id: PlaceId, tab?: number): void }
 
 const WHERE_NAME: Record<string, string> = { town: '在真新镇', menu: '在标题界面', room: '在联机房间', game: '冒险中', pvp: '对战中' };
 
@@ -401,15 +459,17 @@ export class TownHud {
   private onlineList = h('div', { class: 'th-online box tight hidden' });
   private prompt = h('button', { class: 'th-prompt box tight hidden' });
   private dust = h('div', { class: 'th-dust box tight' });
+  private goal = h('button', { class: 'th-goal box tight' });
   private peers: { name: string; trainer: string; dex: number; where: string }[] = [];
   private total = 1;
 
-  constructor(parent: HTMLElement, private p: Profile, a: TownHudActions) {
+  constructor(parent: HTMLElement, private p: Profile, private a: TownHudActions) {
     this.card.addEventListener('click', () => { sfx('click'); a.card(); });
     this.prompt.addEventListener('click', () => a.interact());
+    this.goal.addEventListener('click', () => { sfx('click'); a.go(nextGoal(this.p).place); });
     this.onlineBtn = iconBtn('friends', '在线玩家', () => { sfx('click'); this.onlineList.classList.toggle('hidden'); this.renderOnline(); }, { cls: 'small th-btn', text: '1' });
     this.root = h('div', { id: 'town-hud' },
-      this.card,
+      h('div', { class: 'th-left' }, this.card, this.goal),
       h('div', { class: 'th-top' },
         this.onlineBtn,
         iconBtn('gear', '设置', () => { sfx('click'); a.settings(); }, { cls: 'small th-btn' }),
@@ -446,11 +506,20 @@ export class TownHud {
       h('div', { class: 'th-mon' }, portraitSlot(partnerDex(p), 1, 'th-mon-portrait')),
     );
     clear(this.dust);
+    const stat = (icon: Node, text: string, label: string, id: PlaceId, tab?: number) => h('button', {
+      class: 'th-stat', title: label, 'aria-label': label,
+      onclick: () => { sfx('click'); this.a.go(id, tab); },
+    }, icon, h('span', null, text));
     this.dust.append(
-      h('span', { title: '星之沙' }, iconImg('stardust', 1), ` ${p.stardust}`),
-      h('span', { title: '拥有的宝可梦' }, uiIcon('ball', 1), ` ${unlockedLines(p).length}/${LINE_IDS.length}`),
-      h('span', { title: '成就' }, uiIcon('trophy', 1), ` ${Object.keys(p.achievements).length}/${ACHIEVEMENTS.length}`),
+      stat(iconImg('stardust', 1), String(p.stardust), '星之沙：去大木研究所做研究', 'lab', 0),
+      stat(uiIcon('ball', 1), `${unlockedLines(p).length}/${LINE_IDS.length}`, '拥有的宝可梦：在我的家查看、换伙伴', 'home', 1),
+      stat(uiIcon('badge_boulder', 1), `${Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).length}/${GYMS.length}`, '道馆徽章：去道馆挑战馆主', 'gym'),
+      stat(uiIcon('trophy', 1), `${Object.keys(p.achievements).length}/${ACHIEVEMENTS.length}`, '成就：在大木研究所查看', 'lab', 2),
     );
+    const g = nextGoal(p);
+    clear(this.goal);
+    this.goal.append(h('span', { class: 'th-goal-tag' }, '目标'), uiIcon(g.icon, 1), h('span', { class: 'th-goal-text' }, g.text), h('span', { class: 'th-goal-go' }, '▶'));
+    this.goal.title = `下一步：${g.text}（点一下直接前往）`;
   }
 
   setOnline(peers: { name: string; trainer: string; dex: number; where: string }[], total?: number) {

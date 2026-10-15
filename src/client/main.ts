@@ -21,19 +21,29 @@ import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
 import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
 import {
-  addOwned, applyRun, autoAssistUnlocked, isUnlocked, loadProfile, pvpIdentity, releaseFromParty, saveProfile, unlockedLines, type PartyMon, type Profile, type Settings,
+  addOwned, applyRun, autoAssistUnlocked, badgeMeta, isUnlocked, loadProfile, pvpIdentity, releaseFromParty, saveProfile, unlockedLines, winGym,
+  type PartyMon, type Profile, type Settings,
 } from './save';
-import { $, clear, toast } from './ui/dom';
+import { $, clear, h, toast } from './ui/dom';
 import { Hud } from './ui/hud';
 import { Intermission } from './ui/intermission';
-import { BrowseScreen, creditsScreen, lobbyScreen, pauseScreen, settingsScreen } from './ui/screens';
+import { BrowseScreen, creditsScreen, lobbyScreen, pauseScreen, portraitSlot, settingsScreen } from './ui/screens';
 import { QUICK, TownHud, homeScreen, karpDialog, labHub, npcDialog, onlineText, partnerDex, partnerModal, quickMenu, routeScreen, setupScreen, titleScreen } from './ui/town';
 import { resultsScreen } from './ui/results';
 import { PvpScreen, pvpResultsScreen } from './ui/pvp';
+import { badgeBonus, badgeCount, gymScreen } from './ui/gym';
+import { TOURS, talk, tour, tourActive } from './ui/guide';
+import { badgeCeremony, bigBanner, placeSign, setTransitions, transition, vsSplash, type VsSide } from './ui/fx';
+import { GUIDE, GYM_BY_ID, nextGym, type GymDef } from '../shared/gyms';
+import { gymTeam, isUnderdog, type GymStage } from '../shared/pvp/gym';
+import { TYPE_NAME } from '../shared/types';
 import { TownScene } from './town';
 
-/** uids：出战的背包宝可梦（第一只是队长） */
-interface PvpMatch { mode: PvpMode; uids: string[]; practice: boolean; seats: PvpSeatInfo[] }
+/** uids：出战的背包宝可梦（第一只是队长）；gym：道馆对战（哪个道馆、打的是道馆训练家还是馆主） */
+interface PvpMatch { mode: PvpMode; uids: string[]; practice: boolean; seats: PvpSeatInfo[]; gym?: { id: string; stage: GymStage } }
+
+/** 打开时有过场（走进门）的地方；NPC 对话直接弹出 */
+const BUILDINGS = new Set<string>(['home', 'lab', 'center', 'battle', 'gym', 'route']);
 
 type Where = 'title' | 'setup' | 'town' | 'place' | 'browse' | 'lobby' | 'game' | 'results' | 'pvp';
 
@@ -106,6 +116,10 @@ class App {
   private pendingRoom: string | null = null;
   /** 自己的宝可梦现在是不是由 AI 操作（以服务器状态为准） */
   private autoOn = false;
+  /** 冒险中上一波所在的地区（换地区时挂出地名牌） */
+  private lastBiome = -1;
+  /** 结算动画播放中（避免重复处理结束消息） */
+  private ending = false;
 
   start() {
     initInput(this.canvas);
@@ -160,6 +174,7 @@ class App {
     const s = this.profile.settings;
     setVolume(s.volume, s.music);
     setUiScale(s.uiScale);
+    setTransitions(s.transitions);
     this.canvas.style.filter = s.gbFilter ? 'grayscale(1) sepia(1) hue-rotate(42deg) saturate(2.4) brightness(.8) contrast(1.2)' : '';
     if (this.view) { this.view.settings = s; this.view.resize(); }
   }
@@ -254,8 +269,14 @@ class App {
 
   /** 开始游戏：第一次先走开场，之后直接进真新镇 */
   play() {
-    if (!this.profile.setup) { this.setup(); return; }
+    if (!this.profile.setup) { void transition('fade', () => this.setup()); return; }
+    void transition('fade', () => this.arrive());
+  }
+
+  /** 来到真新镇（从标题或开场）：显示地名牌；邀请链接里有房间号就直接加入 */
+  private arrive() {
     this.enterTown();
+    placeSign('真新镇', '纯白的开始之镇');
     const room = this.pendingRoom;
     this.pendingRoom = null;
     if (room) this.joinRoom(room);
@@ -263,6 +284,7 @@ class App {
 
   setup() {
     this.where = 'setup';
+    this.menu.start();
     this.screen.classList.remove('hidden');
     setupScreen(this.screen, this.profile, (trainer, starter, name) => {
       const p = this.profile;
@@ -273,8 +295,7 @@ class App {
       p.setup = true;
       p.stats.owned = unlockedLines(p).length;
       saveProfile(p);
-      toast(`${name}，和${LINES[starter].name}一起出发吧！`, 'gold', 3500);
-      this.play();
+      void transition('iris', () => this.arrive(), { hold: 250 });
     });
   }
 
@@ -282,6 +303,18 @@ class App {
   home() {
     if (this.profile.setup) this.enterTown();
     else this.title();
+  }
+
+  /** 从建筑里出来（淡出淡入） */
+  private backToTown() {
+    void transition('fade', () => this.enterTown());
+  }
+
+  /** 第一次来到真新镇：大木博士介绍一下镇上的界面（引导期间不能走动） */
+  private townTour() {
+    if (this.where !== 'town' || this.profile.guide.town || tourActive()) return;
+    setInputEnabled(false);
+    tour(this.profile, 'town', TOURS.town, { done: () => { if (this.where === 'town') setInputEnabled(true); } });
   }
 
   // ------------------------------------------------------------ 真新镇
@@ -298,7 +331,7 @@ class App {
     const p = this.profile;
     if (!this.town) {
       this.town = new TownScene(this.canvas, () => this.profile.settings, {
-        enter: (id) => this.openPlace(id),
+        enter: (id) => this.openPlace(id, 0, 'door'),
         move: (x, y, d, m) => { if (this.ws?.connected) this.ws.send({ t: 'tpos', x: Math.round(x), y: Math.round(y), d, m: m ? 1 : 0 }); },
         spot: (s) => this.townHud?.setSpot(s),
       }, { trainer: p.trainer, name: this.name(), dex: partnerDex(p), pos: p.townPos });
@@ -312,9 +345,9 @@ class App {
         card: () => this.openPlace('home', 1),
         settings: () => { this.openPlace('settings'); },
         help: () => { this.openPlace('help'); },
-        title: () => { this.saveTownPos(); this.title(); },
+        title: () => { this.saveTownPos(); void transition('fade', () => this.title()); },
         interact: () => this.town?.interact(),
-        go: (id) => this.openPlace(id),
+        go: (id, tab) => this.openPlace(id, tab ?? 0),
       });
     }
     this.townHud.refresh();
@@ -322,6 +355,7 @@ class App {
     setInputEnabled(true);
     playMusic('town');
     this.presence();
+    if (!p.guide.town) window.setTimeout(() => this.townTour(), 700);
   }
 
   private saveTownPos() {
@@ -346,61 +380,90 @@ class App {
     } else this.menu.start();
   }
 
-  /** 进入建筑 / 和 NPC 说话：镇上的画面留在背后 */
-  openPlace(id: PlaceId | 'settings' | 'help' | 'quick', tab = 0) {
-    if (this.where !== 'town' && this.where !== 'place') return;
+  /**
+   * 进入建筑 / 和 NPC 说话：镇上的画面留在背后。
+   * via=door：走到门口进去的，出来时站在门口；其它（快捷栏、训练家卡片、左下角的信息……）出来时还站在原地。
+   */
+  openPlace(id: PlaceId | 'settings' | 'help' | 'quick', tab = 0, via: 'door' | 'remote' = 'remote') {
+    if ((this.where !== 'town' && this.where !== 'place') || tourActive()) return;
+    if (this.where === 'town') this.place = via === 'door' && BUILDINGS.has(id) ? id as PlaceId : null;
+    const fromTown = this.where === 'town';
     this.where = 'place';
-    if (id !== 'settings' && id !== 'help' && id !== 'quick') this.place = id;
-    this.backdrop();
     this.townHud?.setSpot(null);
-    this.screen.classList.remove('hidden');
     sfx('click');
-    const back = () => this.enterTown();
+    const show = () => {
+      this.backdrop();
+      this.screen.classList.remove('hidden');
+      this.renderPlace(id, tab, via);
+    };
+    if (fromTown && BUILDINGS.has(id)) {
+      setInputEnabled(false);
+      void transition('door', show);
+    } else show();
+  }
+
+  private renderPlace(id: PlaceId | 'settings' | 'help' | 'quick', tab: number, via: 'door' | 'remote') {
+    const back = () => this.backToTown();
+    // 对话框关掉就回到镇上，不需要过场
+    const close = () => this.enterTown();
     const changed = () => { this.townHud?.refresh(); this.town?.setIdentity(this.profile.trainer, this.name(), partnerDex(this.profile)); this.presence(); };
     const p = this.profile;
     switch (id) {
       case 'home': homeScreen(this.screen, p, { back, changed }, tab); break;
-      case 'lab': labHub(this.screen, p, { back, changed }, tab); break;
+      case 'lab':
+        labHub(this.screen, p, { back, changed }, tab);
+        tour(p, 'lab', TOURS.lab);
+        break;
       case 'oak': {
         const n = unlockedLines(p).length;
-        npcDialog(this.screen, '大木博士', n >= 79 ? '了不起！你已经和所有的宝可梦都成为朋友了！' : `你已经拥有 ${n} 种宝可梦了！冒险中击败野生宝可梦时，它们有时会崇拜你。研究所里的「友情缎带」能让它们更容易崇拜你哦。`, [
-          ['去研究所', () => { this.place = 'lab'; labHub(this.screen, p, { back, changed }, 1); }, 'gold'],
-          ['好的', back, 'ghost'],
-        ]);
+        const b = badgeCount(p);
+        npcDialog(this.screen, '大木博士', n >= 79 ? '了不起！你已经和所有的宝可梦都成为朋友了！'
+          : `你已经拥有 ${n} 种宝可梦${b ? `、${b} 枚徽章` : ''}了！冒险中击败野生宝可梦时，它们有时会崇拜你。研究所里的「友情缎带」能让它们更容易崇拜你哦。`, [
+          ['去研究所', () => labHub(this.screen, p, { back, changed }, 1), 'gold'],
+          ['好的', close, 'ghost'],
+        ], { art: 'oak' });
         break;
       }
-      case 'karp': karpDialog(this.screen, p, (bought) => { if (bought) changed(); back(); }); break;
-      case 'mom':
-        npcDialog(this.screen, '妈妈', `${this.name()}，出门冒险要注意安全哦。累了就回家，我会让${LINES[p.partner]?.name ?? '宝可梦'}好好休息的。`, [['知道了', back]]);
+      case 'karp': karpDialog(this.screen, p, (bought) => { if (bought) changed(); close(); }); break;
+      case 'mom': {
+        const b = badgeCount(p);
+        const g = nextGym(p.badges);
+        npcDialog(this.screen, '妈妈', b
+          ? `${this.name()}，听说你已经拿到 ${b} 枚徽章了！${g ? `下一个是${g.name}吧？` : '妈妈真为你骄傲！'}出门要注意安全，累了就回家，我会让${LINES[p.partner]?.name ?? '宝可梦'}好好休息的。`
+          : `${this.name()}，出门冒险要注意安全哦。累了就回家，我会让${LINES[p.partner]?.name ?? '宝可梦'}好好休息的。`, [['知道了', close]], { npc: 'mom' });
         break;
+      }
       case 'rival':
-        npcDialog(this.screen, '小茂的家', '小茂的姐姐：小茂说他要去对战场修行，成为最强的训练家。你要不要也去看看？', [
-          ['去对战场', () => this.pvpCenter(), 'gold'],
-          ['好的', back, 'ghost'],
+        npcDialog(this.screen, '小茂的家', '小茂的姐姐：小茂说他要去挑战道馆，还要在对战场成为最强的训练家。你要不要也去看看？', [
+          ['去道馆', () => this.gymCenter(), 'gold'],
+          ['去对战场', () => this.pvpCenter()],
+          ['好的', close, 'ghost'],
         ]);
         break;
-      case 'quick': quickMenu(this.screen, (to) => { this.where = 'town'; this.openPlace(to); }, back); break;
+      case 'quick': quickMenu(this.screen, (to) => { this.where = 'town'; this.openPlace(to); }, close); break;
       case 'sign':
-        npcDialog(this.screen, '告示牌', '真新镇 —— 纯白的开始之镇。北边是 1 号道路，从那里出发冒险；宝可梦中心可以和朋友联机，对战场里可以和其他训练家对战。', [['好的', back]]);
+        npcDialog(this.screen, '告示牌', '真新镇 —— 纯白的开始之镇。北边是 1 号道路，从那里出发冒险；宝可梦中心可以和朋友联机；东边的道馆可以挑战道馆馆主、和其他训练家对战。', [['好的', close]]);
         break;
       case 'route': this.route(); break;
       case 'center': this.browse(); break;
-      case 'battle': this.pvpCenter(); break;
-      case 'settings': settingsScreen(this.screen, p, () => this.applySettings(), back); break;
-      case 'help': creditsScreen(this.screen, back); break;
+      // 走进道馆的门先遇到道馆向导；快捷栏的「对战」直接去对战场
+      case 'battle': if (via === 'door') this.gymGuide(); else this.pvpCenter(); break;
+      case 'gym': this.gymCenter(); break;
+      case 'settings': settingsScreen(this.screen, p, () => this.applySettings(), close); break;
+      case 'help': creditsScreen(this.screen, close); break;
     }
   }
 
   /** 1 号道路：确认难度后直接带着伙伴出发 */
   private route() {
     const p = this.profile;
-    const back = () => this.enterTown();
     const render = () => routeScreen(this.screen, p, {
-      go: (d) => this.startSolo(p.partner, d),
+      go: (d) => void transition('battle', () => this.startSolo(p.partner, d), { hold: 300 }),
       partner: () => partnerModal(p, (l) => { this.setPartner(l); render(); }),
-      back,
+      back: () => this.backToTown(),
     });
     render();
+    tour(p, 'route', TOURS.route);
   }
 
   private setPartner(line: LineId) {
@@ -416,14 +479,13 @@ class App {
 
   browse() {
     this.where = 'browse';
-    this.place = 'center';
     this.backdrop();
     this.screen.classList.remove('hidden');
     const ws = this.ensureWs();
     this.browser = new BrowseScreen(this.screen, {
       create: (pub) => this.createRoom(pub),
       join: (code) => this.joinRoom(code),
-      back: () => { this.ws?.send({ t: 'browse', on: false }); this.enterTown('center'); },
+      back: () => { this.ws?.send({ t: 'browse', on: false }); this.backToTown(); },
     }, ws.connected);
     if (this.stats) this.browser.setStats(this.stats, ws.connected);
     if (ws.connected) ws.send({ t: 'browse', on: true });
@@ -434,7 +496,6 @@ class App {
   /** 对战中心：背包、匹配、段位与排行榜（自动用跟随的伙伴出战） */
   pvpCenter() {
     this.where = 'pvp';
-    this.place = 'battle';
     this.browser = null;
     this.backdrop();
     this.screen.classList.remove('hidden');
@@ -451,10 +512,108 @@ class App {
       release: (uid) => releaseFromParty(this.profile, uid),
       board: (mode) => { saveProfile(this.profile); this.requestBoard(mode); },
       partner: (mon) => { this.setPartner(mon.build.line); this.profile.pvpPick = mon.uid; saveProfile(this.profile); },
-      adventure: () => { this.pvpUi = null; this.enterTown('battle'); this.openPlace('route'); },
-      back: () => { saveProfile(this.profile); this.pvpUi = null; this.enterTown('battle'); },
+      adventure: () => { this.pvpUi = null; this.where = 'place'; this.route(); },
+      back: () => { saveProfile(this.profile); this.pvpUi = null; this.backToTown(); },
     }, ws.connected);
     if (ws.connected) for (const mode of PVP_MODE_IDS) this.requestBoard(mode);
+    tour(this.profile, 'pvp', TOURS.pvp);
+  }
+
+  // ------------------------------------------------------------ 道馆
+
+  /** 走进道馆的门：道馆向导打招呼，问你要挑战道馆还是去对战场 */
+  private gymGuide() {
+    const p = this.profile;
+    const g = nextGym(p.badges);
+    const tip = g ? `下一个是${g.name}，馆主${g.leader.name}擅长${TYPE_NAME[g.type]}系，推荐 Lv${g.leader.level}。` : '';
+    npcDialog(this.screen, GUIDE.name, g ? `${GUIDE.hello}${tip}` : GUIDE.done, [
+      ['挑战道馆', () => this.gymCenter(), 'gold'],
+      ['排位对战', () => this.pvpCenter()],
+      ['下次再说', () => this.enterTown(), 'ghost'],
+    ], { npc: 'guide' });
+  }
+
+  /** 道馆挑战：徽章盒、八个道馆与你的出战队伍 */
+  gymCenter(sel?: string) {
+    this.where = 'place';
+    this.pvpUi = null;
+    this.backdrop();
+    this.screen.classList.remove('hidden');
+    playMusic('town');
+    gymScreen(this.screen, this.profile, {
+      challenge: (g, team) => this.gymChallenge(g, team),
+      pvp: () => this.pvpCenter(),
+      adventure: () => this.route(),
+      back: () => this.backToTown(),
+    }, sel);
+    tour(this.profile, 'gym', TOURS.gym);
+  }
+
+  /** 道馆训练家 / 馆主开战前的台词（打败过道馆训练家就直接挑战馆主） */
+  private gymChallenge(g: GymDef, team: PartyMon[], stage?: GymStage) {
+    const p = this.profile;
+    const st: GymStage = stage ?? (p.gymJunior[g.id] || p.badges[g.id] ? 'leader' : 'junior');
+    const T = g[st];
+    const foes = gymTeam(g, st);
+    this.where = 'place';
+    this.backdrop();
+    this.screen.classList.remove('hidden');
+    talk(this.screen, {
+      name: `${T.title} · ${T.name}`, art: T.art,
+      text: st === 'leader' && p.badges[g.id] ? g.leader.rematch : T.intro,
+      extra: h('div', { class: 'talk-team' }, foes.map((b) => portraitSlot(formOf(b.line, b.stage).dex, 1, 'tiny')), h('span', { class: 'small muted' }, `Lv${T.level}`)),
+      buttons: [
+        [st === 'leader' ? '挑战馆主！' : '迎战！', () => this.startGymBattle(g, team, st), 'gold'],
+        ['再准备一下', () => this.gymCenter(g.id), 'ghost'],
+      ],
+    });
+  }
+
+  private startGymBattle(g: GymDef, team: PartyMon[], stage: GymStage) {
+    mobileFullscreen();
+    const T = g[stage];
+    void transition('battle', () => {
+      if (this.pvpUi?.isQueued) this.ws?.send({ t: 'pvpCancel' });
+      this.close();
+      this.solo = false;
+      this.pvpMatch = { mode: '1v1', uids: team.map((m) => m.uid), practice: true, seats: [], gym: { id: g.id, stage } };
+      const t = new LocalPvpTransport('1v1', { name: this.name(), team: team.map((m) => m.build), meta: this.meta(), trainer: this.profile.trainer, auto: this.profile.pvpAuto },
+        [], { name: T.name, trainer: T.art, builds: gymTeam(g, stage), meta: g.meta });
+      this.t = t;
+      t.onMessage = (m) => this.onMessage(m);
+    }, { hold: 300 });
+  }
+
+  /** 道馆对战结束：输了可以再来；赢了道馆训练家接着挑战馆主；赢了馆主颁发徽章 */
+  private endGym(g: GymDef, stage: GymStage, team: PartyMon[], res: PvpMatchResult, you: number, report: () => void) {
+    const p = this.profile;
+    const T = g[stage];
+    const me = res.players.find((x) => x.id === you);
+    const won = !!me && res.winner === me.team;
+    const back = () => this.gymCenter(g.id);
+    const who = { name: `${T.title} · ${T.name}`, art: T.art };
+    if (!won) {
+      talk(this.screen, { ...who, text: T.win, buttons: [['再挑战一次', () => this.gymChallenge(g, team, stage), 'gold'], ['查看战报', report], ['回去准备', back, 'ghost']] });
+      return;
+    }
+    if (stage === 'junior') {
+      p.gymJunior[g.id] = Date.now();
+      saveProfile(p);
+      talk(this.screen, { ...who, text: T.lose, buttons: [['挑战馆主！', () => this.gymChallenge(g, team, 'leader'), 'gold'], ['查看战报', report], ['先休息一下', back, 'ghost']] });
+      return;
+    }
+    const mine = res.players.filter((x) => x.owner === me!.owner);
+    const reward = winGym(p, { gym: g.id, underdog: isUnderdog(team.map((m) => m.build), g), auto: me!.bot, flawless: mine.every((x) => x.alive) });
+    this.townHud?.refresh();
+    const ceremony = () => {
+      if (!reward.badge) { back(); return; }
+      void badgeCeremony({
+        icon: g.badge.icon, name: g.badge.name, color: g.badge.color, gym: g.name, bonus: badgeBonus(g), stardust: reward.stardust,
+        achievements: reward.newAchievements.map((a) => a.name),
+      }).then(back);
+    };
+    if (!reward.badge && reward.newAchievements.length) toast(`新成就：${reward.newAchievements.map((a) => a.name).join('、')}（星之沙 +${reward.stardust}）`, 'gold', 4000);
+    talk(this.screen, { ...who, text: T.lose, buttons: reward.badge ? [['收下徽章', ceremony, 'gold']] : [['查看战报', report], ['好的', back, 'gold']] });
   }
 
   private requestBoard(mode: PvpMode) {
@@ -499,7 +658,8 @@ class App {
     this.pvpCenter();
   }
 
-  private endPvp(res: PvpMatchResult, you: number, rating: PvpRatingChange | null) {
+  /** 对战结束：先在画面中央显示胜负，再淡出到结算（道馆对战接着显示台词） */
+  private async endPvp(res: PvpMatchResult, you: number, rating: PvpRatingChange | null) {
     const match = this.pvpMatch;
     this.pvpMatch = null;
     const me = res.players.find((p) => p.id === you);
@@ -513,29 +673,41 @@ class App {
       }
       saveProfile(this.profile);
     }
-    const t = this.t;
-    this.t = null;
-    if (t instanceof LocalPvpTransport) t.close();
-    this.leaveGame();
-    this.where = 'results';
-    this.backdrop();
-    this.screen.classList.remove('hidden');
-    playMusic('shop');
+    setInputEnabled(false);
     sfx(outcome === 'win' ? 'clear' : outcome === 'loss' ? 'down' : 'wave');
-    pvpResultsScreen(this.screen, res, you, rating, match?.seats ?? [], !!match?.practice, {
-      again: () => {
-        this.pvpCenter();
-        // 放生过的不再上场；队长没了就留在对战中心重新选
-        if (!match || !team.length || team[0].uid !== match.uids[0]) return;
-        if (match.practice) this.pvpPractice(match.mode, team);
-        else if (this.ws?.connected) { this.pvpUi?.setWaiting(); this.pvpQueue(match.mode, team); }
-      },
-      back: () => this.pvpCenter(),
-      home: () => { this.place = 'battle'; this.enterTown('battle'); },
+    await bigBanner(outcome === 'win' ? '胜利！' : outcome === 'loss' ? '败北……' : '平局', res.reason === 'ko' ? (outcome === 'win' ? '击倒了全部对手' : outcome === 'loss' ? '我方全员倒下' : '双方同时倒下') : '时间到', outcome === 'win' ? 'win' : outcome === 'loss' ? 'lose' : 'draw');
+    const gym = match?.gym ? GYM_BY_ID[match.gym.id] : null;
+    const report = () => pvpResultsScreen(this.screen, res, you, rating, match?.seats ?? [], true, {
+      again: () => (gym && match?.gym ? this.gymChallenge(gym, team, match.gym.stage) : this.pvpCenter()),
+      back: () => (gym ? this.gymCenter(gym.id) : this.pvpCenter()),
+      home: () => this.backToTown(),
+    });
+    void transition('fade', () => {
+      const t = this.t;
+      this.t = null;
+      if (t instanceof LocalPvpTransport) t.close();
+      this.leaveGame();
+      this.where = gym ? 'place' : 'results';
+      this.backdrop();
+      this.screen.classList.remove('hidden');
+      playMusic('shop');
+      if (gym && match?.gym) { this.endGym(gym, match.gym.stage, team, res, you, report); return; }
+      pvpResultsScreen(this.screen, res, you, rating, match?.seats ?? [], !!match?.practice, {
+        again: () => {
+          this.pvpCenter();
+          // 放生过的不再上场；队长没了就留在对战中心重新选
+          if (!match || !team.length || team[0].uid !== match.uids[0]) return;
+          if (match.practice) this.pvpPractice(match.mode, team);
+          else if (this.ws?.connected) { this.pvpUi?.setWaiting(); this.pvpQueue(match.mode, team); }
+        },
+        back: () => this.pvpCenter(),
+        home: () => this.backToTown(),
+      });
     });
   }
 
-  private meta() { return { ...this.profile.upgrades }; }
+  /** 研究所强化 + 道馆徽章：开局时加到宝可梦身上（服务器端同样计算） */
+  private meta() { return { ...this.profile.upgrades, ...badgeMeta(this.profile) }; }
   private name() { return this.profile.name || TRAINERS[this.profile.trainer]?.name || '训练家'; }
   /** 加入房间时带上的身份 */
   private ident() { return { trainer: this.profile.trainer, line: this.profile.partner, owned: unlockedLines(this.profile) }; }
@@ -630,7 +802,7 @@ class App {
         if (this.joining || m.fatal) {
           this.joining = false;
           if (this.t === this.ws) this.t = null;
-          if (!this.solo && this.profile.setup) { this.enterTown('center'); this.openPlace('center'); }
+          if (!this.solo && this.profile.setup) { this.where = 'place'; this.browse(); }
           else this.home();
         }
         break;
@@ -672,7 +844,7 @@ class App {
       },
       ready: (on) => this.send({ t: 'ready', on }),
       start: () => this.send({ t: 'start' }),
-      leave: () => { this.close(); this.enterTown('center'); this.openPlace('center'); },
+      leave: () => { this.close(); this.where = 'place'; this.browse(); },
       difficulty: (id) => this.send({ t: 'difficulty', id }),
       visibility: (on) => this.send({ t: 'visibility', public: on }),
     }, this.roomDifficulty, this.roomPublic);
@@ -691,7 +863,12 @@ class App {
     this.view = new GameView(this.canvas, w, h, this.you, this.profile.settings, {
       onMessage: (text) => this.hud?.message(text),
       onBoss: (name) => this.hud?.announce(`野生的${name}出现了！`),
-      onWave: (n) => this.hud?.announce(`第 ${n} 波`, BIOMES[this.view?.biome ?? 0]?.name ?? ''),
+      onWave: (n) => {
+        const b = this.view?.biome ?? 0;
+        this.hud?.announce(`第 ${n} 波`, BIOMES[b]?.name ?? '');
+        // 进入新的地区时，左上角挂出地名牌
+        if (b !== this.lastBiome) { this.lastBiome = b; placeSign(BIOMES[b]?.name ?? '', n === 1 ? '冒险开始！' : `第 ${n} 波 · 来到了新的地区`); }
+      },
       onEvolve: (pid, text) => {
         if (pid === this.you) this.hud?.announce(text);
         else this.hud?.message(`${players.find((p) => p.id === pid)?.name ?? '队友'}：${text}`);
@@ -724,7 +901,9 @@ class App {
       this.hud.enableAuto(() => this.toggleAuto(), M.team > 1
         ? '交给 AI 操作你的队长（另外两只一直由 AI 操作），可以随时切回手动。对战比的是构筑和阵容，网络不好时也可以放心交给 AI。'
         : '交给 AI 操作你的宝可梦，可以随时切回手动。');
+      this.battleIntro(mode, pvpSeats);
     } else {
+      this.lastBiome = -1;
       this.hud = new Hud(this.ui, this.solo ? () => this.setPause(true) : null);
       this.inter = new Intermission(this.ui, (c) => this.send(c));
       if (autoAssistUnlocked(this.profile)) {
@@ -748,6 +927,26 @@ class App {
     const isNew = addOwned(this.profile, line, true);
     sfx('achieve');
     this.hud?.announce(`野生的${formOf(line, LINES[line].forms.findIndex((f) => f.dex === dex)).name}崇拜了你！`, isNew ? `${name}成为了你的伙伴！回到真新镇可以让它跟着你` : '');
+  }
+
+  /** 对战开场：两边的训练家和宝可梦（道馆对战显示道馆训练家 / 馆主的立绘） */
+  private battleIntro(mode: PvpMode, seats: PvpSeatInfo[]) {
+    const me = seats.find((s) => s.id === this.you);
+    if (!me) return;
+    const allies = seats.filter((s) => s.team === me.team), foes = seats.filter((s) => s.team !== me.team);
+    const gym = this.pvpMatch?.gym ? GYM_BY_ID[this.pvpMatch.gym.id] : null;
+    const left: VsSide = { name: this.name(), sub: TRAINERS[this.profile.trainer]?.title, art: this.profile.trainer, dex: allies.map((s) => s.dex) };
+    let right: VsSide, title: string;
+    if (gym && this.pvpMatch?.gym) {
+      const T = gym[this.pvpMatch.gym.stage];
+      right = { name: T.name, sub: T.title, art: T.art, dex: foes.map((s) => s.dex) };
+      title = `${gym.name} · ${this.pvpMatch.gym.stage === 'leader' ? '馆主战' : '道馆训练家'}`;
+    } else {
+      const names = [...new Set(foes.map((s) => s.name))];
+      right = { name: names.length > 1 ? `${names[0]} 等 ${names.length} 人` : names[0] ?? '对手', sub: foes[0]?.bot ? 'AI 训练家' : '训练家', art: foes[0]?.trainer ?? 'gary', dex: foes.map((s) => s.dex) };
+      title = `${PVP_MODES[mode].name}${this.pvpMatch?.practice ? ' · 练习赛' : ' · 排位赛'}`;
+    }
+    void vsSplash(left, right, title);
   }
 
   /** 切换自动战斗（对战随时可用；冒险要先通关一次） */
@@ -786,6 +985,8 @@ class App {
       if (this.me) this.inter.update(this.me, s, this.you);
       playMusic('shop');
       sfx('clear');
+      // 第一次进商店：介绍升级、刷新与撤销、出发
+      window.setTimeout(() => { if (this.inter?.visible) tour(this.profile, 'shop', TOURS.shop); }, 450);
     } else if (s.phase === 'wave' && this.inter.visible) {
       this.inter.show(false);
       setInputEnabled(true);
@@ -811,7 +1012,7 @@ class App {
       this.screen.classList.remove('hidden');
       pauseScreen(this.screen, () => this.setPause(false), () => settingsScreen(this.screen, this.profile, () => this.applySettings(), () => this.renderPause()), () => {
         this.close();
-        this.enterTown('route');
+        this.backToTown();
       });
     } else {
       clear(this.screen);
@@ -820,20 +1021,32 @@ class App {
     }
   }
 
-  private endGame(victory: boolean, summary: import('../shared/meta').RunSummary | null, board: BoardEntry[]) {
+  /** 一局冒险结束：画面中央先显示「恭喜通关」或「全员倒下了」，再淡出到结算 */
+  private async endGame(victory: boolean, summary: import('../shared/meta').RunSummary | null, board: BoardEntry[]) {
+    if (this.ending) return;
+    this.ending = true;
     const reward = summary ? applyRun(this.profile, summary) : null;
-    // 新成就直接在结算界面里列出，不再弹提示挡住统计
-    if (reward?.newAchievements.length) sfx('achieve');
-    this.leaveGame();
-    this.where = 'results';
-    this.backdrop();
-    this.screen.classList.remove('hidden');
-    playMusic('shop');
-    const line = this.profile.partner, diff = this.pendingDifficulty;
-    resultsScreen(this.screen, victory, summary, reward, board, this.you, () => {
-      if (this.solo) { this.close(); this.startSolo(line, diff); }
-      else this.showLobby();
-    }, this.solo ? '再来一局' : '返回房间', this.profile, () => { this.close(); this.enterTown('route'); });
+    setInputEnabled(false);
+    sfx(victory ? 'clear' : 'down');
+    const waves = summary?.wavesCleared ?? this.pub?.wave ?? 0;
+    await bigBanner(victory ? '恭喜通关！' : '全员倒下了……', victory ? '你们是真正的宝可梦大师！' : `坚持到了第 ${waves + 1} 波`, victory ? 'win' : 'lose');
+    void transition('fade', () => {
+      this.ending = false;
+      // 新成就直接在结算界面里列出，不再弹提示挡住统计
+      if (reward?.newAchievements.length) sfx('achieve');
+      this.leaveGame();
+      this.where = 'results';
+      this.backdrop();
+      this.screen.classList.remove('hidden');
+      playMusic('shop');
+      const line = this.profile.partner, diff = this.pendingDifficulty;
+      resultsScreen(this.screen, victory, summary, reward, board, this.you, () => {
+        if (this.solo) void transition('battle', () => { this.close(); this.startSolo(line, diff); }, { hold: 300 });
+        else this.showLobby();
+      }, this.solo ? '再来一局' : '返回房间', this.profile, () => { this.close(); this.backToTown(); });
+      // 第一次结算：提醒把宝可梦放进背包（之后可以挑战道馆、对战）
+      if (summary?.build) window.setTimeout(() => tour(this.profile, 'results', TOURS.results), 500);
+    });
   }
 
   private leaveGame() {

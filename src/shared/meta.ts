@@ -1,6 +1,7 @@
 import { DIFFICULTIES, type DifficultyId } from './difficulty';
+import { GYMS, badgeKey } from './gyms';
 import { LINES, type LineId } from './pokemon';
-import type { Mods } from './stats';
+import { addTypeMods, type Mods, type TypeMods } from './stats';
 import type { SavedBuild } from './pvp/build';
 import { TRAINERS } from './trainers';
 
@@ -38,21 +39,31 @@ export function metaCost(u: MetaUpgrade, lv: number): number {
   return Math.round(u.base * Math.pow(lv + 1, 1.45));
 }
 
-export interface MetaBonus { mods: Partial<Mods>; startMoney: number }
+export interface MetaBonus { mods: Partial<Mods>; startMoney: number; typeMods: TypeMods }
 
+/** 局外加成：大木研究所的强化 + 道馆徽章（levels 里的 badge_<道馆> 键） */
 export function metaBonus(levels: Record<string, number> | undefined): MetaBonus {
   const mods: Partial<Mods> = {};
+  const add = (per: Partial<Mods>, n: number) => {
+    for (const k in per) {
+      const key = k as keyof Mods;
+      mods[key] = (mods[key] ?? 0) + (per[key] ?? 0) * n;
+    }
+  };
   let startMoney = 0;
   for (const u of META_UPGRADES) {
     const lv = Math.max(0, Math.min(u.max, Math.floor(levels?.[u.id] ?? 0)));
     if (!lv) continue;
-    for (const k in u.per) {
-      const key = k as keyof Mods;
-      mods[key] = (mods[key] ?? 0) + (u.per[key] ?? 0) * lv;
-    }
+    add(u.per, lv);
     startMoney += (u.startMoney ?? 0) * lv;
   }
-  return { mods, startMoney };
+  const typeMods: TypeMods = {};
+  for (const g of GYMS) {
+    if (!levels?.[badgeKey(g.id)]) continue;
+    add(g.badge.mods, 1);
+    addTypeMods(typeMods, g.badge.typeMods);
+  }
+  return { mods, startMoney, typeMods };
 }
 
 /** 一局结束后服务器发给每位玩家的战绩，用于成就判定与星之沙结算。 */
@@ -119,6 +130,19 @@ export interface LifetimeStats {
   recruits: number;
   /** 已经拥有的宝可梦种类（进化线） */
   owned: number;
+  /** 拿到的道馆徽章数 */
+  badges: number;
+}
+
+/** 击败道馆馆主时的情况（判定道馆成就用） */
+export interface GymOutcome {
+  gym: string;
+  /** 队伍平均等级比馆主低 3 级以上 */
+  underdog: boolean;
+  /** 结束时队长由 AI 操作 */
+  auto: boolean;
+  /** 自己的宝可梦一只都没有退场 */
+  flawless: boolean;
 }
 
 export interface AchievementDef {
@@ -132,8 +156,17 @@ export interface AchievementDef {
   trainer?: string;
   /** 解锁的难度（仅用于展示） */
   unlocksDifficulty?: DifficultyId;
-  check: (r: RunSummary, s: LifetimeStats) => boolean;
+  /** g：刚刚击败道馆馆主时才有 */
+  check: (r: RunSummary, s: LifetimeStats, g?: GymOutcome | null) => boolean;
 }
+
+/** 不在冒险结算时判定成就（例如赢了道馆之后）用的空战绩：只有累计统计和道馆成就可能达成 */
+export const NO_RUN: RunSummary = {
+  line: 'charmander', trainer: '', difficulty: 'easy', neverEvolved: false, wavesCleared: 0, victory: false, kills: 0, level: 0, stage: 0,
+  finalForm: false, evolved: false, skillsFull: false, foreignSkill: false, items: 0, moneyEarned: 0, superEff: 0, players: 0, revives: 0,
+  bossKills: [], damage: 0, recruits: [], typeDmg: {},
+  detail: { time: 0, dex: 0, form: '', kills: { minion: 0, elite: 0, boss: 0 }, topKills: [], damageTaken: 0, healed: 0, crits: 0, dodges: 0, moneySpent: 0, skillDmg: [], skills: [], items: [], waves: [], forms: [] },
+};
 
 /** 属性成就：一局中用这个属性的技能造成的伤害 */
 export const TYPE_DMG_GOAL = 200000;
@@ -175,6 +208,14 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'magikarp_power', name: '鲤鱼跃龙门', desc: '用鲤鱼王完成第 10 波', reward: 100, check: (r) => r.line === 'magikarp' && r.wavesCleared >= 10 },
   { id: 'eevee_master', name: '伊布进化家', desc: '让伊布进化并完成第 10 波', reward: 80, check: (r) => r.line === 'eevee' && r.stage > 0 && r.wavesCleared >= 10 },
   { id: 'mewtwo_win', name: '最强的宝可梦', desc: '用超梦通关', reward: 200, check: (r) => r.line === 'mewtwo' && r.victory },
+  // 道馆：按顺序挑战，所以拿到第 N 枚徽章就说明打败了第 N 个道馆的馆主
+  { id: 'badge_1', name: '坚如磐石', desc: '击败深灰道馆馆主小刚，获得灰色徽章', reward: 40, trainer: 'brock', check: (_r, s) => s.badges >= 1 },
+  { id: 'badge_4', name: '半程冠军', desc: '集齐 4 枚道馆徽章', reward: 100, check: (_r, s) => s.badges >= 4 },
+  { id: 'badge_6', name: '预知未来', desc: '击败金黄道馆馆主娜姿，获得金色徽章', reward: 120, trainer: 'sabrina', check: (_r, s) => s.badges >= 6 },
+  { id: 'badge_8', name: '宝可梦联盟的资格', desc: '集齐全部 8 枚道馆徽章', reward: 300, check: (_r, s) => s.badges >= 8 },
+  { id: 'gym_underdog', name: '以弱胜强', desc: '用平均等级比馆主低 3 级以上的队伍击败道馆馆主', reward: 80, check: (_r, _s, g) => !!g?.underdog },
+  { id: 'gym_auto', name: '斗蛐蛐大师', desc: '开着自动战斗击败道馆馆主', reward: 40, check: (_r, _s, g) => !!g?.auto },
+  { id: 'gym_flawless', name: '一只都没少', desc: '自己的三只宝可梦都没有退场，击败道馆馆主', reward: 80, check: (_r, _s, g) => !!g?.flawless },
 ];
 
 export const ACHIEVEMENT_BY_ID: Record<string, AchievementDef> = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a]));
@@ -208,7 +249,7 @@ export function trainerHint(id: string): string {
   const t = TRAINERS[id];
   if (!t) return '';
   if (t.unlock.start) return '初始可用';
-  if (t.unlock.cost) return `在我的家用 ${t.unlock.cost} 星之沙招募`;
   const a = t.unlock.ach ? ACHIEVEMENT_BY_ID[t.unlock.ach] : null;
-  return a ? `成就「${a.name}」：${a.desc}` : '';
+  const parts = [t.unlock.cost ? `在我的家用 ${t.unlock.cost} 星之沙招募` : '', a ? `成就「${a.name}」：${a.desc}` : ''].filter(Boolean);
+  return parts.join('；或');
 }
