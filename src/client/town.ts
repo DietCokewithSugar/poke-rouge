@@ -3,14 +3,14 @@
  * 走到建筑门口（或 NPC 身边）按 A / 空格 / 回车进入；镇上能看到所有在线的玩家。
  */
 import { TOWN_WHERE, type TownPeer } from '../shared/protocol';
-import { BUILDINGS, NPCS, SPAWN, TOWN_H, TOWN_W, blocked, drawSea, spotAt, townCanvas, type PlaceId, type Spot } from './gfx/town';
+import { BUILDINGS, CELL, NPCS, SPAWN, VIEW_BOUNDS, blocked, doorPos, drawTownBg, drawTownFg, spotAt, type PlaceId, type Spot } from './gfx/town';
 import { Animator, dirRow } from './gfx/sprites';
 import { drawNpc, drawTrainer, tdirOf, walkFrame, type TDir } from './gfx/trainers';
 import { moveVector } from './input';
 import { renderDpr } from './game/view';
 import type { Settings } from './save';
 
-const SPEED = 92;
+const SPEED = 88;
 /** 跟随的宝可梦和训练家之间隔多远 */
 const FOLLOW_GAP = 22;
 
@@ -95,9 +95,10 @@ export class TownScene {
 
   /** 从建筑里出来：站在门口，面朝下 */
   placeAt(id: PlaceId) {
-    const b = BUILDINGS.find((x) => x.id === id);
-    if (b) { this.me.x = b.door; this.me.y = b.y + b.h + 16; }
-    else if (id === 'route') { this.me.x = 384; this.me.y = 60; }
+    const p = doorPos(id);
+    if (!p) return;
+    this.me.x = p.x;
+    this.me.y = p.y;
     this.me.dir = 0;
     this.me.mx = this.me.x;
     this.me.my = this.me.y - FOLLOW_GAP;
@@ -212,27 +213,26 @@ export class TownScene {
     const dpr = renderDpr(this.settings());
     const cw = Math.floor(window.innerWidth * dpr), ch = Math.floor(window.innerHeight * dpr);
     if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
-    const S = Math.max(2, Math.round(Math.min(ch / 250, cw / 440)));
+    const S = Math.max(2, Math.round(Math.min(ch / 230, cw / 400)));
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#305830';
+    ctx.fillStyle = '#3a7a3a';
     ctx.fillRect(0, 0, cw, ch);
     const vw = cw / S, vh = ch / S;
-    const clampCam = (v: number, view: number, size: number) => (view >= size ? (size - view) / 2 : Math.max(0, Math.min(size - view, v - view / 2)));
-    this.cam.x = Math.round(clampCam(this.me.x, vw, TOWN_W));
-    this.cam.y = Math.round(clampCam(this.me.y - 8, vh, TOWN_H));
+    const B = VIEW_BOUNDS;
+    const clampCam = (v: number, view: number, a: number, b: number) => (view >= b - a ? (a + b - view) / 2 : Math.max(a, Math.min(b - view, v - view / 2)));
+    this.cam.x = Math.round(clampCam(this.me.x, vw, B.x0, B.x1));
+    this.cam.y = Math.round(clampCam(this.me.y - 8, vh, B.y0, B.y1));
     const { x: ox, y: oy } = this.cam;
     ctx.setTransform(S, 0, 0, S, -ox * S, -oy * S);
-    ctx.drawImage(townCanvas(), 0, 0);
-    drawSea(ctx, this.time, ox, ox + vw);
+    drawTownBg(ctx);
 
-    // 按脚底的 y 排序后画：NPC、其他玩家、自己，以及各自跟随的宝可梦
+    // 按脚底的 y 排序后画：NPC、其他玩家、自己，以及各自跟随的宝可梦；树冠和屋檐最后画，挡住走到后面的人
     type D = { y: number; draw: () => void };
     const list: D[] = [];
     const t = this.time;
-    list.push({ y: NPCS.oak.y, draw: () => drawNpc(ctx, 'oak', NPCS.oak.look, NPCS.oak.x, NPCS.oak.y, 0) });
-    list.push({ y: NPCS.karp.y, draw: () => { drawNpc(ctx, 'karp', NPCS.karp.look, NPCS.karp.x, NPCS.karp.y, 0); } });
+    for (const [k, n] of Object.entries(NPCS)) list.push({ y: n.y, draw: () => drawNpc(ctx, k, n.x, n.y, 0) });
     const pushWalker = (w: Walker, trainer: string, alpha = 1) => {
       list.push({ y: w.my, draw: () => { shadow(ctx, w.mx, w.my); w.mon.draw(ctx, w.mx, w.my, 1, 0, alpha); } });
       list.push({ y: w.y, draw: () => { shadow(ctx, w.x, w.y); drawTrainer(ctx, trainer, w.x, w.y, w.dir, walkFrame(w.t, w.moving), 1, alpha); } });
@@ -241,6 +241,7 @@ export class TownScene {
     pushWalker(this.me, this.trainer);
     list.sort((a, b) => a.y - b.y);
     for (const d of list) d.draw();
+    drawTownFg(ctx);
 
     // 文字用屏幕像素画，保证清晰
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -256,13 +257,13 @@ export class TownScene {
       ctx.fillStyle = col;
       ctx.fillText(text, sx, sy - 1);
     };
-    for (const b of BUILDINGS) label(b.name, b.door, b.y - 2, '#ffe070');
-    label('1号道路 ▲', 384, 34, '#c8ffb0');
-    for (const q of this.peers.values()) if (q.w === 0 && q.x >= 0) label(q.name, q.x, q.y - 24, '#e8f0ff');
-    label(this.name || '训练家', this.me.x, this.me.y - 24, '#ffffff', 'rgba(40,80,200,.75)');
+    for (const b of BUILDINGS) label(b.name, b.door.x * CELL + CELL / 2, (b.door.y - 1) * CELL - 1, '#ffe070');
+    label('1号道路 ▲', 13 * CELL, 2 * CELL + 6, '#c8ffb0');
+    for (const q of this.peers.values()) if (q.w === 0 && q.x >= 0) label(q.name, q.x, q.y - 26, '#e8f0ff');
+    label(this.name || '训练家', this.me.x, this.me.y - 26, '#ffffff', 'rgba(40,80,200,.75)');
     if (this.spot && this.active) {
       const bob = Math.round(Math.sin(t * 6) * 1.5);
-      label(`▼ ${this.spot.label}`, this.me.x, this.me.y - 36 + bob, '#ffd23f', 'rgba(16,20,40,.85)');
+      label(`▼ ${this.spot.label}`, this.me.x, this.me.y - 38 + bob, '#ffd23f', 'rgba(16,20,40,.85)');
     }
   }
 }

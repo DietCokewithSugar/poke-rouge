@@ -1,10 +1,9 @@
 import { LINES } from '../../shared/pokemon';
-import { SKILLS } from '../../shared/skills';
 import { BIOMES } from '../../shared/waves';
 import { DIFFICULTIES } from '../../shared/difficulty';
 import type { MeState, PublicState } from '../../shared/sim/game';
 import type { PvpSeatInfo } from '../../shared/protocol';
-import { PVP_MODES } from '../../shared/pvp/sim';
+import { PVP_MODES, RING_START, type PvpMode } from '../../shared/pvp/sim';
 import { Animator } from '../gfx/sprites';
 import { trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
@@ -43,10 +42,14 @@ export class Hud {
   private bannerTimer = 0;
   private subTimer = 0;
 
-  private pvpBox = h('div', { class: 'hud-pvp box tight hidden' });
+  private pvpBox = h('div', { class: 'hud-pvp box tight compact hidden' });
+  /** 技能冷却：服务器每秒只同步几次，两次之间在本地按时间倒数，进度条才不会跳 */
+  private cds: { cd: number; max: number; at: number }[] = [];
+  private raf = 0;
   private pvpSeats: PvpSeatInfo[] = [];
   private myTeam = 0;
   private lastCount = -1;
+  private autoBtn: HTMLButtonElement | null = null;
 
   constructor(parent: HTMLElement, onPause: (() => void) | null, onLeave?: () => void, leaveConfirm = '再按一次离开') {
     this.pauseBtn = onLeave
@@ -79,14 +82,36 @@ export class Hud {
     );
     this.bossBox.append(this.bossName, h('div', { class: 'bar boss' }, this.bossFill));
     parent.appendChild(this.root);
+    this.raf = requestAnimationFrame(this.tick);
   }
 
-  destroy() { this.root.remove(); }
+  destroy() {
+    cancelAnimationFrame(this.raf);
+    this.root.remove();
+  }
+
+  /** 收到新的私有状态时调用：记下每个技能剩余的冷却和收到的时间 */
+  setCooldowns(skills: MeState['skills']) {
+    const now = performance.now();
+    this.cds = skills.map((s) => ({ cd: s.cd, max: Math.max(0.1, s.max), at: now }));
+  }
+
+  private tick = () => {
+    this.raf = requestAnimationFrame(this.tick);
+    const now = performance.now();
+    this.cds.forEach((c, i) => {
+      const cd = (this.skills.children[i] as HTMLElement | undefined)?.querySelector('.cd') as HTMLElement | null;
+      if (!cd) return;
+      const left = Math.max(0, c.cd - (now - c.at) / 1000);
+      const p = `${Math.round(Math.min(1, left / c.max) * 100)}%`;
+      if (cd.style.getPropertyValue('--p') !== p) cd.style.setProperty('--p', p);
+    });
+  };
 
   /** 左上角：训练家 + 宝可梦 */
   setTrainer(trainer: string, name: string) {
     clear(this.me.trainer);
-    this.me.trainer.appendChild(trainerPortrait(trainer, 2, 'tportrait'));
+    this.me.trainer.appendChild(trainerPortrait(trainer, 1, 'tportrait'));
     this.me.trainer.title = name;
   }
 
@@ -99,28 +124,47 @@ export class Hud {
     this.net.title = `往返延迟 ${ms}ms · 画面缓冲 ${Math.round(buffer)}ms（网络抖动越大，缓冲越大）`;
   }
 
-  /** 对战：顶部显示两队宝可梦、倒计时与缩圈状态 */
-  setPvp(seats: PvpSeatInfo[], you: number) {
+  /** 自动战斗按钮（右下角，键盘 T / 手柄 Y） */
+  enableAuto(onToggle: () => void, hint: string) {
+    this.autoBtn?.remove();
+    this.autoBtn = h('button', { class: 'btn small hud-auto', 'data-key': 'y', onclick: () => onToggle() }, uiIcon('robot', 2), h('span', null, '手动'));
+    tip(this.autoBtn, () => h('div', { class: 'info' }, h('b', null, 'AI 自动战斗（T）'), h('div', { class: 'small' }, hint)));
+    this.root.appendChild(this.autoBtn);
+  }
+
+  setAuto(on: boolean) {
+    if (!this.autoBtn) return;
+    this.autoBtn.classList.toggle('on', on);
+    set(this.autoBtn.querySelector('span') as HTMLElement, on ? '自动中' : '手动');
+  }
+
+  /** 对战：顶部显示两队宝可梦、倒计时与缩圈状态。单挑时每边是一位训练家的三只宝可梦 */
+  setPvp(mode: PvpMode, seats: PvpSeatInfo[], you: number) {
+    const me = seats.find((s) => s.id === you);
+    const M = PVP_MODES[mode];
     this.pvpSeats = seats;
-    this.myTeam = seats.find((s) => s.id === you)?.team ?? 0;
+    this.myTeam = me?.team ?? 0;
     this.root.classList.add('pvp');
     this.pvpBox.classList.remove('hidden');
-    set(this.downBox.querySelector('.hud-down-sub') as HTMLElement, '队友站到你身边就能把你救起来（附近有对手时无法救援）');
-    const chip = (s: PvpSeatInfo) => h('div', { class: `pvp-chip ${s.id === you ? 'me' : ''}`, 'data-id': s.id, title: `${s.name}${s.bot ? '（AI）' : ''} · Lv${s.level}` },
+    set(this.downBox.querySelector('b') as HTMLElement, M.revive ? '你倒下了！' : '你的队长退场了！');
+    set(this.downBox.querySelector('.hud-down-sub') as HTMLElement, M.revive ? '队友站到你身边就能把你救起来（附近有对手时无法救援）' : '另外两只宝可梦还在战斗，为它们加油吧！');
+    const chip = (s: PvpSeatInfo) => {
+      const form = LINES[s.line]?.forms.find((f) => f.dex === s.dex)?.name ?? '';
+      return h('div', {
+        class: `pvp-chip ${s.id === you ? 'me' : ''} ${me && s.owner === me.owner ? 'mine' : ''}`, 'data-id': s.id,
+        title: `${s.name}${s.bot ? '（AI 训练家）' : ''}的${form} · Lv${s.level}${s.helper ? ' · AI 操作' : ''}`,
+      },
       h('div', { class: 'pvp-chip-portrait' }, Animator.portrait(s.dex, 1)),
-      h('div', { class: 'pvp-chip-body' },
-        h('div', { class: 'pvp-chip-name' }, s.name, s.bot ? h('i', null, 'AI') : null),
-        h('div', { class: 'bar thin' }, h('div', { class: 'bar-fill hp' })),
-      ),
-    );
+      h('div', { class: 'pvp-chip-body' }, h('div', { class: 'bar thin' }, h('div', { class: 'bar-fill hp' }))),
+      );
+    };
+    const side = (ally: boolean) => {
+      const list = seats.filter((s) => (s.team === this.myTeam) === ally);
+      const label = M.team > 1 && list[0] ? `${list[0].name}${list[0].bot ? ' · AI' : ''}` : ally ? '我方' : '对方';
+      return h('div', { class: `pvp-side ${ally ? 'ally' : 'enemy'}` }, h('div', { class: 'pvp-side-name' }, label), h('div', { class: 'pvp-chips' }, list.map(chip)));
+    };
     clear(this.pvpBox);
-    const mode = seats.length > 2 ? '4v4' : '1v1';
-    this.pvpBox.classList.toggle('compact', mode === '4v4');
-    this.pvpBox.append(
-      h('div', { class: 'pvp-side ally' }, seats.filter((s) => s.team === this.myTeam).map(chip)),
-      h('div', { class: 'pvp-mid' }, h('div', { class: 'pvp-mode-name' }, PVP_MODES[mode].name), this.timer, h('div', { class: 'pvp-ring small' })),
-      h('div', { class: 'pvp-side enemy' }, seats.filter((s) => s.team !== this.myTeam).map(chip)),
-    );
+    this.pvpBox.append(side(true), h('div', { class: 'pvp-mid' }, h('div', { class: 'pvp-mode-name' }, M.name), this.timer, h('div', { class: 'pvp-ring small' })), side(false));
   }
 
   private updatePvp(pub: PublicState) {
@@ -140,8 +184,8 @@ export class Hud {
       set(this.timer, `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`);
       this.timer.classList.toggle('urgent', left <= 10);
     }
-    const t0 = PVP_MODES[pv.mode].dur * 0.3;
-    set(this.pvpBox.querySelector('.pvp-ring') as HTMLElement, pv.ring.shrinking ? '场地正在缩小！' : pub.time < t0 ? `${Math.ceil(t0 - pub.time)} 秒后缩圈` : '场地已缩到最小');
+    const t0 = PVP_MODES[pv.mode].dur * RING_START;
+    set(this.pvpBox.querySelector('.pvp-ring') as HTMLElement, pv.ring.shrinking ? '场地正在缩小！' : pub.time < t0 ? `${Math.ceil(t0 - pub.time)} 秒后缩圈` : '加时 · 伤害提高');
   }
 
   show(on: boolean) { this.root.classList.toggle('hidden', !on); }
@@ -176,13 +220,6 @@ export class Hud {
           this.skills.appendChild(cell);
         }
       }
-      me.skills.forEach((s, i) => {
-        const cell = this.skills.children[i] as HTMLElement | undefined;
-        const cd = cell?.querySelector('.cd') as HTMLElement | null;
-        if (!cd) return;
-        const frac = SKILLS[s.id] ? Math.min(1, s.cd / Math.max(0.1, s.max)) : 0;
-        cd.style.setProperty('--p', `${Math.round(frac * 100)}%`);
-      });
     }
     if (pub?.pvp) {
       this.updatePvp(pub);

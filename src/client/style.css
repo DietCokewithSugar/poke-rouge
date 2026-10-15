@@ -44,7 +44,7 @@ img.ico { width: var(--iw); height: var(--ih); }
 #ui { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
 #ui > * { pointer-events: auto; }
 #ui #hud { pointer-events: none; }
-#ui #hud .hud-pause, #ui #hud .hud-skill { pointer-events: auto; }
+#ui #hud .hud-pause, #ui #hud .hud-skill, #ui #hud .hud-auto { pointer-events: auto; }
 
 .scr {
   position: fixed; inset: 0; z-index: 20;
@@ -553,6 +553,7 @@ button.card:hover { transform: translateY(-0.1875rem); background: rgba(255, 255
 .board.lb img.ico { width: 1rem; height: 1rem; vertical-align: -0.125rem; }
 .tag.ai { background: #7088a8; color: #fff; }
 .tag.mvp { background: var(--gold); }
+.tag.lead { background: #5aa0ff; color: #fff; }
 .release-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.375rem; margin: 0.5rem 0; }
 .modal-box.release { width: min(44rem, 94vw); }
 .scoreboard { display: grid; gap: 0.625rem; }
@@ -574,27 +575,30 @@ button.card:hover { transform: translateY(-0.1875rem); background: rgba(255, 255
 .legend { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .ko-feed { display: grid; gap: 0.125rem; max-height: 10rem; overflow: auto; }
 
-/* 对战 HUD */
+/* 对战 HUD：两边各是一排宝可梦头像（单挑时上面写训练家的名字），自己操作的那只描金边 */
 #hud.pvp .hud-wavebox, #hud.pvp .hud-team, #hud.pvp .hud-money, #hud.pvp .hud-me .bar.thin { display: none; }
-.hud-pvp { display: flex; align-items: center; gap: 0.625rem; }
-.pvp-side { display: flex; gap: 0.25rem; }
-.pvp-side.ally { flex-direction: row-reverse; }
-.pvp-chip { display: flex; gap: 0.25rem; align-items: center; padding: 0.125rem 0.25rem; border-radius: 0.375rem; background: rgba(0, 0, 0, .25); width: 6.5rem; }
+.hud-pvp { display: flex; align-items: center; gap: 0.5rem; }
+.pvp-side { display: grid; gap: 0.125rem; }
+.pvp-side-name { font-size: 0.75rem; line-height: 0.875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 11rem; }
+.pvp-side.ally .pvp-side-name { text-align: right; color: #9fd0ff; }
+.pvp-side.enemy .pvp-side-name { color: #ff9a9a; }
+.pvp-chips { display: flex; gap: 0.25rem; }
+.pvp-side.ally .pvp-chips { flex-direction: row-reverse; }
+.pvp-chip { display: flex; flex-direction: column; gap: 0.0625rem; align-items: center; padding: 0.125rem; border-radius: 0.375rem; background: rgba(0, 0, 0, .25); width: 2.5rem; }
 .pvp-side.ally .pvp-chip { border-bottom: 0.125rem solid #5aa0ff; }
 .pvp-side.enemy .pvp-chip { border-bottom: 0.125rem solid #ff6a6a; }
 .pvp-side.enemy .bar-fill.hp { background: linear-gradient(180deg, #f87878, #c83030); }
-.pvp-chip.me .pvp-chip-name { color: var(--gold); }
+.pvp-chip.mine { background: rgba(255, 210, 63, .1); }
+.pvp-chip.me { box-shadow: inset 0 0 0 1px var(--gold); }
 .pvp-chip.down { filter: grayscale(1) brightness(.6); }
 .pvp-chip-portrait { width: 1.75rem; height: 1.75rem; overflow: hidden; display: flex; align-items: center; justify-content: center; flex: none; }
-.pvp-chip-body { flex: 1; min-width: 0; display: grid; gap: 0.125rem; }
-.pvp-chip-name { font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pvp-chip-name i { font-style: normal; font-size: 0.625rem; color: #a0b8d0; margin-left: 0.25rem; }
-.hud-pvp.compact { gap: 0.375rem; }
-.hud-pvp.compact .pvp-chip { width: 2.5rem; flex-direction: column; gap: 0.0625rem; padding: 0.125rem; }
-.hud-pvp.compact .pvp-chip-name { display: none; }
-.hud-pvp.compact .pvp-chip-body { width: 100%; }
-.hud-pvp.compact .pvp-chip.me { box-shadow: inset 0 0 0 1px var(--gold); }
+.pvp-chip-body { width: 100%; min-width: 0; display: grid; gap: 0.125rem; }
 .pvp-mid { text-align: center; min-width: 6rem; }
+/* 自动战斗开关（右下角） */
+.hud-auto { position: absolute; right: 0.625rem; bottom: 0.75rem; display: flex; align-items: center; gap: 0.3125rem; padding: 0.3125rem 0.625rem; }
+.hud-auto.on { border-color: var(--gold); color: var(--gold); background: rgba(70, 52, 8, .85); }
+.hud-auto.on .uico { animation: auto-bob 0.8s steps(2) infinite; }
+@keyframes auto-bob { 50% { transform: translateY(-0.125rem); } }
 .pvp-mode-name { font-size: 0.75rem; color: var(--muted); }
 .pvp-ring { color: #e0a0ff; }
 
@@ -857,8 +861,25 @@ button.card:hover { transform: translateY(-0.1875rem); background: rgba(255, 255
 .pvp-mode { height: 3.75rem; overflow: hidden; padding: 0.25rem 0.5rem; gap: 0; display: flex; flex-direction: column; justify-content: center; }
 .pvp-mode b { line-height: 1.375rem; }
 .pvp-mode small { line-height: 1rem; display: block; }
-.pvp-mode small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pvp-rating { flex: none; height: 5.5rem; overflow: hidden; padding: 0.25rem 0.625rem; }
+.pvp-mode small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.6875rem; }
+.pvp-rating { flex: none; height: 5.25rem; overflow: hidden; padding: 0.25rem 0.625rem; }
+/* 出战队伍：队长 + 两只队员（不够的显示「借用」），右边是斗蛐蛐开关 */
+.pvp-team { flex: none; height: 3.5rem; display: flex; align-items: center; gap: 0.375rem; padding: 0 0.375rem; background: rgba(0, 0, 0, .22); border-radius: 0.5rem; }
+.pvp-slot { width: 3rem; height: 3.125rem; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 0.375rem; border: 0.125rem solid rgba(255, 255, 255, .15); background: rgba(0, 0, 0, .2); cursor: pointer; }
+.pvp-slot.on { border-color: var(--gold); }
+.pvp-slot.rental { border-style: dashed; cursor: help; }
+.pvp-slot-portrait { width: 2.25rem; height: 2.25rem; }
+.pvp-slot-q { width: 2.25rem; height: 2.25rem; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 1.25rem; }
+.pvp-slot-label { font-size: 0.6875rem; line-height: 0.75rem; white-space: nowrap; }
+.pvp-slot:first-child .pvp-slot-label { color: var(--gold); }
+.pvp-team-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pvp-auto { margin-left: auto; display: flex; align-items: center; gap: 0.25rem; white-space: nowrap; }
+.pvp-auto.on { border-color: var(--gold); color: var(--gold); }
+.mon-badge { position: absolute; top: 0.125rem; left: 0.25rem; z-index: 1; font-size: 0.625rem; line-height: 0.875rem; padding: 0 0.25rem; border-radius: 0.1875rem; background: #5fe08a; color: #10301a; text-shadow: none; }
+.mon-badge.lead { background: var(--gold); color: #3a2300; }
+.mon-badge.static { position: static; font-size: 0.75rem; line-height: 1.125rem; padding: 0 0.375rem; }
+.pvp-detail-actions { flex: none; gap: 0.25rem; flex-wrap: nowrap; }
+.pvp-party h3 .small { font-weight: normal; }
 .pvp-rating .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.15rem; }
 .pvp-rating .pvp-score b { font-size: 1.5rem; line-height: 1.75rem; }
 .pvp-rating .tier-bar { margin: 0.125rem 0; }
@@ -872,7 +893,8 @@ button.card:hover { transform: translateY(-0.1875rem); background: rgba(255, 255
 .hist.filler { visibility: hidden; }
 .hist .grow { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .pvp-board .row.between { flex: none; flex-wrap: nowrap; }
-.lb-head, .lb-row { display: grid; grid-template-columns: 1.75rem minmax(0, 1fr) 5.75rem 2.75rem 2.75rem; gap: 0.25rem; align-items: center; font-size: 0.75rem; height: 1.6rem; padding: 0 0.25rem; }
+.lb-head, .lb-row { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr) 4.75rem 2.5rem 2.5rem; gap: 0.25rem; align-items: center; font-size: 0.75rem; height: 1.6rem; padding: 0 0.25rem; }
+.lb-row .lb-tier { font-size: 0.6875rem; }
 .lb-head { color: var(--muted); flex: none; border-bottom: 1px solid rgba(255, 255, 255, .15); }
 .lb-row { border-bottom: 1px solid rgba(255, 255, 255, .08); }
 .lb-row.me { color: var(--gold); background: rgba(255, 210, 63, .08); }
@@ -889,14 +911,26 @@ button.card:hover { transform: translateY(-0.1875rem); background: rgba(255, 255
 
 /* 对战结算 */
 .pvp-results .tab-body .r-section h3 { margin-bottom: 0.25rem; }
+.r-hero.r-hero-team { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.375rem; padding: 0.375rem; }
+.r-hero-mon { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; gap: 0.0625rem; }
+.r-hero-mon .r-hero-portrait { width: 3rem; height: 3rem; }
+.r-hero-mon b { font-size: 0.8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; }
+.r-hero-mon .small { font-size: 0.6875rem; line-height: 0.875rem; }
+.r-hero-mon.dead .r-hero-portrait { filter: grayscale(1); opacity: .7; }
+.r-unit-tabs { display: flex; gap: 0.25rem; margin-bottom: 0.25rem; }
+.r-unit-tabs .btn { display: flex; align-items: center; gap: 0.125rem; }
+.r-unit-tabs .portrait { height: 1.125rem; width: auto; }
 .hp-chart { height: 7.5rem; }
 .ko-feed { grid-template-rows: repeat(10, 1.4rem); max-height: none; overflow: hidden; }
 .pvp-results .hp-chart { height: 13rem; }
 .ko-row { height: 1.4rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ko-row.filler { visibility: hidden; }
-.scoreboard { gap: 0.5rem; }
+.scoreboard { gap: 0.375rem; }
 .sb-team { overflow: hidden; }
-.sb-team .board { font-size: 0.75rem; }
+.sb-team .board { font-size: 0.75rem; margin-top: 0.125rem; }
+.sb-team .board th, .sb-team .board td { padding: 0.0625rem 0.375rem; height: 1.375rem; }
+.sb-team .board-mon .portrait { height: 1.125rem; }
+.sb-head { font-size: 0.875rem; line-height: 1.125rem; }
 
 /* 进化提示等 */
 .box.loading-box { width: 30rem; height: 6rem; display: flex; align-items: center; justify-content: center; }
@@ -1004,7 +1038,7 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 }
 .tcard:hover { background: rgba(255, 255, 255, .08); }
 .tcard.on { border-color: var(--gold); background: rgba(255, 210, 63, .12); }
-.tcard.locked .tfull { filter: brightness(0) opacity(.5); }
+.tcard.locked .tfull, .tcard.locked .tportrait { filter: brightness(0) opacity(.5); }
 .tcard.locked .tcard-name { color: var(--muted); }
 .tcard-sprite { flex: none; display: flex; align-items: flex-end; justify-content: center; }
 .tcard-body { min-width: 0; display: grid; gap: 0.0625rem; text-align: center; }
@@ -1105,6 +1139,11 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 .route-portrait { width: 6rem; height: 6rem; }
 .route .diff-row { margin: 0; }
 .route .row.end { margin-top: auto; }
+.route-foot { margin-top: auto; flex-wrap: nowrap; gap: 0.75rem; }
+.route-assist { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.route-assist .small { line-height: 1.1rem; }
+.route-auto { display: flex; align-items: center; gap: 0.25rem; white-space: nowrap; flex: none; }
+.route-auto.on { border-color: var(--gold); color: var(--gold); }
 
 /* NPC 对话：屏幕下方的对话框 */
 .scr[data-screen="dialog"] { align-items: flex-end; padding-bottom: 2.5rem; background: transparent; }
@@ -1132,14 +1171,14 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 .th-dust { position: absolute; left: 0.625rem; bottom: 0.625rem; display: flex; gap: 0.875rem; align-items: center; font-size: 0.875rem; }
 .th-dust span { display: inline-flex; align-items: center; gap: 0.25rem; }
 .th-dust img.ico { width: 0.75rem; height: 0.75rem; }
-.th-prompt { position: absolute; left: 50%; bottom: 1.25rem; transform: translateX(-50%); display: flex; align-items: center; gap: 0.5rem; cursor: pointer; appearance: none; color: inherit; font: inherit; padding: 0.375rem 0.875rem; white-space: nowrap; }
+.th-prompt { position: absolute; left: 50%; bottom: 3.375rem; transform: translateX(-50%); display: flex; align-items: center; gap: 0.5rem; cursor: pointer; appearance: none; color: inherit; font: inherit; padding: 0.375rem 0.875rem; white-space: nowrap; }
 .th-key { display: inline-flex; min-width: 1.5rem; height: 1.5rem; padding: 0 0.25rem; align-items: center; justify-content: center; border-radius: 0.75rem; background: #3cb371; color: #fff; font-size: 0.75rem; text-shadow: none; }
 .th-key::after { content: '空格'; }
 body.pad .th-key::after { content: var(--g-a); }
 @media (pointer: coarse) { .th-key::after { content: '点我'; } }
 
 /* 战斗 HUD：训练家 + 宝可梦 */
-.hud-trainer { width: 2rem; display: flex; justify-content: center; align-items: center; }
+.hud-trainer { width: 2.25rem; display: flex; justify-content: center; align-items: center; background: rgba(0, 0, 0, .25); border-radius: 0.375rem; overflow: hidden; }
 .hud-pause.icon { padding: 0.3125rem; }
 
 /* 大厅：训练家 + 伙伴 */
@@ -1160,3 +1199,9 @@ body.pad .th-key::after { content: var(--g-a); }
 .card .lock { display: inline-flex; align-items: center; gap: 0.1875rem; }
 .card .lock img.uico { width: 0.75rem; height: 0.75rem; }
 .btn.undo .undo-head { display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem; }
+.th-quick { position: absolute; right: 0.625rem; bottom: 0.625rem; display: flex; gap: 0.375rem; }
+.th-quick .btn { position: relative; }
+.th-num { position: absolute; top: -0.375rem; right: -0.25rem; font-style: normal; font-size: 0.625rem; line-height: 1; padding: 0.0625rem 0.1875rem; border-radius: 0.25rem; background: #101830; color: var(--gold); text-shadow: none; }
+body.pad .th-num, .th-quick .btn:not(:hover) .th-num { opacity: .8; }
+@media (pointer: coarse) { .th-num { display: none; } }
+.box.quick-menu { width: 24rem; }

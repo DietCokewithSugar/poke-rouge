@@ -134,27 +134,44 @@ test('对战 1v1：真人匹配、结算积分、排行榜', async () => {
   await Promise.all([a.open(), b.open()]);
   const rng = new Rng(5);
   const A = ident('a'), B = ident('b');
-  a.send({ t: 'pvpQueue', mode: '1v1', build: { line: 'nope' }, name: '小智', meta: {}, v: PROTOCOL_VERSION, ...A });
+  a.send({ t: 'pvpQueue', mode: '1v1', team: [{ line: 'nope' }] as never, name: '小智', meta: {}, v: PROTOCOL_VERSION, ...A });
   assert.match((await a.wait('error')).msg, /未知的宝可梦/);
-  a.send({ t: 'pvpQueue', mode: '1v1', build: generateBuild(rng, 12), name: '小智', meta: { atk: 3 }, v: PROTOCOL_VERSION, ...A });
-  b.send({ t: 'pvpQueue', mode: '1v1', build: generateBuild(rng, 12), name: '小霞', meta: {}, v: PROTOCOL_VERSION, ...B });
+  const dup = generateBuild(rng, 9);
+  a.send({ t: 'pvpQueue', mode: '1v1', team: [dup, dup], name: '小智', meta: {}, v: PROTOCOL_VERSION, ...A });
+  assert.match((await a.wait('error')).msg, /重复/);
+  // 小智带了两只（第三只由服务器借给他），小霞带了三只并开启自动战斗
+  a.send({ t: 'pvpQueue', mode: '1v1', team: [generateBuild(rng, 12), generateBuild(rng, 11)], name: '小智', meta: { atk: 3 }, v: PROTOCOL_VERSION, ...A });
+  b.send({ t: 'pvpQueue', mode: '1v1', team: [generateBuild(rng, 12), generateBuild(rng, 12), generateBuild(rng, 10)], name: '小霞', meta: {}, v: PROTOCOL_VERSION, auto: true, ...B });
   await a.wait('pvpQueued');
   const ja = await a.wait('joined'), jb = await b.wait('joined');
   const sa = await a.wait('start');
   await b.wait('start');
   assert.equal(sa.pvp?.mode, '1v1');
-  assert.equal(sa.pvp!.seats.length, 2);
-  assert.ok(sa.pvp!.seats.every((s) => !s.bot), '两位真人互相匹配');
-  const teamA = sa.pvp!.seats.find((s) => s.id === ja.you)!.team;
-  const teamB = sa.pvp!.seats.find((s) => s.id === jb.you)!.team;
-  assert.notEqual(teamA, teamB);
-  // 倒计时结束后开打
+  const seats = sa.pvp!.seats;
+  assert.equal(seats.length, 6, '三对三');
+  assert.ok(seats.every((s) => !s.bot), '两位真人互相匹配');
+  const meA = seats.find((s) => s.id === ja.you)!, meB = seats.find((s) => s.id === jb.you)!;
+  assert.ok(!meA.helper && !meB.helper, '每人控制自己的队长');
+  assert.equal(seats.filter((s) => s.owner === meA.owner).length, 3);
+  assert.notEqual(meA.team, meB.team);
+  const teamB = meB.team;
+  // 倒计时结束后开打；小霞的队长一开局就交给 AI
   const t0 = Date.now();
   while (Date.now() - t0 < 6000) {
     const st = await a.wait('st');
-    if (st.s.phase === 'wave') break;
+    if (st.s.phase === 'wave') {
+      assert.ok(st.s.players.find((p) => p.id === jb.you)!.bot, '小霞开启了自动战斗');
+      assert.ok(!st.s.players.find((p) => p.id === ja.you)!.bot);
+      break;
+    }
   }
-  assert.ok(a.lastSnap && a.lastSnap.players.length === 2);
+  assert.ok(a.lastSnap && a.lastSnap.players.length === 6);
+  a.send({ t: 'auto', on: true });
+  for (let i = 0; i < 10; i++) {
+    const st = await a.wait('st');
+    if (st.s.players.find((p) => p.id === ja.you)!.bot) break;
+    assert.ok(i < 9, '对战中可以切换成自动战斗');
+  }
   a.send({ t: 'debug', cmd: 'down' });
   const ea = await a.wait('pvpEnd'), eb = await b.wait('pvpEnd');
   assert.equal(ea.result.winner, teamB);
@@ -171,7 +188,7 @@ test('对战 1v1：真人匹配、结算积分、排行榜', async () => {
   const api = await res.json() as { rows: { name: string }[] };
   assert.deepEqual(api.rows.map((r) => r.name), ['小霞', '小智']);
   // 同一身份用错误的密钥会被拒绝
-  a.send({ t: 'pvpQueue', mode: '1v1', build: generateBuild(rng, 5), name: '冒充', meta: {}, v: PROTOCOL_VERSION, pid: B.pid, secret: 'wrong-secret-0123456789' });
+  a.send({ t: 'pvpQueue', mode: '1v1', team: [generateBuild(rng, 5)], name: '冒充', meta: {}, v: PROTOCOL_VERSION, pid: B.pid, secret: 'wrong-secret-0123456789' });
   assert.match((await a.wait('error')).msg, /校验失败/);
   a.ws.close(); b.ws.close();
 });
@@ -180,20 +197,24 @@ test('对战 4v4：等不到人时 AI 补位，可以取消匹配', async () => 
   const c = new Client(), d = new Client();
   await Promise.all([c.open(), d.open()]);
   const rng = new Rng(9);
-  d.send({ t: 'pvpQueue', mode: '4v4', build: generateBuild(rng, 8), name: '小刚', meta: {}, v: PROTOCOL_VERSION, ...ident('d') });
+  d.send({ t: 'pvpQueue', mode: '4v4', team: [generateBuild(rng, 8)], name: '小刚', meta: {}, v: PROTOCOL_VERSION, ...ident('d') });
   await d.wait('pvpQueued');
   d.send({ t: 'pvpCancel' });
   await d.wait('pvpCancelled');
-  c.send({ t: 'pvpQueue', mode: '4v4', build: generateBuild(rng, 15), name: '小遥', meta: {}, v: PROTOCOL_VERSION, ...ident('c') });
+  c.send({ t: 'pvpQueue', mode: '4v4', team: [generateBuild(rng, 15), generateBuild(rng, 15)], name: '小遥', meta: {}, v: PROTOCOL_VERSION, ...ident('c') });
+  assert.match((await c.wait('error')).msg, /只能派出 1 只/);
+  c.send({ t: 'pvpQueue', mode: '4v4', team: [generateBuild(rng, 15)], name: '小遥', meta: {}, v: PROTOCOL_VERSION, ...ident('c') });
   const st = await c.wait('start', 6000);
   const seats = st.pvp!.seats;
   assert.equal(seats.length, 8);
   assert.equal(seats.filter((s) => s.bot).length, 7);
   assert.equal(seats.filter((s) => s.team === 0).length, 4);
-  // 用过的构筑会进入 AI 构筑池，被其他人匹配到
-  d.send({ t: 'pvpQueue', mode: '1v1', build: generateBuild(rng, 15), name: '小刚', meta: {}, v: PROTOCOL_VERSION, ...ident('d') });
+  assert.ok(seats.every((s) => !s.helper), '团战每人一只');
+  // 用过的构筑会进入 AI 构筑池，被其他人匹配到；单挑的 AI 训练家也派出三只
+  d.send({ t: 'pvpQueue', mode: '1v1', team: [generateBuild(rng, 15)], name: '小刚', meta: {}, v: PROTOCOL_VERSION, ...ident('d') });
   const sd = await d.wait('start', 6000);
   assert.ok(sd.pvp!.seats.some((s) => s.bot));
+  assert.equal(sd.pvp!.seats.length, 6);
   c.send({ t: 'leave' });
   await c.wait('left');
   c.ws.close(); d.ws.close();

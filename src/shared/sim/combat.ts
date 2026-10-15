@@ -114,7 +114,7 @@ export function healPlayer(sim: GameSim, p: SimPlayer, amount: number, lifesteal
     p.lsCount++;
   }
   const before = p.hp;
-  p.hp = Math.min(p.d.maxHp, p.hp + amount);
+  p.hp = Math.min(p.d.maxHp, p.hp + amount * sim.healScale);
   const gained = p.hp - before;
   p.stats.healed += gained;
   if (gained >= 1 && !lifesteal) sim.emit(['heal', p.id, Math.round(gained)]);
@@ -127,6 +127,8 @@ export interface HurtOpts {
   by?: number;
   /** 持续伤害不会被闪避 */
   dot?: boolean;
+  /** 对战：这一下最多扣多少 HP（按受击方的承伤上限） */
+  cap?: number;
 }
 
 /** 玩家受到伤害。cat：phys 接触伤害（物防减免），spec 弹幕/爆炸（特防减免）。 */
@@ -140,6 +142,10 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
     return 0;
   }
   let dmg = Math.max(1, Math.round(raw * (cat === 'phys' ? p.d.physTaken : p.d.specTaken)));
+  if (o.cap !== undefined) {
+    dmg = Math.min(dmg, Math.floor(o.cap));
+    if (dmg <= 0) return 0;
+  }
   if (p.shield > 0) {
     const absorbed = Math.min(p.shield, dmg);
     p.shield -= absorbed;

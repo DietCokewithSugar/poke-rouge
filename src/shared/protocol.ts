@@ -7,7 +7,7 @@ import type { SavedBuild } from './pvp/build';
 import type { PvpMatchResult, PvpMode } from './pvp/sim';
 import { formOf } from './pokemon';
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 export const MAX_PLAYERS = 4;
 
 // ---------------------------------------------------------------- 对战
@@ -16,7 +16,8 @@ export interface PvpRecord { mode: PvpMode; rating: number; best: number; wins: 
 export interface PvpBoardRow { rank: number; name: string; rating: number; wins: number; losses: number; draws: number; streak: number; dex: number; you?: boolean }
 export interface PvpHistory { at: number; mode: PvpMode; result: 'win' | 'loss' | 'draw'; delta: number; dex: number; opp: string }
 export interface PvpRatingChange { mode: PvpMode; before: number; after: number; delta: number; record: PvpRecord }
-export interface PvpSeatInfo { id: number; name: string; team: number; bot: boolean; rating: number; trainer: string; line: LineId; dex: number; level: number }
+/** 场上的一只宝可梦：owner 是派出它的训练家（座位），helper 为训练家派出的第二、三只（AI 操作） */
+export interface PvpSeatInfo { id: number; name: string; team: number; bot: boolean; rating: number; trainer: string; line: LineId; dex: number; level: number; owner: number; helper: boolean }
 
 export interface LobbyPlayer { id: number; name: string; trainer: string; line: LineId | null; ready: boolean; host: boolean }
 
@@ -68,7 +69,10 @@ export type C2S =
   /** 客户端画面能看到的世界范围（宽高，世界像素），服务器据此裁剪快照 */
   | { t: 'view'; w: number; h: number }
   | { t: 'ping'; at: number }
-  | { t: 'pvpQueue'; mode: PvpMode; build: SavedBuild; name: string; meta: Record<string, number>; v: number; pid: string; secret: string; trainer?: string }
+  /** team：出战的宝可梦，第一只由自己操作；单挑最多 3 只（不够的由服务器借给你），团战 1 只。auto：开局就交给 AI */
+  | { t: 'pvpQueue'; mode: PvpMode; team: SavedBuild[]; name: string; meta: Record<string, number>; v: number; pid: string; secret: string; trainer?: string; auto?: boolean }
+  /** 自动战斗：AI 替你走位（冒险需要先通关一次，对战随时可以切换） */
+  | { t: 'auto'; on: boolean }
   /** 在线身份：名字、训练家、跟随的宝可梦，以及是不是在真新镇里 */
   | { t: 'presence'; name: string; trainer: string; dex: number; town: boolean; busy?: 1 }
   /** 真新镇里的位置 */
@@ -146,6 +150,8 @@ export function encodeSnapshot(sim: GameSim, tick: number, box?: ViewBox | null)
     if (p.moving) f |= 8;
     if (p.buffT > 0) f |= 16;
     if (p.slowT > 0) f |= 32;
+    // 由服务器操作走位（AI）：客户端跟随服务器位置，不再上报
+    if (p.bot) f |= 64;
     v.setUint8(o, p.id); o += 1;
     v.setInt16(o, q(p.x), true); o += 2;
     v.setInt16(o, q(p.y), true); o += 2;

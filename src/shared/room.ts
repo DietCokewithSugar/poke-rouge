@@ -182,6 +182,9 @@ export class Room {
       case 'ping':
         this.send(m.conn, { t: 'pong', at: msg.at });
         return;
+      case 'auto':
+        this.sim?.setAuto(id, !!msg.on);
+        return;
       case 'pos':
         if (this.sim && !this.paused) this.sim.setPlayerPos(id, +msg.x, +msg.y, !!msg.m, +msg.d);
         if (msg.k !== undefined) m.sync.ack(+msg.k, performance.now());

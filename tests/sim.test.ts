@@ -100,6 +100,33 @@ test('客户端位置上报不能超速', () => {
   assert.ok(p.x - x0 < 80, `移动了 ${p.x - x0}`);
 });
 
+test('AI 辅助战斗：服务器替玩家走位、捡糖果，客户端上报的位置被忽略，快照带上标记', () => {
+  const idle = new GameSim([{ id: 1, name: 'A', line: 'squirtle', meta: {} }], 5);
+  const sim = new GameSim([{ id: 1, name: 'A', line: 'squirtle', meta: {} }], 5);
+  const p = sim.players[0];
+  sim.setAuto(1, true);
+  assert.equal(decodeSnapshot(encodeSnapshot(sim, 1)).players[0].flags & 64, 64);
+  assert.ok(sim.publicState().players[0].bot);
+  let moved = 0, picks = 0, lx = p.x, ly = p.y;
+  const pickedBy = (evs: unknown[][]) => evs.filter((e) => e[0] === 'pick' && e[2] === 1).length;
+  for (let i = 0; i < 30 * 20; i++) {
+    sim.step(1 / 30);
+    idle.step(1 / 30);
+    picks += pickedBy(sim.flushEvents());
+    idle.flushEvents();
+    moved += Math.hypot(p.x - lx, p.y - ly);
+    lx = p.x; ly = p.y;
+  }
+  assert.ok(moved > 300, `AI 在走位（${Math.round(moved)}）`);
+  assert.ok(picks > 0, '捡到了糖果');
+  assert.ok(p.hp >= idle.players[0].hp, '比站着不动挨打少');
+  const x = p.x;
+  sim.setPlayerPos(1, x + 40, p.y, true, 0);
+  assert.equal(p.x, x, '自动时忽略客户端上报的位置');
+  sim.setAuto(1, false);
+  assert.equal(decodeSnapshot(encodeSnapshot(sim, 2)).players[0].flags & 64, 0);
+});
+
 test('局外成长与成就', () => {
   const b = metaBonus({ hp: 3, atk: 2, money: 2, reroll: 9 });
   assert.equal(b.mods.maxHp, 9);

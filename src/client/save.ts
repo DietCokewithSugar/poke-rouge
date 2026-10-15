@@ -1,7 +1,7 @@
 import { ACHIEVEMENTS, META_UPGRADES, metaCost, stardustFor, type LifetimeStats, type RunSummary } from '../shared/meta';
 import { DIFFICULTIES, type DifficultyId } from '../shared/difficulty';
 import { LINES, LINE_IDS, STARTERS, isLine, type LineId } from '../shared/pokemon';
-import { validateBuild, type SavedBuild } from '../shared/pvp/build';
+import { buildPower, validateBuild, type SavedBuild } from '../shared/pvp/build';
 import type { PvpMode } from '../shared/pvp/sim';
 import { TRAINERS, TRAINER_IDS } from '../shared/trainers';
 import { defaultUiScale } from './ui/layout';
@@ -51,6 +51,12 @@ export interface Profile {
   pvpId: { pid: string; secret: string } | null;
   pvpMode: PvpMode;
   pvpPick: string;
+  /** 单挑时和队长一起上场的两只（背包里的 uid）；null 表示自动选最强的 */
+  pvpTeam: string[] | null;
+  /** 对战开局就交给 AI（斗蛐蛐） */
+  pvpAuto: boolean;
+  /** 冒险的 AI 辅助战斗（首次通关后解锁） */
+  autoAssist: boolean;
   /** 上次在真新镇里站的位置 */
   townPos: { x: number; y: number } | null;
 }
@@ -74,8 +80,31 @@ function fresh(): Profile {
     pvpId: null,
     pvpMode: '1v1',
     pvpPick: '',
+    pvpTeam: null,
+    pvpAuto: false,
+    autoAssist: false,
     townPos: null,
   };
+}
+
+/** 冒险的 AI 辅助战斗：通关过一次才能用 */
+export const autoAssistUnlocked = (p: Profile) => p.stats.wins > 0;
+
+/** 对战的队长：背包里跟随的伙伴那条进化线的构筑（优先上次选的，其次最强的） */
+export function pvpLeader(p: Profile): PartyMon | null {
+  const own = p.party.filter((m) => m.build.line === p.partner);
+  return own.find((m) => m.uid === p.pvpPick) ?? own.sort((a, b) => buildPower(b.build) - buildPower(a.build))[0] ?? null;
+}
+
+/** 出战队伍：队长 + 一起上场的（单挑共 3 只；没有手动选过时自动挑最强的） */
+export function pvpTeamOf(p: Profile, size: number): PartyMon[] {
+  const leader = pvpLeader(p);
+  if (!leader) return [];
+  const others = p.party.filter((m) => m !== leader);
+  const picked = p.pvpTeam
+    ? p.pvpTeam.map((u) => others.find((m) => m.uid === u)).filter((m): m is PartyMon => !!m)
+    : others.sort((a, b) => buildPower(b.build) - buildPower(a.build));
+  return [leader, ...picked].slice(0, size);
 }
 
 function randomId(len: number) {
@@ -109,6 +138,7 @@ export function addToParty(p: Profile, s: RunSummary): PartyMon | null {
 export function releaseFromParty(p: Profile, uid: string) {
   p.party = p.party.filter((m) => m.uid !== uid);
   if (p.pvpPick === uid) p.pvpPick = p.party[0]?.uid ?? '';
+  if (p.pvpTeam) p.pvpTeam = p.pvpTeam.filter((u) => u !== uid);
   saveProfile(p);
 }
 
