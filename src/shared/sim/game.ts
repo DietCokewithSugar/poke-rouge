@@ -6,7 +6,7 @@ import { LINES, LINE_IDS, LINE_OF_DEX, formOf, isFinal, type LineId } from '../p
 import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
-import { SKILLS } from '../skills';
+import { SKILLS, skillLevelCd } from '../skills';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
 import { updateEnemy } from './ai';
@@ -954,7 +954,9 @@ export class GameSim {
       xp: Math.floor(p.xp), xpNext: xpToNext(p.level), money: Math.floor(p.money),
       hp: Math.ceil(p.hp), maxHp: p.d.maxHp, speed: this.moveSpeed(p), down: p.down,
       slots: p.slots,
-      skills: p.skills.map((s) => ({ id: s.id, lv: s.lv, cd: Math.max(0, Math.round(s.cd * 10) / 10), max: Math.round(SKILLS[s.id].cd * 10) / 10 })),
+      // max 是实际的冷却时间（技能等级与技能急速都算进去），界面按它画冷却进度
+      // 没有目标时技能每 0.1 秒重试一次，这种状态当作已经就绪，免得冷却图标一闪一闪
+      skills: p.skills.map((s) => ({ id: s.id, lv: s.lv, cd: s.cd <= 0.11 ? 0 : Math.round(s.cd * 10) / 10, max: Math.round(SKILLS[s.id].cd * skillLevelCd(s.lv) * p.d.cdMult * 100) / 100 })),
       items: Object.entries(p.items).filter(([, n]) => n > 0),
       stats: {
         maxHp: p.d.maxHp, atk: Math.round(p.d.atk), spa: Math.round(p.d.spa), def: Math.round(p.d.def), spd: Math.round(p.d.spd), spe: Math.round(p.d.spe),

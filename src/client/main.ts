@@ -749,6 +749,7 @@ class App {
 
   private onMe(s: MeState) {
     this.me = s;
+    this.hud?.setCooldowns(s.skills);
     if (this.view) this.view.me = s;
     this.hud?.update(s, this.pub, this.you);
     if (this.pub?.phase === 'inter' && this.inter?.visible) this.inter.update(s, this.pub, this.you);

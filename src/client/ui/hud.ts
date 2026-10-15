@@ -1,5 +1,4 @@
 import { LINES } from '../../shared/pokemon';
-import { SKILLS } from '../../shared/skills';
 import { BIOMES } from '../../shared/waves';
 import { DIFFICULTIES } from '../../shared/difficulty';
 import type { MeState, PublicState } from '../../shared/sim/game';
@@ -44,6 +43,9 @@ export class Hud {
   private subTimer = 0;
 
   private pvpBox = h('div', { class: 'hud-pvp box tight hidden' });
+  /** 技能冷却：服务器每秒只同步几次，两次之间在本地按时间倒数，进度条才不会跳 */
+  private cds: { cd: number; max: number; at: number }[] = [];
+  private raf = 0;
   private pvpSeats: PvpSeatInfo[] = [];
   private myTeam = 0;
   private lastCount = -1;
@@ -79,9 +81,31 @@ export class Hud {
     );
     this.bossBox.append(this.bossName, h('div', { class: 'bar boss' }, this.bossFill));
     parent.appendChild(this.root);
+    this.raf = requestAnimationFrame(this.tick);
   }
 
-  destroy() { this.root.remove(); }
+  destroy() {
+    cancelAnimationFrame(this.raf);
+    this.root.remove();
+  }
+
+  /** 收到新的私有状态时调用：记下每个技能剩余的冷却和收到的时间 */
+  setCooldowns(skills: MeState['skills']) {
+    const now = performance.now();
+    this.cds = skills.map((s) => ({ cd: s.cd, max: Math.max(0.1, s.max), at: now }));
+  }
+
+  private tick = () => {
+    this.raf = requestAnimationFrame(this.tick);
+    const now = performance.now();
+    this.cds.forEach((c, i) => {
+      const cd = (this.skills.children[i] as HTMLElement | undefined)?.querySelector('.cd') as HTMLElement | null;
+      if (!cd) return;
+      const left = Math.max(0, c.cd - (now - c.at) / 1000);
+      const p = `${Math.round(Math.min(1, left / c.max) * 100)}%`;
+      if (cd.style.getPropertyValue('--p') !== p) cd.style.setProperty('--p', p);
+    });
+  };
 
   /** 左上角：训练家 + 宝可梦 */
   setTrainer(trainer: string, name: string) {
@@ -176,13 +200,6 @@ export class Hud {
           this.skills.appendChild(cell);
         }
       }
-      me.skills.forEach((s, i) => {
-        const cell = this.skills.children[i] as HTMLElement | undefined;
-        const cd = cell?.querySelector('.cd') as HTMLElement | null;
-        if (!cd) return;
-        const frac = SKILLS[s.id] ? Math.min(1, s.cd / Math.max(0.1, s.max)) : 0;
-        cd.style.setProperty('--p', `${Math.round(frac * 100)}%`);
-      });
     }
     if (pub?.pvp) {
       this.updatePvp(pub);
