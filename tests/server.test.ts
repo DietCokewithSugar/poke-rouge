@@ -198,3 +198,30 @@ test('对战 4v4：等不到人时 AI 补位，可以取消匹配', async () => 
   await c.wait('left');
   c.ws.close(); d.ws.close();
 });
+
+test('真新镇：在线玩家互相可见，位置与状态会同步', async () => {
+  const a = new Client(), b = new Client();
+  await Promise.all([a.open(), b.open()]);
+  a.send({ t: 'presence', name: '小智', trainer: 'ash', dex: 4, town: true });
+  a.send({ t: 'tpos', x: 120, y: 200, d: 1, m: 1 });
+  b.send({ t: 'presence', name: '小霞', trainer: 'misty', dex: 7, town: true });
+  b.send({ t: 'tpos', x: 300, y: 260, d: 0, m: 0 });
+  const seen = async (c: Client, name: string, check: (p: { x: number; y: number; w: number; trainer: string }) => boolean) => {
+    for (let i = 0; i < 20; i++) {
+      const m = await c.wait('town', 3000);
+      const p = m.peers.find((x) => x.name === name && x.id !== m.you);
+      if (p && check(p)) return p;
+    }
+    throw new Error(`没有看到 ${name}`);
+  };
+  const pa = await seen(b, '小智', (p) => p.x === 120 && p.y === 200);
+  assert.equal(pa.trainer, 'ash');
+  assert.equal(pa.w, 0, '在真新镇里');
+  a.send({ t: 'tpos', x: 140, y: 210, d: 3, m: 1 });
+  await seen(b, '小智', (p) => p.x === 140);
+  // 小智进入冒险（单人模式在浏览器里运行）：镇上的人看到他「冒险中」
+  a.send({ t: 'presence', name: '小智', trainer: 'ash', dex: 4, town: false, busy: 1 });
+  await seen(b, '小智', (p) => p.w === 3);
+  a.ws.close();
+  b.ws.close();
+});

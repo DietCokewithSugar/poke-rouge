@@ -83,6 +83,11 @@ const md = `# 致谢 / Credits
 |---|---|---|
 ${rows.join('\n')}
 
+## 界面图标（UI icons）
+
+齿轮、声音、奖杯、硬币、星星、王冠、好友、精灵球等界面图标取自
+[JPTER78/pokesurvivor](https://github.com/JPTER78/pokesurvivor) 的 \`js/ui/icons.js\`（MIT），其余图标与训练家、真新镇为本项目程序绘制。
+
 ## 字体（Font）
 
 [缝合像素字体 Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)（12px 比例 简体中文），

@@ -1013,8 +1013,10 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 .tcard-bonus { line-height: 1.2; }
 .tcard-bonus div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tcard.compact { flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.25rem 0.5rem; }
-.tcard.compact .tcard-body { text-align: left; }
-.tcard.compact .tcard-name { font-size: 0.9375rem; }
+.tcard.compact .tcard-body { text-align: left; flex: 1; min-width: 0; }
+.tcard.compact .tcard-name { font-size: 0.9375rem; overflow: hidden; text-overflow: ellipsis; }
+.tcard.compact .tcard-bonus { font-size: 0.75rem; line-height: 1.15; }
+.setup-trainers .tcard.compact .tcard-bonus div:nth-child(n+3) { display: none; }
 .tcard-foot { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 0.25rem; }
 .tcard-foot img.ico { width: 0.75rem; height: 0.75rem; }
 
@@ -1098,7 +1100,7 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 .route { gap: 0.625rem; }
 .route-team { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 0.75rem; }
 .route-who, .route-mon { display: flex; gap: 0.625rem; align-items: center; background: rgba(0, 0, 0, .2); border-radius: 0.5rem; padding: 0.5rem 0.625rem; min-width: 0; height: 8.5rem; }
-.route-who > div, .route-mon > div { min-width: 0; display: grid; gap: 0.125rem; }
+.route-who > div:not(.pslot), .route-mon > div:not(.pslot) { min-width: 0; display: grid; gap: 0.125rem; }
 .route-mon > .btn { margin-left: auto; flex: none; }
 .route-portrait { width: 6rem; height: 6rem; }
 .route .diff-row { margin: 0; }
