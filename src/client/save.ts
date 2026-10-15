@@ -91,6 +91,8 @@ export interface Profile {
   badges: Record<string, number>;
   /** 打败过的道馆训练家（再来时直接挑战馆主） */
   gymJunior: Record<string, number>;
+  /** 每个道馆的挑战记录（道馆训练家和馆主都算） */
+  gymLog: Record<string, { tries: number; wins: number }>;
   /** 看过的新手引导 */
   guide: Record<string, number>;
   /** 上次在真新镇里站的位置 */
@@ -125,6 +127,7 @@ function fresh(): Profile {
     autoAssist: false,
     badges: {},
     gymJunior: {},
+    gymLog: {},
     guide: {},
     townPos: null,
   };
@@ -238,6 +241,7 @@ export function loadProfile(): Profile {
     out.stats.shinies = out.shiny.length;
     out.pvpBest = Number.isFinite(out.pvpBest) ? out.pvpBest : 0;
     out.bestRun = cleanRun(out.bestRun);
+    if (!out.gymLog || typeof out.gymLog !== 'object') out.gymLog = {};
     return out;
   } catch {
     return fresh();

@@ -167,9 +167,15 @@ export class PvpScreen {
   /** 背包里正在查看的宝可梦（默认是队长） */
   private focus: string | null = null;
 
-  constructor(private root: HTMLElement, private p: Profile, private a: PvpActions, connected: boolean) {
+  /**
+   * tab：打开时显示哪个标签（道馆的「调整队伍」直接打开背包）；
+   * from：从别的地方过来的（比如「道馆」），出门按钮就是返回那里
+   */
+  constructor(private root: HTMLElement, private p: Profile, private a: PvpActions, connected: boolean, tab = 0, private from: string | null = null) {
     this.connected = connected;
     this.boardKind = p.pvpMode;
+    this.tab = tab;
+    if (tab === 2) this.requestBoard(this.boardKind);
     this.render();
   }
 
@@ -264,7 +270,7 @@ export class PvpScreen {
       h('div', { class: 'panel-head' },
         h('div', { class: 'row' }, uiIcon('sword', 3), h('h2', null, '对战场')),
         tabs(['对战', `背包 ${p.party.length}/${partyMax(p)}`, '排行榜'], this.tab, (i) => this.go(i)),
-        iconBtn('back', '回到真新镇', () => { if (busy) this.a.cancel(); this.a.back(); }, { attrs: { 'data-back': '1' }, cls: 'ghost small', text: '出门' }),
+        iconBtn('back', `回到${this.from ?? '真新镇'}`, () => { if (busy) this.a.cancel(); this.a.back(); }, { attrs: { 'data-back': '1' }, cls: 'ghost small', text: this.from ? '返回' : '出门' }),
       ),
       body,
     ), 'pvp');

@@ -644,8 +644,11 @@ class App {
 
   // ------------------------------------------------------------ 对战场
 
-  /** 对战中心：背包、匹配、段位与排行榜（自动用跟随的伙伴出战） */
-  pvpCenter() {
+  /**
+   * 对战中心：背包、匹配、段位与排行榜（自动用跟随的伙伴出战）。
+   * tab：0 对战 · 1 背包 · 2 排行榜；gym：从这个道馆过来的，出门时回到道馆
+   */
+  pvpCenter(tab = 0, gym?: string) {
     this.where = 'pvp';
     this.browser = null;
     this.backdrop();
@@ -665,10 +668,10 @@ class App {
       rank: (kind) => { this.reportProgress(); this.ws?.send({ t: 'rankBoard', kind, ...pvpIdentity(this.profile) }); },
       partner: (mon) => { this.setPartner(buildMon(mon.build)); this.profile.pvpPick = mon.uid; saveProfile(this.profile); },
       adventure: () => { this.pvpUi = null; this.where = 'place'; this.route(); },
-      back: () => { saveProfile(this.profile); this.pvpUi = null; this.backToTown(); },
-    }, ws.connected);
+      back: () => { saveProfile(this.profile); this.pvpUi = null; if (gym) this.gymCenter(gym); else this.backToTown(); },
+    }, ws.connected, tab, gym ? '道馆' : null);
     if (ws.connected) for (const mode of PVP_MODE_IDS) this.requestBoard(mode);
-    tour(this.profile, 'pvp', TOURS.pvp);
+    if (!tab) tour(this.profile, 'pvp', TOURS.pvp);
   }
 
   // ------------------------------------------------------------ 道馆
@@ -694,7 +697,7 @@ class App {
     playMusic('town');
     gymScreen(this.screen, this.profile, {
       challenge: (g, team) => this.gymChallenge(g, team),
-      pvp: () => this.pvpCenter(),
+      team: (g) => this.pvpCenter(1, g.id),
       adventure: () => this.route(),
       back: () => this.backToTown(),
     }, sel);
@@ -744,6 +747,10 @@ class App {
     const won = !!me && res.winner === me.team;
     const back = () => this.gymCenter(g.id);
     const who = { name: `${T.title} · ${T.name}`, art: T.art };
+    const log = (p.gymLog[g.id] ??= { tries: 0, wins: 0 });
+    log.tries++;
+    if (won) log.wins++;
+    saveProfile(p);
     if (!won) {
       talk(this.screen, { ...who, text: T.win, buttons: [['再挑战一次', () => this.gymChallenge(g, team, stage), 'gold'], ['查看战报', report], ['回去准备', back, 'ghost']] });
       return;
