@@ -1236,8 +1236,27 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 .locked-detail { display: flex !important; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 0.25rem; }
 .locked-detail .ld-portrait { width: 6rem !important; height: 6rem; }
 .partner-modal { width: 58rem; height: 32rem; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.875rem 1.125rem; }
-.pmon-views { gap: 0.25rem; }
+.pmon-views { flex: none; gap: 0.375rem; align-items: stretch; flex-wrap: nowrap; }
 .pmon-views img.uico, .shiny-tag img.uico { width: 0.75rem; height: 0.75rem; }
+.pmon-mode {
+  appearance: none; cursor: pointer; display: flex; align-items: baseline; gap: 0.375rem; padding: 0.25rem 0.75rem; border-radius: 0.5rem;
+  border: 0.125rem solid rgba(255, 255, 255, .18); background: rgba(0, 0, 0, .2); color: inherit; font: inherit; text-shadow: 1px 1px 0 #000;
+}
+.pmon-mode b { font-size: 0.9375rem; }
+.pmon-mode small { font-size: 0.75rem; color: var(--muted); }
+.pmon-mode.on { border-color: var(--gold); background: rgba(255, 210, 63, .12); }
+.pmon-mode.on b { color: var(--gold); }
+.pmon-shiny { margin-left: auto; align-self: center; white-space: nowrap; }
+/* 选伙伴时的简要资料；特性和技能在「详细资料」弹窗里 */
+.line-detail.summary { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.625rem 0.75rem; }
+.line-detail.summary .ld-top { flex: none; }
+.line-detail.summary .ld-info { gap: 0.125rem; }
+.ld-facts { line-height: 1.35; }
+.ld-builds { line-height: 1.4; }
+.ld-builds.ok { color: #b8f0c8; }
+.ld-more { align-self: flex-start; }
+.modal-box.line-modal { width: 42rem; height: 31rem; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem 1rem; }
+.line-modal .line-detail { flex: 1; min-height: 0; }
 
 /* 闪光宝可梦：浅蓝色的光、淡金色的字 */
 .pmon.shiny, .mon-card.shiny { background: linear-gradient(160deg, rgba(154, 230, 255, .2), rgba(0, 0, 0, .22) 60%); }

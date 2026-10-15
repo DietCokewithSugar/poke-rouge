@@ -46,7 +46,8 @@ export function portraitSlot(dex: number, scale: number, cls = '', shiny = false
   return h('div', { class: `pslot ${cls}${shiny ? ' shiny' : ''}` }, Animator.portrait(dex, scale, shiny));
 }
 
-export function lineDetail(line: LineId, compact = false, shiny = false) {
+/** 进化路线：每个形态的小头像，中间写进化等级或进化石 */
+function evoChain(line: LineId, shiny: boolean) {
   const L = LINES[line];
   const evo = h('div', { class: 'evo-chain' });
   L.forms.forEach((f, i) => {
@@ -54,6 +55,59 @@ export function lineDetail(line: LineId, compact = false, shiny = false) {
     evo.appendChild(h('div', { class: 'evo-form' }, portraitSlot(f.dex, 1, 'tiny', shiny), h('div', { class: 'small' }, f.name)));
   });
   if (L.forms.length === 1) evo.appendChild(h('span', { class: 'muted small' }, `Lv${L.evoLevels.join(' / Lv')} 觉醒`));
+  return evo;
+}
+
+/**
+ * 宝可梦的简要资料（选伙伴时看的）：头像、属性、种族值、进化路线；
+ * 特性的说明、初始技能和升级领悟的技能放在「详细资料」里。
+ */
+export function lineSummary(line: LineId, shiny = false, onMore?: () => void, extra: Node | null = null) {
+  const L = LINES[line];
+  return h('div', { class: `line-detail summary${shiny ? ' shiny' : ''}` },
+    h('div', { class: 'ld-top' },
+      portraitSlot(L.forms[0].dex, 3, 'ld-portrait', shiny),
+      h('div', { class: 'ld-info' },
+        h('h2', null, shinyName(L.name, shiny)),
+        h('div', null, ...L.forms[0].types.map(typeBadge), shiny ? h('span', { class: 'shiny-tag' }, uiIcon('shiny', 1), '闪光 · 六项能力 +1%') : null),
+        h('div', { class: 'small ld-facts' }, `技能栏 ${L.forms[0].slots} 个 · ${TYPE_NAME[L.bonusType]}系技能 +${L.bonusPct}%`),
+        h('div', { class: 'small muted ld-facts' }, `特性：${L.passives.slice(1).map((x) => x.name).join('、') || '无'}`),
+      ),
+    ),
+    statBars(line, shiny),
+    evoChain(line, shiny),
+    extra,
+    onMore ? h('button', { class: 'btn small ghost ld-more', onclick: () => { sfx('click'); onMore(); } }, uiIcon('book', 2), ' 详细资料（特性、技能）') : null,
+  );
+}
+
+/** 背包里这只宝可梦的对战构筑（闪光的和普通的分开算） */
+export function buildsLine(party: { build: { line: LineId; shiny?: boolean; level: number } }[], line: LineId, shiny: boolean) {
+  const own = party.filter((m) => m.build.line === line && !!m.build.shiny === shiny);
+  return h('div', { class: `small ld-builds ${own.length ? 'ok' : 'muted'}` }, uiIcon('bag', 1), own.length
+    ? ` 背包里有它的对战构筑 ${own.length} 个（最高 Lv${Math.max(...own.map((m) => m.build.level))}），设为伙伴后它就是对战的队长`
+    : ' 背包里还没有它的对战构筑：带它冒险，结算时放进背包');
+}
+
+/** 详细资料：特性的说明、初始技能、升级领悟的技能 */
+export function lineDetailModal(line: LineId, shiny = false) {
+  const overlay = h('div', { class: 'modal' });
+  const close = () => overlay.remove();
+  overlay.appendChild(h('div', { class: 'box modal-box line-modal' },
+    h('div', { class: 'panel-head' },
+      h('h2', null, `${shinyName(LINES[line].name, shiny)} · 详细资料`),
+      iconBtn('close', '关闭', () => { sfx('click'); close(); }, { attrs: { 'data-back': '1' }, cls: 'ghost small' }),
+    ),
+    lineDetail(line, false, shiny),
+  ));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+export function lineDetail(line: LineId, compact = false, shiny = false) {
+  const L = LINES[line];
+  const evo = evoChain(line, shiny);
   const skillChip = (id: string, label: string) => {
     const el = h('span', { class: 'chip' }, skillIcon(id, 1, true), h('span', { class: 'chip-text' }, label));
     tip(el, () => skillInfo(id, 1, line));
