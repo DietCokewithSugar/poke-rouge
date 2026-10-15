@@ -49,6 +49,10 @@ export interface SimPlayer {
   team: number;
   /** 由服务器控制走位的 AI 训练家 */
   bot: boolean;
+  /** 训练家（加成在 metaMods / trainerTypeMods 里） */
+  trainer: string;
+  /** 这位玩家已经拥有的宝可梦（进化线）：没有的才会崇拜他 */
+  owned: Set<string>;
   line: LineId;
   stage: number;
   level: number;
@@ -66,6 +70,7 @@ export interface SimPlayer {
   items: Record<string, number>;
   levelMods: Mods;
   metaMods: Partial<Mods>;
+  trainerTypeMods: TypeMods;
   typeMods: TypeMods;
   d: Derived;
   slots: number;
@@ -80,6 +85,8 @@ export interface SimPlayer {
   lsWindow: number;
   lsCount: number;
   sashUsed: boolean;
+  /** 特性「结实」每波只能触发一次 */
+  sturdyUsed: boolean;
   levelQueue: number[];
   cards: LevelCard[] | null;
   cardRerolls: number;
@@ -108,6 +115,8 @@ export interface SimPlayer {
     /** 对战：击倒对手次数、被击倒次数 */
     kos: number;
     deaths: number;
+    /** 本局结交的伙伴（进化线） */
+    recruits: string[];
   };
 }
 

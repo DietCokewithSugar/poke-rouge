@@ -1,8 +1,9 @@
 import { ACHIEVEMENTS, META_UPGRADES, metaCost, stardustFor, type LifetimeStats, type RunSummary } from '../shared/meta';
 import { DIFFICULTIES, type DifficultyId } from '../shared/difficulty';
-import { LINES, LINE_IDS, type LineId } from '../shared/pokemon';
+import { LINES, LINE_IDS, STARTERS, isLine, type LineId } from '../shared/pokemon';
 import { validateBuild, type SavedBuild } from '../shared/pvp/build';
 import type { PvpMode } from '../shared/pvp/sim';
+import { TRAINERS, TRAINER_IDS } from '../shared/trainers';
 import { defaultUiScale } from './ui/layout';
 
 const KEY = 'poke-rouge-save-v1';
@@ -29,11 +30,19 @@ export interface PartyMon {
 
 export interface Profile {
   name: string;
+  /** 完成了开场（选训练家、初始伙伴、名字） */
+  setup: boolean;
+  trainer: string;
+  /** 用星之沙招募的训练家（初始的与成就解锁的不在这里） */
+  trainers: string[];
+  /** 跟随的宝可梦：冒险与对战都直接用它 */
+  partner: LineId;
+  /** 拥有的宝可梦（进化线）：初始伙伴、崇拜你的、买来的。成就解锁的另外判断 */
+  owned: LineId[];
   stardust: number;
   upgrades: Record<string, number>;
   achievements: Record<string, number>;
   stats: LifetimeStats;
-  lastLine: LineId;
   lastDifficulty: DifficultyId;
   settings: Settings;
   seenEnemies: string[];
@@ -42,16 +51,22 @@ export interface Profile {
   pvpId: { pid: string; secret: string } | null;
   pvpMode: PvpMode;
   pvpPick: string;
+  /** 上次在真新镇里站的位置 */
+  townPos: { x: number; y: number } | null;
 }
 
 function fresh(): Profile {
   return {
     name: '',
+    setup: false,
+    trainer: 'ash',
+    trainers: [],
+    partner: 'charmander',
+    owned: [],
     stardust: 0,
     upgrades: {},
     achievements: {},
-    stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0 },
-    lastLine: 'charmander',
+    stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 0 },
     lastDifficulty: 'easy',
     settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true, uiScale: defaultUiScale(), fps: 60, quality: 'high' },
     seenEnemies: [],
@@ -59,6 +74,7 @@ function fresh(): Profile {
     pvpId: null,
     pvpMode: '1v1',
     pvpPick: '',
+    townPos: null,
   };
 }
 
@@ -100,10 +116,19 @@ export function loadProfile(): Profile {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return fresh();
-    const p = JSON.parse(raw) as Partial<Profile>;
+    const p = JSON.parse(raw) as Partial<Profile> & { lastLine?: string };
     const f = fresh();
     const party = Array.isArray(p.party) ? p.party.filter((m) => m && typeof validateBuild(m.build) !== 'string').slice(0, PARTY_MAX) : [];
-    return { ...f, ...p, party, stats: { ...f.stats, ...p.stats }, settings: { ...f.settings, ...p.settings } };
+    const out: Profile = { ...f, ...p, party, stats: { ...f.stats, ...p.stats }, settings: { ...f.settings, ...p.settings } };
+    // 旧存档：以前御三家一开始就能用，保留下来；需要重新走一遍开场选训练家
+    if (!Array.isArray(p.owned)) out.owned = (p.stats?.runs ?? 0) > 0 ? [...STARTERS] : [];
+    out.owned = out.owned.filter(isLine);
+    out.trainers = (Array.isArray(out.trainers) ? out.trainers : []).filter((t) => TRAINERS[t]);
+    if (!TRAINERS[out.trainer]) out.trainer = 'ash';
+    if (!isLine(out.partner)) out.partner = isLine(p.lastLine) ? p.lastLine : 'charmander';
+    if (out.setup && !isUnlocked(out, out.partner)) out.partner = unlockedLines(out)[0] ?? 'charmander';
+    out.stats.owned = unlockedLines(out).length;
+    return out;
   } catch {
     return fresh();
   }
@@ -114,8 +139,9 @@ export function saveProfile(p: Profile) {
 }
 
 export function isUnlocked(p: Profile, line: LineId): boolean {
-  const u = LINES[line].unlock;
-  return !u || !!p.achievements[u];
+  const L = LINES[line];
+  if (!L) return false;
+  return p.owned.includes(line) || (!!L.unlock.ach && !!p.achievements[L.unlock.ach]);
 }
 
 export function isDifficultyUnlocked(p: Profile, id: DifficultyId): boolean {
@@ -125,6 +151,46 @@ export function isDifficultyUnlocked(p: Profile, id: DifficultyId): boolean {
 
 export function unlockedLines(p: Profile): LineId[] {
   return LINE_IDS.filter((l) => isUnlocked(p, l));
+}
+
+export function isTrainerUnlocked(p: Profile, id: string): boolean {
+  const t = TRAINERS[id];
+  if (!t) return false;
+  return !!t.unlock.start || p.trainers.includes(id) || (!!t.unlock.ach && !!p.achievements[t.unlock.ach]);
+}
+
+export function unlockedTrainers(p: Profile): string[] {
+  return TRAINER_IDS.filter((t) => isTrainerUnlocked(p, t));
+}
+
+/** 用星之沙招募训练家 */
+export function buyTrainer(p: Profile, id: string): boolean {
+  const t = TRAINERS[id];
+  if (!t?.unlock.cost || isTrainerUnlocked(p, id) || p.stardust < t.unlock.cost) return false;
+  p.stardust -= t.unlock.cost;
+  p.trainers.push(id);
+  saveProfile(p);
+  return true;
+}
+
+/** 用星之沙买宝可梦（鲤鱼王推销员） */
+export function buyLine(p: Profile, id: LineId): boolean {
+  const cost = LINES[id]?.unlock.cost;
+  if (!cost || isUnlocked(p, id) || p.stardust < cost) return false;
+  p.stardust -= cost;
+  addOwned(p, id);
+  return true;
+}
+
+/** 新的伙伴：冒险中崇拜你的宝可梦（返回是不是第一次得到） */
+export function addOwned(p: Profile, id: LineId, recruited = false): boolean {
+  if (!isLine(id)) return false;
+  const isNew = !isUnlocked(p, id);
+  if (!p.owned.includes(id)) p.owned.push(id);
+  if (recruited) p.stats.recruits++;
+  p.stats.owned = unlockedLines(p).length;
+  saveProfile(p);
+  return isNew;
 }
 
 export function buyUpgrade(p: Profile, id: string): boolean {
@@ -151,7 +217,12 @@ export function refundUpgrades(p: Profile) {
   saveProfile(p);
 }
 
-export interface RunReward { stardust: number; newAchievements: { id: string; name: string; reward: number; unlocks?: LineId }[] }
+export interface RunReward {
+  stardust: number;
+  newAchievements: { id: string; name: string; reward: number; unlocks?: LineId[]; trainer?: string }[];
+  /** 本局崇拜你的新伙伴 */
+  recruits: LineId[];
+}
 
 /** 结算一局：更新统计、判定成就、发放星之沙。 */
 export function applyRun(p: Profile, r: RunSummary): RunReward {
@@ -161,17 +232,27 @@ export function applyRun(p: Profile, r: RunSummary): RunReward {
   p.stats.bestWave = Math.max(p.stats.bestWave, r.wavesCleared);
   if (r.players > 1) p.stats.coopRuns++;
   p.stats.revives += r.revives;
+  // 冒险中已经实时解锁过了；断线等情况下漏掉的在这里补上
+  for (const id of r.recruits) if (!p.owned.includes(id)) addOwned(p, id, true);
+  p.stats.owned = unlockedLines(p).length;
   let dust = stardustFor(r);
   const fresh: RunReward['newAchievements'] = [];
-  for (const a of ACHIEVEMENTS) {
-    if (p.achievements[a.id]) continue;
-    if (a.check(r, p.stats)) {
-      p.achievements[a.id] = Date.now();
-      dust += a.reward;
-      fresh.push({ id: a.id, name: a.name, reward: a.reward, unlocks: a.unlocks });
+  // 成就可能会连锁（解锁新宝可梦让图鉴数达标），多判定几轮
+  for (let round = 0; round < 3; round++) {
+    let any = false;
+    for (const a of ACHIEVEMENTS) {
+      if (p.achievements[a.id]) continue;
+      if (a.check(r, p.stats)) {
+        p.achievements[a.id] = Date.now();
+        dust += a.reward;
+        fresh.push({ id: a.id, name: a.name, reward: a.reward, unlocks: a.unlocks, trainer: a.trainer });
+        any = true;
+      }
     }
+    p.stats.owned = unlockedLines(p).length;
+    if (!any) break;
   }
   p.stardust += dust;
   saveProfile(p);
-  return { stardust: dust, newAchievements: fresh };
+  return { stardust: dust, newAchievements: fresh, recruits: r.recruits.slice() };
 }

@@ -1,6 +1,7 @@
-import { LINES, LINE_IDS, formOf, type LineId } from './pokemon';
+import { LINES, formOf, isLine, type LineId } from './pokemon';
 import { DIFFICULTY_IDS, type DifficultyId } from './difficulty';
-import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
+import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type JoinIdentity, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
+import { trainerOf } from './trainers';
 import { PeerSync, cullEvents, type Conn } from './netsync';
 import { GameSim, TICK_RATE } from './sim/game';
 
@@ -10,6 +11,8 @@ interface Member {
   conn: Conn;
   name: string;
   meta: Record<string, number>;
+  trainer: string;
+  owned: string[];
   line: LineId | null;
   ready: boolean;
   joinedAt: number;
@@ -32,6 +35,11 @@ export function cleanMeta(meta: unknown): Record<string, number> {
     }
   }
   return out;
+}
+
+export function cleanOwned(owned: unknown): string[] {
+  if (!Array.isArray(owned)) return [];
+  return [...new Set(owned.filter(isLine))].slice(0, 200);
 }
 
 /** 一个房间：大厅（选精灵/准备）+ 对局（权威模拟）。服务器与单人模式共用。 */
@@ -70,13 +78,16 @@ export class Room {
   }
 
   /** 加入房间，返回房间内的玩家编号（1~4），失败时返回错误信息。 */
-  join(conn: Conn, name: string, meta: unknown, v: number): number | string {
+  join(conn: Conn, name: string, meta: unknown, v: number, ident: JoinIdentity = {}): number | string {
     if (v !== PROTOCOL_VERSION) return '客户端版本与服务器不一致，请刷新页面';
     if (this.members.size >= (this.solo ? 1 : MAX_PLAYERS)) return '房间已满（最多 4 人）';
     if (this.sim) return '该房间正在游戏中，请等待本局结束';
     let id = 1;
     while (this.members.has(id)) id++;
-    this.members.set(id, { conn, name: cleanName(name), meta: cleanMeta(meta), line: null, ready: false, joinedAt: ++this.joinSeq, sync: new PeerSync() });
+    this.members.set(id, {
+      conn, name: cleanName(name), meta: cleanMeta(meta), trainer: trainerOf(ident.trainer).id, owned: cleanOwned(ident.owned),
+      line: isLine(ident.line) ? ident.line : null, ready: false, joinedAt: ++this.joinSeq, sync: new PeerSync(),
+    });
     this.send(conn, { t: 'joined', code: this.code, you: id, solo: this.solo });
     this.sendLobby();
     return id;
@@ -94,7 +105,7 @@ export class Room {
 
   lobbyPlayers(): LobbyPlayer[] {
     const host = this.hostId;
-    return [...this.members.entries()].map(([id, m]) => ({ id, name: m.name, line: m.line, ready: m.ready, host: id === host }));
+    return [...this.members.entries()].map(([id, m]) => ({ id, name: m.name, trainer: m.trainer, line: m.line, ready: m.ready, host: id === host }));
   }
 
   sendLobby() {
@@ -106,7 +117,7 @@ export class Room {
     return {
       code: this.code,
       host: host?.name ?? '',
-      players: [...this.members.values()].map((m) => ({ name: m.name, line: m.line })),
+      players: [...this.members.values()].map((m) => ({ name: m.name, trainer: m.trainer, line: m.line })),
       max: MAX_PLAYERS,
       inGame: this.inGame,
       wave: this.sim?.wave ?? 0,
@@ -119,7 +130,7 @@ export class Room {
     if (!m || !msg || typeof msg !== 'object') return;
     switch (msg.t) {
       case 'pick':
-        if (this.sim || !LINE_IDS.includes(msg.line)) return;
+        if (this.sim || !isLine(msg.line)) return;
         m.line = msg.line;
         this.sendLobby();
         return;
@@ -186,6 +197,8 @@ export class Room {
       case 'pvpQueue':
       case 'pvpCancel':
       case 'pvpBoard':
+      case 'presence':
+      case 'tpos':
         return;
       default:
         if (!this.sim) return;
@@ -207,12 +220,12 @@ export class Room {
   }
 
   private startGame() {
-    const inits = [...this.members.entries()].map(([id, m]) => ({ id, name: m.name, line: m.line!, meta: m.meta }));
+    const inits = [...this.members.entries()].map(([id, m]) => ({ id, name: m.name, line: m.line!, meta: m.meta, trainer: m.trainer, owned: m.owned }));
     this.sim = new GameSim(inits, (Math.random() * 2 ** 31) | 0, this.difficulty);
     this.tick = 0;
     this.paused = false;
     this.lastPhase = '';
-    this.broadcast({ t: 'start', w: this.sim.w, h: this.sim.h, players: inits.map((i) => ({ id: i.id, name: i.name, line: i.line })) });
+    this.broadcast({ t: 'start', w: this.sim.w, h: this.sim.h, players: inits.map((i) => ({ id: i.id, name: i.name, trainer: i.trainer, line: i.line })) });
     this.broadcast({ t: 'ev', e: this.sim.flushEvents() });
     this.sendPublic();
     for (const m of this.members.values()) m.sync.reset();
@@ -284,9 +297,10 @@ export class Room {
 
   private endGame() {
     const sim = this.sim!;
-    const board = sim.players.map((p) => ({ id: p.id, name: p.name, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level, kills: p.stats.kills, damage: Math.round(p.stats.damage), taken: Math.round(p.stats.taken), revives: p.stats.revives }));
+    const board = sim.players.map((p) => ({ id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level, kills: p.stats.kills, damage: Math.round(p.stats.damage), taken: Math.round(p.stats.taken), revives: p.stats.revives }));
     for (const [id, m] of this.members) {
       const p = sim.players.find((q) => q.id === id);
+      if (p) m.owned = [...p.owned];
       this.send(m.conn, { t: 'end', victory: sim.phase === 'won', summary: p ? sim.summary(p) : null, board });
     }
     this.sim = null;

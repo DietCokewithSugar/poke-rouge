@@ -7,7 +7,7 @@ import type { EnemyDef } from '../enemies';
 import { formOf } from '../pokemon';
 import { SKILLS } from '../skills';
 import { gameEffectiveness, type PType } from '../types';
-import { PLAYER_R, applyStatus, healPlayer, hurtPlayer, type HitOpts } from '../sim/combat';
+import { PLAYER_R, applyStatus, healMult, healPlayer, hurtPlayer, type HitOpts } from '../sim/combat';
 import type { Enemy, SimPlayer } from '../sim/entities';
 import { GameSim, REVIVE_RADIUS, type Command, type PublicState } from '../sim/game';
 import { createPlayerFromBuild } from '../sim/player';
@@ -34,7 +34,7 @@ export const RING_DPS = 0.08;
 /** 竞技场地面（tiles.ts 的第 5 种场地） */
 export const PVP_BIOME = 4;
 
-export interface PvpInit { id: number; name: string; team: number; build: SavedBuild; meta: Record<string, number>; bot?: boolean }
+export interface PvpInit { id: number; name: string; team: number; build: SavedBuild; meta: Record<string, number>; trainer?: string; bot?: boolean }
 
 export interface PvpPublic {
   mode: PvpMode;
@@ -45,7 +45,7 @@ export interface PvpPublic {
 }
 
 export interface PvpPlayerResult {
-  id: number; name: string; team: number; bot: boolean;
+  id: number; name: string; team: number; bot: boolean; trainer: string;
   line: SavedBuild['line']; dex: number; form: string; level: number;
   damage: number; taken: number; healed: number; kos: number; deaths: number; revives: number; crits: number; dodges: number; superEff: number;
   hp: number; maxHp: number; alive: boolean;
@@ -104,7 +104,7 @@ export class PvpSim extends GameSim {
     this.phase = 'inter';
     this.ring = { x: this.w / 2, y: this.h / 2, r: Math.hypot(this.w, this.h) / 2 + 12, r0: Math.hypot(this.w, this.h) / 2 + 12, t0: this.def.dur * 0.3, t1: this.def.dur * 0.85 };
     for (const i of inits) {
-      const p = createPlayerFromBuild(this, i.id, i.name, i.build, i.meta);
+      const p = createPlayerFromBuild(this, i.id, i.name, i.build, i.meta, i.trainer);
       p.team = i.team ? 1 : 0;
       p.bot = !!i.bot;
       p.money = 0;
@@ -293,7 +293,7 @@ export class PvpSim extends GameSim {
           st.leech -= 0.5;
           parts.push([st.leechDps * 0.5, st.leechSrc]);
           const src = this.byId.get(st.leechSrc);
-          if (src) healPlayer(this, src, st.leechDps * 0.5 * st.leechHeal * (src.line === 'bulbasaur' ? 1.3 : 1) * (src.items.big_root ? 1.3 : 1), true);
+          if (src) healPlayer(this, src, st.leechDps * 0.5 * st.leechHeal * healMult(src), true);
         }
         for (const [d, sid] of parts) {
           if (p.down || d <= 0) continue;
@@ -521,7 +521,7 @@ export class PvpSim extends GameSim {
       players: this.players.map((p) => {
         const form = formOf(p.line, p.stage);
         return {
-          id: p.id, name: p.name, team: p.team, bot: p.bot, line: p.line, dex: form.dex, form: form.name, level: p.level,
+          id: p.id, name: p.name, team: p.team, bot: p.bot, trainer: p.trainer, line: p.line, dex: form.dex, form: form.name, level: p.level,
           damage: Math.round(p.stats.damage), taken: Math.round(p.stats.taken), healed: Math.round(p.stats.healed),
           kos: p.stats.kos, deaths: p.stats.deaths, revives: p.stats.revives, crits: p.stats.crits, dodges: p.stats.dodges, superEff: p.stats.superEff,
           hp: Math.max(0, Math.ceil(p.hp)), maxHp: p.d.maxHp, alive: p.alive && !p.down,

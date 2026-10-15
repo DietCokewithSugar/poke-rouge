@@ -6,6 +6,8 @@ import type { MeState, PublicState } from '../../shared/sim/game';
 import type { PvpSeatInfo } from '../../shared/protocol';
 import { PVP_MODES } from '../../shared/pvp/sim';
 import { Animator } from '../gfx/sprites';
+import { trainerPortrait } from '../gfx/trainers';
+import { uiIcon } from '../gfx/uiicons';
 import { clear, h, tip } from './dom';
 import { confirmButton } from './layout';
 import { skillIcon, skillInfo } from './describe';
@@ -13,6 +15,7 @@ import { skillIcon, skillInfo } from './describe';
 export class Hud {
   root: HTMLElement;
   private me = {
+    trainer: h('div', { class: 'hud-trainer' }),
     portrait: h('div', { class: 'hud-portrait' }),
     name: h('div', { class: 'hud-name' }),
     lv: h('span', { class: 'hud-lv' }),
@@ -47,11 +50,12 @@ export class Hud {
 
   constructor(parent: HTMLElement, onPause: (() => void) | null, onLeave?: () => void, leaveConfirm = '再按一次离开') {
     this.pauseBtn = onLeave
-      ? confirmButton('离开', leaveConfirm, 'btn small hud-pause', onLeave, { 'data-key': 'start' })
-      : h('button', { class: 'btn small hud-pause', 'data-key': 'start', onclick: () => onPause?.() }, '暂停');
+      ? confirmButton('离开', leaveConfirm, 'btn small hud-pause', onLeave, { 'data-key': 'start' }, 'door')
+      : h('button', { class: 'btn small icon hud-pause', 'data-key': 'start', title: '暂停', 'aria-label': '暂停', onclick: () => onPause?.() }, uiIcon('pause', 2));
     if (!onPause && !onLeave) this.pauseBtn.classList.add('hidden');
     this.root = h('div', { id: 'hud' },
       h('div', { class: 'hud-me box tight' },
+        this.me.trainer,
         this.me.portrait,
         h('div', { class: 'hud-me-body' },
           h('div', { class: 'hud-row' }, this.me.name, this.me.lv),
@@ -78,6 +82,13 @@ export class Hud {
   }
 
   destroy() { this.root.remove(); }
+
+  /** 左上角：训练家 + 宝可梦 */
+  setTrainer(trainer: string, name: string) {
+    clear(this.me.trainer);
+    this.me.trainer.appendChild(trainerPortrait(trainer, 2, 'tportrait'));
+    this.me.trainer.title = name;
+  }
 
   /** 联机延迟：往返时间与画面缓冲 */
   setNet(rtt: number, buffer: number) {

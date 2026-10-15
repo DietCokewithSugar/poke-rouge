@@ -117,6 +117,22 @@ const TRACKS: Record<string, Track> = {
     ],
     drum: 'k.h.s.h.k.h.s.hhk.h.s.h.k.k.s.h.',
   },
+  town: {
+    bpm: 100,
+    lead: [
+      72, null, 74, null, 76, null, 79, null, 77, null, 76, null, 74, null, null, null,
+      72, null, 74, null, 76, null, 72, null, 74, null, null, null, 67, null, null, null,
+      69, null, 71, null, 72, null, 76, null, 74, null, 72, null, 71, null, null, null,
+      72, null, 71, null, 69, null, 67, null, 72, null, null, null, null, null, null, null,
+    ],
+    bass: [
+      48, null, null, null, 55, null, null, null, 53, null, null, null, 55, null, null, null,
+      48, null, null, null, 55, null, null, null, 50, null, null, null, 55, null, null, null,
+      45, null, null, null, 52, null, null, null, 53, null, null, null, 55, null, null, null,
+      53, null, null, null, 55, null, null, null, 48, null, null, null, 48, null, null, null,
+    ],
+    drum: 'k.......h.......k.......h...h...',
+  },
   shop: {
     bpm: 112,
     lead: [

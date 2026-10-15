@@ -2,12 +2,14 @@ import { DIFFICULTIES } from '../../shared/difficulty';
 import { ENEMIES } from '../../shared/enemies';
 import { ITEMS } from '../../shared/items';
 import { ACHIEVEMENTS, type RunSummary } from '../../shared/meta';
+import { TRAINERS } from '../../shared/trainers';
 import { LINES } from '../../shared/pokemon';
 import type { BoardEntry } from '../../shared/protocol';
 import { SKILLS, TIER_COLOR } from '../../shared/skills';
 import { TYPE_COLOR } from '../../shared/types';
 import { TOTAL_WAVES, WAVES } from '../../shared/waves';
 import { iconImg } from '../gfx/icons';
+import { uiIcon } from '../gfx/uiicons';
 import { validateBuild } from '../../shared/pvp/build';
 import { sfx } from '../audio';
 import { PARTY_MAX, addToParty, releaseFromParty, type Profile, type RunReward } from '../save';
@@ -15,7 +17,7 @@ import { h, tip, toast } from './dom';
 import { itemInfo, skillIcon, skillInfo, typeBadge } from './describe';
 import { releaseModal } from './pvp';
 import { mount, portraitSlot, tabs } from './screens';
-import { pager } from './layout';
+import { iconBtn, pager } from './layout';
 
 function fmtTime(sec: number) {
   const m = Math.floor(sec / 60), s = sec % 60;
@@ -169,7 +171,7 @@ export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary
       h('h2', { class: victory ? 'gold' : '' }, victory ? '通关！你是真正的宝可梦大师！' : '眼前一片漆黑……'),
       h('div', { class: 'row' },
         s?.build && profile && typeof validateBuild(s.build) !== 'string' ? storeButton(profile, s, state) : null,
-        onHome ? h('button', { class: 'btn ghost', 'data-back': '1', onclick: onHome }, '返回首页') : null,
+        onHome ? iconBtn('home', '回到真新镇', onHome, { cls: 'ghost', attrs: { 'data-back': '1' }, text: '回到真新镇' }) : null,
         h('button', { class: 'btn gold big', 'data-key': 'y', onclick: onContinue }, label),
       ),
     );
@@ -208,15 +210,25 @@ export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary
     if (reward?.newAchievements.length) {
       const pg = pager(reward.newAchievements, 6, state.achs, (a) => {
         const def = ACHIEVEMENTS.find((x) => x.id === a.id);
-        const unlock = a.unlocks ? `解锁 ${LINES[a.unlocks].name}！` : def?.unlocksDifficulty ? `解锁${DIFFICULTIES[def.unlocksDifficulty].name}难度！` : '';
+        const names = [...(a.unlocks ?? []).map((l) => LINES[l].name), ...(a.trainer ? [`训练家${TRAINERS[a.trainer]?.name ?? ''}`] : [])];
+        const unlock = names.length ? `解锁 ${names.join('、')}！` : def?.unlocksDifficulty ? `解锁${DIFFICULTIES[def.unlocksDifficulty].name}难度！` : '';
         const el = h('div', { class: `r-ach ${unlock ? 'unlock' : ''}` }, h('b', null, `★ ${a.name}`), h('span', { class: 'muted' }, ` +${a.reward}`), unlock ? h('span', { class: 'gold' }, ` · ${unlock}`) : null);
         if (def) tip(el, () => `${def.desc}${unlock ? ` · ${unlock}` : ''}`);
         return el;
       }, { cls: 'r-achs', filler: () => h('div', { class: 'r-ach filler' }), onPage: (n) => { state.achs = n; render(); }, keys: null, label: `达成 ${reward.newAchievements.length} 个新成就` });
       achs = h('div', { class: 'r-paged' }, pg.list, pg.nav);
     }
+    const recruits = reward?.recruits ?? s.recruits ?? [];
     const rewards = h('div', { class: 'r-reward' },
       h('div', { class: 'reward' }, iconImg('stardust', 3), reward ? `获得星之沙 +${reward.stardust}` : '没有获得星之沙'),
+      recruits.length ? h('div', { class: 'r-recruits' },
+        h('span', { class: 'small gold' }, uiIcon('heart', 1), ` 结交了 ${recruits.length} 位新伙伴`),
+        h('div', { class: 'r-recruit-list' }, recruits.slice(0, 8).map((l) => {
+          const el = h('div', { class: 'r-recruit' }, portraitSlot(LINES[l].forms[0].dex, 1, 'tiny'), h('span', { class: 'small' }, LINES[l].name));
+          tip(el, () => `${LINES[l].name}崇拜了你，回到真新镇可以在「我的家」让它跟着你`);
+          return el;
+        })),
+      ) : null,
       achs ?? h('div', { class: 'muted small' }, '这一局没有达成新成就'),
     );
     const boardEl = board.length > 1 ? h('table', { class: 'board' },

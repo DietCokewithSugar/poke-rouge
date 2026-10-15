@@ -1,3 +1,5 @@
+import type { PType } from './types';
+
 export interface WaveDef {
   /** 敌人权重池 */
   pool: Record<string, number>;
@@ -83,3 +85,16 @@ export const BIOMES = [
   { name: '月见山' },
   { name: '宝可梦之塔' },
 ] as const;
+
+/** 乱入的野生宝可梦：各个地区常见的属性（权重） */
+export const BIOME_TYPES: Partial<Record<PType, number>>[] = [
+  { normal: 3, flying: 3, bug: 1.5, grass: 2, poison: 1, water: 1.5, fire: 1.5, electric: 1, fighting: 1, ground: 1, fairy: 1 },
+  { bug: 3, grass: 3, poison: 2, electric: 1.5, normal: 1, flying: 1, water: 1.5, psychic: 1, fairy: 1 },
+  { rock: 3, ground: 3, fighting: 2, fairy: 2, poison: 1.5, steel: 1.5, ice: 1.5, water: 1, fire: 1, dragon: 0.6 },
+  { ghost: 3, psychic: 3, poison: 2, dark: 1, fire: 1.5, ice: 1.5, normal: 1, dragon: 1, electric: 1, water: 1 },
+];
+
+/** 每波乱入几只野生宝可梦（首领波没有） */
+export function intruderCount(wave: number): number {
+  return WAVES[wave - 1]?.boss ? 0 : 1 + Math.floor(wave / 6);
+}

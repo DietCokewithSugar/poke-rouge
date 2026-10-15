@@ -16,6 +16,7 @@ export interface PvpSeat {
   team: number;
   build: SavedBuild;
   meta: Record<string, number>;
+  trainer: string;
   conn: Conn | null;
   bot: boolean;
   rating: number;
@@ -43,7 +44,7 @@ export class PvpRoom {
   constructor(readonly code: string, readonly mode: PvpMode, seats: PvpSeat[], seed = (Math.random() * 2 ** 31) | 0) {
     this.seats = seats;
     for (const s of seats) s.sync = new PeerSync();
-    this.sim = new PvpSim(mode, seats.map((s) => ({ id: s.id, name: s.name, team: s.team, build: s.build, meta: s.meta, bot: s.bot })), seed);
+    this.sim = new PvpSim(mode, seats.map((s) => ({ id: s.id, name: s.name, team: s.team, build: s.build, meta: s.meta, trainer: s.trainer, bot: s.bot })), seed);
   }
 
   private humans() { return this.seats.filter((s) => s.conn && !s.left); }
@@ -57,13 +58,13 @@ export class PvpRoom {
   seatInfo(): PvpSeatInfo[] {
     return this.seats.map((s) => {
       const p = this.sim.players.find((q) => q.id === s.id)!;
-      return { id: s.id, name: s.name, team: s.team, bot: s.bot, rating: Math.round(s.rating), line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level };
+      return { id: s.id, name: s.name, team: s.team, bot: s.bot, rating: Math.round(s.rating), trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level };
     });
   }
 
   begin() {
     const sim = this.sim;
-    const players = sim.players.map((p) => ({ id: p.id, name: p.name, line: p.line }));
+    const players = sim.players.map((p) => ({ id: p.id, name: p.name, trainer: p.trainer, line: p.line }));
     const seats = this.seatInfo();
     for (const s of this.humans()) {
       this.send(s.conn!, { t: 'joined', code: this.code, you: s.id, solo: false });

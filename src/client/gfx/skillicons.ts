@@ -377,6 +377,13 @@ const GLYPHS: Record<string, Gen> = {
       return d < half * 0.35 && x > 4 ? 'w' : d < half * 0.7 ? 'l' : 'm';
     });
   },
+  moon(P) {
+    P.fill((x, y) => {
+      const d1 = Math.hypot(x + 0.5 - 6, y + 0.5 - 6), d2 = Math.hypot(x + 0.5 - 8.4, y + 0.5 - 4.4);
+      if (d1 > 4.9 || d2 < 4.1) return null;
+      return d1 < 2.2 ? 'w' : x + y < 9 ? 'l' : 'm';
+    });
+  },
   spikes(P) {
     for (const [cx, h] of [[2.5, 6], [6, 9.5], [9.5, 7]]) {
       P.fill((x, y) => {
@@ -403,6 +410,22 @@ const SKILL_GLYPH: Record<string, [string, string?]> = {
   dragon_breath: ['breath'], dragon_claw: ['claw'], draco_meteor: ['meteor'], air_slash: ['blade'], metal_claw: ['claw'], iron_tail: ['tail'],
   ice_beam: ['snowflake'], bite: ['fang'], dark_pulse: ['ripple'], brick_break: ['fist'], poison_powder: ['powder'], sludge_bomb: ['blob'],
   rock_slide: ['rocks'], earthquake: ['quake'],
+  headbutt: ['impact'], hyper_fang: ['fang'], pay_day: ['orb', 'gold'], sing: ['sound', 'fairy'], splash: ['drop', 'water'], tri_attack: ['star', 'hyper'],
+  body_slam: ['impact'], double_edge: ['dash'], explosion: ['blast', 'hyper'], fire_punch: ['fist'], heat_wave: ['wave'], whirlpool: ['swirl'],
+  crabhammer: ['claw'], waterfall: ['wave'], scald: ['drop'], mega_drain: ['seed', 'heal'], stun_spore: ['powder', 'electric'], giga_drain: ['leaf', 'heal'],
+  leaf_blade: ['blade'], power_whip: ['vine'], thunder_punch: ['fist'], zap_cannon: ['orb'], powder_snow: ['snowflake'], ice_shard: ['spikes'],
+  aurora_beam: ['beam'], ice_punch: ['fist'], blizzard: ['storm'], karate_chop: ['fist'], cross_chop: ['blade'], close_combat: ['nova'],
+  high_jump_kick: ['dash'], focus_blast: ['orb'], poison_sting: ['spikes'], acid: ['blob'], poison_jab: ['fist'], sludge_wave: ['wave'], gunk_shot: ['bomb'],
+  mud_slap: ['blob'], bonemerang: ['tail'], bulldoze: ['quake'], dig: ['quake'], earth_power: ['nova'], gust: ['swirl'], peck: ['dash'],
+  wing_attack: ['claw'], aerial_ace: ['blade'], drill_peck: ['spiral'], hurricane: ['storm'], brave_bird: ['dash'], hypnosis: ['spiral'],
+  bug_bite: ['fang'], struggle_bug: ['bubbles'], pin_missile: ['spikes'], signal_beam: ['beam'], x_scissor: ['claw'], bug_buzz: ['sound'], megahorn: ['impact'],
+  rock_throw: ['rocks'], rock_tomb: ['rocks'], ancient_power: ['meteor'], power_gem: ['star'], stone_edge: ['spikes'], lick: ['fang'],
+  night_shade: ['shadow'], shadow_claw: ['claw'], hex: ['eye'], shadow_force: ['shadow'], twister: ['swirl'], dragon_rage: ['breath'],
+  dragon_pulse: ['ripple'], outrage: ['blast'], dragon_dance: ['chevrons'], night_slash: ['blade'], crunch: ['fang'], steel_wing: ['blade'],
+  iron_defense: ['shield'], flash_cannon: ['beam'], meteor_mash: ['meteor'], fairy_wind: ['swirl'], disarming_voice: ['sound'], draining_kiss: ['heart'],
+  dazzling_gleam: ['nova'], play_rough: ['impact'], moonblast: ['moon'], moonlight: ['moon', 'fairy'], spike_cannon: ['spikes'], egg_bomb: ['bomb'],
+  vacuum_wave: ['ripple'], seismic_toss: ['quake'], pursuit: ['dash'], aqua_jet: ['drop'], bullet_punch: ['fist'], gyro_ball: ['orb'],
+  dragon_darts: ['dash'], flame_wheel: ['swirl'], wild_charge: ['bolt'],
 };
 
 /** 结算里的「持续伤害」「反伤等其它」 */

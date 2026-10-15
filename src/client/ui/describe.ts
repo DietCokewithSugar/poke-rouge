@@ -1,5 +1,5 @@
 import { GROUP_NAME, ITEMS } from '../../shared/items';
-import { LINES, type LineId } from '../../shared/pokemon';
+import { isNative, type LineId } from '../../shared/pokemon';
 import { CAT_NAME, SKILLS, TIER_COLOR, TIER_NAME, skillLevelCd, skillLevelDmg } from '../../shared/skills';
 import { MOD_LABEL, fmtMod, type ModKey } from '../../shared/stats';
 import { TYPE_COLOR, TYPE_NAME, type PType } from '../../shared/types';
@@ -31,7 +31,7 @@ export function skillIcon(id: string, lv = 1, small = false) {
 /** 技能卡片的内容：图标、名字与等级、属性与级别、威力与冷却、简介 */
 export function skillCardBody(id: string, lv: number, line?: LineId) {
   const s = SKILLS[id];
-  const native = line ? LINES[line].start.includes(id) || LINES[line].learnset.some((e) => e.skill === id) : true;
+  const native = line ? isNative(line, id) : true;
   return h('div', { class: 'sk-card' },
     skillIcon(id, lv),
     h('div', { class: 'sk-card-body' },
@@ -45,7 +45,7 @@ export function skillCardBody(id: string, lv: number, line?: LineId) {
 
 export function skillInfo(id: string, lv = 1, line?: LineId) {
   const s = SKILLS[id];
-  const native = line ? LINES[line].start.includes(id) || LINES[line].learnset.some((e) => e.skill === id) : true;
+  const native = line ? isNative(line, id) : true;
   return h('div', { class: 'info' },
     h('div', { class: 'info-head' }, h('b', null, s.name, lv > 1 ? ` +${lv - 1}` : ''), typeBadge(s.type), tierBadge(s.tier)),
     h('div', { class: 'muted small' }, `${CAT_NAME[s.cat]} · ${PATTERN_NAME[s.pattern]}${!native ? ' · 外来技能' : ''}`),
@@ -100,6 +100,7 @@ export const STAT_ROWS: [string, string, (v: number) => string][] = [
   ['specTaken', '特殊承伤', (v) => `${v}%`],
   ['moveSpeed', '移动速度', (v) => String(v)],
   ['enemies', '敌人数量', (v) => `${v >= 0 ? '+' : ''}${v}%`],
+  ['recruit', '崇拜几率', (v) => `${v >= 0 ? '+' : ''}${v}%`],
 ];
 
 export function statCardText(stat: ModKey, amount: number) {

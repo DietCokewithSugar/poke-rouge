@@ -6,7 +6,8 @@ import { sfx } from '../audio';
 import { FxLayer, drawPickup, drawProj, drawZone, pxCircle, pxRing } from '../gfx/fx';
 import { vis, type Trail } from '../gfx/vfx';
 import { TYPES } from '../../shared/types';
-import { Animator, dirRow, shadowSize } from '../gfx/sprites';
+import { Animator, dirRow, preload, shadowSize } from '../gfx/sprites';
+import { LINE_OF_DEX } from '../../shared/pokemon';
 import { BORDER, arenaCanvas } from '../gfx/tiles';
 import { moveVector } from '../input';
 import type { Settings } from '../save';
@@ -37,6 +38,8 @@ export interface ViewHooks {
   onBoss(name: string): void;
   onWave(n: number): void;
   onEvolve(pid: number, text: string): void;
+  /** 野生宝可梦崇拜了某位玩家 */
+  onRecruit(pid: number, dex: number, line: string): void;
 }
 
 export class GameView {
@@ -83,6 +86,8 @@ export class GameView {
   hooks: ViewHooks;
   send: (x: number, y: number, moving: boolean, dir: number) => void = () => {};
   canMove = () => true;
+  /** 自己是不是已经有这条进化线：没有的野生宝可梦头上画一颗爱心 */
+  isOwned: (line: string) => boolean = () => true;
   /** 对战：每位玩家的队伍 */
   private pvp: { teams: Map<number, number>; myTeam: number } | null = null;
 
@@ -327,6 +332,14 @@ export class GameView {
       }
       case 'txt': this.fx.text(n(1), n(2), ev[3] as string, ev[4] as string, 11, 1.1); break;
       case 'msg': this.hooks.onMessage(ev[1] as string); break;
+      case 'wild': void preload(ev[1] as number[]); break;
+      case 'recruit': {
+        const x = n(4), y = n(5);
+        for (let i = 0; i < 8; i++) this.fx.sp('heart', 'fairy', x + (Math.random() - 0.5) * 18, y - 8 - Math.random() * 10, { vy: -30 - Math.random() * 20, life: 0.9 + Math.random() * 0.4 });
+        this.fx.text(x, y - 30, n(1) === this.you ? '崇拜了你！' : '崇拜了队友！', '#ff8ad8', 13, 1.6);
+        this.hooks.onRecruit(n(1), n(2), ev[3] as string);
+        break;
+      }
       case 'boss': this.hooks.onBoss(ev[2] as string); sfx('boss'); break;
       case 'wave':
         this.biome = n(3);
@@ -491,7 +504,8 @@ export class GameView {
         vis.anim.update(dt);
         vis.flash = Math.max(-1, vis.flash - dt);
         if (e.flags & 1) continue;
-        list.push({ y, draw: () => this.drawEnemy(e, def.rank, def.dex, x, y, vis, t) });
+        const want = !!def.wild && !this.isOwned(LINE_OF_DEX[def.dex]);
+        list.push({ y, draw: () => this.drawEnemy(e, def.rank, def.dex, x, y, vis, t, want) });
       }
       for (const p of b.s.players) {
         const pa = a.players.get(p.id);
@@ -626,9 +640,15 @@ export class GameView {
     this.ctx.fillRect(Math.round(x - rx + 2), Math.round(y - 2), Math.round(rx * 2 - 4), 5);
   }
 
-  private drawEnemy(e: SnapEnemy, rank: string, dex: number, x: number, y: number, v: EnemyVis, t: number) {
+  private drawEnemy(e: SnapEnemy, rank: string, dex: number, x: number, y: number, v: EnemyVis, t: number, want = false) {
     const ctx = this.ctx;
     this.drawShadow(x, y, shadowSize(dex), v.scale);
+    if (want) {
+      // 还没有的乱入宝可梦：脚下粉色光圈，头上一颗跳动的爱心
+      ctx.globalAlpha = 0.4 + 0.2 * Math.sin(t * 5);
+      pxRing(ctx, x, y, 11, '#ff8ad8', 1, 0.45, 2);
+      ctx.globalAlpha = 1;
+    }
     if (rank !== 'minion') {
       ctx.globalAlpha = 0.35 + 0.15 * Math.sin(t * 6);
       pxRing(ctx, x, y, 10 * v.scale, rank === 'boss' ? '#f8d030' : '#f85050', 1, 0.45, 2);
@@ -648,6 +668,7 @@ export class GameView {
       ctx.fillRect(Math.round(x) - 1, Math.round(top) - 6, 2, 5);
       ctx.fillRect(Math.round(x) - 1, Math.round(top), 2, 2);
     }
+    if (want) heart(ctx, x, top - 4 + Math.round(Math.sin(t * 4) * 1.5));
     if (rank !== 'minion' || e.hp < 0.999) {
       const w = rank === 'boss' ? 0 : rank === 'elite' ? 22 : 12;
       if (w) {
@@ -730,4 +751,12 @@ export class GameView {
       }
     }
   }
+}
+
+/** 5×4 的像素爱心（带描边） */
+function heart(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  const X = Math.round(x) - 3, Y = Math.round(y) - 3;
+  const rows = ['.oo.oo.', 'oppopqo', 'opppppo', '.opppo.', '..opo..', '...o...'];
+  const col: Record<string, string> = { o: '#401030', p: '#ff6ab8', q: '#ffd0ec' };
+  rows.forEach((r, j) => { for (let i = 0; i < r.length; i++) { const c = col[r[i]]; if (c) { ctx.fillStyle = c; ctx.fillRect(X + i, Y + j, 1, 1); } } });
 }

@@ -400,6 +400,8 @@ export interface Vis {
   /** 定点打击：落下的东西 / 爆炸的样子 */
   fall?: string;
   boom?: 'fire' | 'impact' | 'bolt' | 'rings' | 'splash' | 'rocks' | 'leaves' | 'column' | 'cloud' | 'big';
+  /** 持续区域里飘着的小图 */
+  zone?: string;
 }
 
 const V: Record<string, Partial<Vis>> = {
@@ -429,6 +431,31 @@ const V: Record<string, Partial<Vis>> = {
   e_bubble: { pal: 'water', proj: 'bubble' }, e_star: { pal: 'fairy', proj: 'star', trail: 'glitter' },
   e_ring: { pal: 'normal', proj: 'ring' }, e_blast: { pal: 'electric', boom: 'impact' }, e_cloud: { pal: 'poison', boom: 'cloud' },
   e_slam: { pal: 'ground', boom: 'rocks' }, e_vanish: { pal: 'ghost', boom: 'cloud' },
+  e_fire: { pal: 'fire', proj: 'fire', trail: 'ember' }, e_ice: { pal: 'ice', proj: 'shard' }, e_leaf: { pal: 'grass', proj: 'leaf' },
+  e_mud: { pal: 'ground', proj: 'blob', trail: 'dirt' }, e_dragon: { pal: 'dragon', proj: 'orb', trail: 'spark' }, e_dark: { pal: 'dark', proj: 'crescent' },
+  // 初代 151 只补充的招式
+  headbutt: { melee: 'impact' }, hyperfang: { melee: 'jaws' }, payday: { pal: 'gold', proj: 'orb', trail: 'glitter' }, sing: { pal: 'fairy', nova: 'note' },
+  triattack: { pal: 'hyper', proj: 'star', trail: 'spark' }, bodyslam: { nova: 'impact' }, doubleedge: { melee: 'impact' }, explosion: { pal: 'hyper', nova: 'flame' },
+  firepunch: { melee: 'flames' }, heatwave: { nova: 'flame' }, whirlpool: { zone: 'bubble' }, crabhammer: { melee: 'drops' }, waterfall: { melee: 'drops' },
+  scald: { proj: 'drop', trail: 'drip' }, megadrain: { pal: 'heal', proj: 'orb', trail: 'leafy' }, stunspore: { pal: 'electric', zone: 'cloud' },
+  gigadrain: { proj: 'orb', trail: 'leafy' }, leafblade: { melee: 'claw' }, powerwhip: { melee: 'vine' }, thunderpunch: { melee: 'bolts' },
+  zapcannon: { proj: 'orb', trail: 'spark' }, powdersnow: { proj: 'shard', trail: 'glitter' }, iceshard: { proj: 'shard' }, aurorabeam: { beam: 'ring' },
+  icepunch: { melee: 'shards' }, blizzard: { nova: 'shard' }, karate: { melee: 'impact' }, crosschop: { melee: 'claw' }, closecombat: { nova: 'impact' },
+  hijump: { melee: 'streak' }, focusblast: { proj: 'orb', trail: 'spark' }, poisonsting: { proj: 'needle' }, acid: { proj: 'blob', trail: 'bubbles' },
+  poisonjab: { melee: 'streak' }, sludgewave: { nova: 'blob' }, gunkshot: { fall: 'blob', boom: 'splash' }, mudslap: { proj: 'blob', trail: 'dirt' },
+  bonemerang: { proj: 'crescent' }, bulldoze: { nova: 'rock' }, dig: { boom: 'rocks' }, earthpower: { boom: 'column' }, gust: { proj: 'wind' },
+  peck: { melee: 'streak' }, wingattack: { melee: 'claw' }, aerialace: { proj: 'crescent', trail: 'glitter' }, drillpeck: { melee: 'streak' },
+  hurricane: { zone: 'wind' }, bravebird: { melee: 'streak' }, hypnosis: { proj: 'ring' }, bugbite: { melee: 'jaws' }, strugglebug: { proj: 'ball' },
+  pinmissile: { proj: 'needle' }, signalbeam: { beam: 'ring' }, xscissor: { melee: 'claw' }, bugbuzz: { nova: 'note' }, megahorn: { melee: 'impact' },
+  rockthrow: { fall: 'rock', boom: 'rocks' }, rocktomb: { fall: 'rock', boom: 'rocks' }, ancientpower: { proj: 'rock' }, powergem: { beam: 'shard' },
+  stoneedge: { nova: 'rock' }, lick: { melee: 'jaws' }, nightshade: { proj: 'shadow', trail: 'wisp' }, shadowclaw: { melee: 'claw' },
+  hex: { zone: 'shadow' }, shadowforce: { boom: 'cloud' }, twister: { zone: 'wind' }, dragonrage: { proj: 'fire', trail: 'ember' },
+  dragonpulse: { beam: 'ring' }, outrage: { nova: 'flame' }, nightslash: { melee: 'claw' }, crunch: { melee: 'jaws' }, steelwing: { melee: 'claw' },
+  flashcannon: { beam: 'ring' }, meteormash: { melee: 'impact' }, fairywind: { proj: 'star', trail: 'glitter' }, disarm: { nova: 'heart' },
+  drainkiss: { proj: 'heart', trail: 'glitter' }, dazzle: { nova: 'star' }, playrough: { melee: 'impact' }, moonblast: { proj: 'orb', trail: 'glitter' },
+  spikecannon: { proj: 'needle' }, eggbomb: { fall: 'ball', boom: 'impact' }, vacuum: { proj: 'crescent' }, seismic: { boom: 'impact' },
+  pursuit: { proj: 'crescent', trail: 'wisp' }, aquajet: { proj: 'drop', trail: 'drip' }, bulletpunch: { proj: 'orb' }, gyroball: { proj: 'orb', trail: 'spark' },
+  dragondarts: { proj: 'arrow' }, flamewheel: { proj: 'fire', trail: 'ember' }, wildcharge: { proj: 'orb', trail: 'spark' },
 };
 
 const FX_TYPE = new Map<string, string>();

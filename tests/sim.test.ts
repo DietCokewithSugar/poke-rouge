@@ -30,7 +30,7 @@ test('数据引用完整', () => {
     const L = LINES[id];
     for (const s of L.start) assert.ok(SKILLS[s], `${id} 初始技能 ${s}`);
     for (const e of L.learnset) assert.ok(SKILLS[e.skill], `${id} 技能表 ${e.skill}`);
-    if (L.evoItem) assert.ok(ITEMS[L.evoItem]);
+    for (const st of Object.keys(L.stones ?? {})) assert.ok(ITEMS[st], `${id} 进化石 ${st}`);
   }
   for (const w of WAVES) {
     for (const e of Object.keys(w.pool)) assert.ok(ENEMIES[e], `敌人 ${e}`);
@@ -108,7 +108,7 @@ test('局外成长与成就', () => {
   assert.equal(b.mods.rerolls, 2, '超出上限会被截断');
   const sim = new GameSim([{ id: 1, name: 'a', line: 'charmander', meta: { hp: 10 } }], 1);
   assert.ok(sim.players[0].d.maxHp >= 30 + 30);
-  const pika = ACHIEVEMENTS.find((a) => a.unlocks === 'pikachu')!;
+  const pika = ACHIEVEMENTS.find((a) => a.unlocks?.includes('pikachu'))!;
   assert.ok(pika.check({ line: 'charmander', wavesCleared: 4 } as never, {} as never));
 });
 

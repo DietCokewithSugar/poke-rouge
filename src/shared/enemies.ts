@@ -1,3 +1,4 @@
+import { DEX, type DexEntry } from './dex';
 import type { PType } from './types';
 
 export type EnemyAI =
@@ -46,6 +47,8 @@ export interface EnemyDef {
   knockResist?: number;
   scale?: number;
   flying?: boolean;
+  /** 乱入的野生宝可梦（按图鉴生成，更容易崇拜你） */
+  wild?: boolean;
 }
 
 const E = (d: EnemyDef) => d;
@@ -119,6 +122,35 @@ const LIST: EnemyDef[] = [
   E({ id: 'mew', dex: 151, name: '梦幻', types: ['psychic'], hp: 1900, dmg: 16, speed: 60, r: 14, ai: 'boss_mew', rank: 'boss', candy: 150, knockResist: 1, scale: 2, flying: true,
     shot: { power: 11, speed: 110, cd: 2, range: 400, size: 5, fx: 'e_psy' } }),
 ];
+
+/** 远程攻击的野生宝可梦按属性选弹体外观 */
+const SHOT_FX: Record<PType, string> = {
+  normal: 'e_ring', fire: 'e_fire', water: 'e_bubble', grass: 'e_leaf', electric: 'e_shock', ice: 'e_ice',
+  fighting: 'e_ring', poison: 'e_acid', ground: 'e_mud', flying: 'e_gust', psychic: 'e_psy', bug: 'e_spore',
+  rock: 'e_rock', ghost: 'e_shadow', dragon: 'e_dragon', dark: 'e_dark', steel: 'e_shock', fairy: 'e_star',
+};
+
+const FLOATING = new Set([12, 15, 41, 42, 49, 81, 82, 92, 93, 94, 109, 110, 120, 121, 142, 144, 145, 146, 149, 150, 151]);
+
+/** 由种族值生成乱入的野生宝可梦：比同一波的普通敌人更耐打，击败后更容易崇拜你 */
+function wildOf(d: DexEntry): EnemyDef {
+  const hp = Math.round(14 + d.hp * 0.25 + d.def * 0.08 + d.spd * 0.06);
+  const dmg = Math.round((3 + d.atk * 0.06) * 10) / 10;
+  const speed = Math.round(30 + Math.min(150, d.spe) * 0.32);
+  const r = Math.round(7 + Math.min(4, d.bst / 150));
+  const flying = FLOATING.has(d.dex) || d.types.includes('flying');
+  const base = { id: `w${d.dex}`, dex: d.dex, name: d.name, types: d.types, hp, dmg, speed, r, rank: 'minion' as Rank, candy: 4, flying, wild: true, knockResist: Math.min(0.8, d.def / 200) };
+  if (d.spa > d.atk * 1.15) {
+    const count = d.spa >= 100 ? 3 : 1;
+    return { ...base, ai: 'shooter', shot: { power: Math.round(3 + d.spa * 0.05), speed: 110 + Math.min(60, d.spe * 0.4), cd: 2.4, range: 165, count, spread: count > 1 ? 0.5 : undefined, fx: SHOT_FX[d.types[0]] } };
+  }
+  if (d.spe >= 95) return { ...base, ai: 'charge' };
+  if (d.hp + d.def >= 190) return { ...base, ai: 'tank', speed: Math.round(speed * 0.75), knockResist: 0.7 };
+  if (d.spe >= 75) return { ...base, ai: 'swarm' };
+  return { ...base, ai: 'chase' };
+}
+
+for (let dex = 1; dex <= 151; dex++) LIST.push(wildOf(DEX[dex]));
 
 export const ENEMIES: Record<string, EnemyDef> = Object.fromEntries(LIST.map((e) => [e.id, e]));
 export const ENEMY_IDS = LIST.map((e) => e.id);

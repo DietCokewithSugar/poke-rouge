@@ -1,8 +1,9 @@
 import { ITEMS, ITEM_IDS, type ItemDef } from '../items';
 import { metaBonus } from '../meta';
-import { LINES, awakenings, formOf, maxStageByLevel, type LineId } from '../pokemon';
+import { LINES, awakenings, formOf, isFinal, isNative, maxStageByLevel, type LineId } from '../pokemon';
 import { SKILLS, SKILL_IDS, SKILL_MAX_LV } from '../skills';
 import { addMods, addTypeMods, derive, emptyMods, type Mods, type TypeMods } from '../stats';
+import { trainerOf } from '../trainers';
 import { priceMult } from '../waves';
 import type { SavedBuild } from '../pvp/build';
 import type { LevelCard, ShopOffer, SimPlayer, UndoBuy } from './entities';
@@ -14,22 +15,26 @@ export function xpToNext(level: number): number {
   return (level + 3) * (level + 3);
 }
 
-export function createPlayer(sim: GameSim, id: number, name: string, line: LineId, meta: Record<string, number>): SimPlayer {
+export function createPlayer(sim: GameSim, id: number, name: string, line: LineId, meta: Record<string, number>, trainer = '', owned: Iterable<string> = []): SimPlayer {
   const mb = metaBonus(meta);
   const L = LINES[line];
+  const T = trainerOf(trainer);
+  const metaMods: Partial<Mods> = { ...mb.mods };
+  for (const [k, v] of Object.entries(T.mods)) metaMods[k as keyof Mods] = (metaMods[k as keyof Mods] ?? 0) + (v ?? 0);
   const p: SimPlayer = {
-    id, name, team: 0, bot: false, line, stage: 0, level: 1, xp: 0, money: 30 + mb.startMoney,
+    id, name, team: 0, bot: false, trainer: T.id, owned: new Set(owned), line, stage: 0, level: 1, xp: 0, money: 30 + mb.startMoney,
     x: sim.w / 2, y: sim.h / 2, dir: 0, moving: false,
     hp: 1, alive: true, down: false, downT: 0, revive: 0,
     skills: L.start.map((id, i) => ({ id, lv: 1, cd: 0.5 + i * 0.2 })),
     items: {},
     levelMods: emptyMods(),
-    metaMods: mb.mods,
+    metaMods,
+    trainerTypeMods: { ...(T.typeMods ?? {}) },
     typeMods: {},
     d: derive(formOf(line, 0).base, emptyMods()),
     slots: formOf(line, 0).slots,
     invuln: 1.5, shield: 0, shieldT: 0, buffT: 0, buff: { haste: 0, spe: 0 },
-    slowT: 0, slowAmt: 0, regenAcc: 0, lsWindow: 0, lsCount: 0, sashUsed: false,
+    slowT: 0, slowAmt: 0, regenAcc: 0, lsWindow: 0, lsCount: 0, sashUsed: false, sturdyUsed: false,
     levelQueue: [], cards: null, cardRerolls: 0, crates: [], evoPrompt: false,
     shop: { offers: [], locked: [false, false, false, false], rerolls: 0, freeRerolls: 0 },
     undo: null,
@@ -37,7 +42,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     stats: {
       kills: 0, damage: 0, superEff: 0, moneyEarned: 0, revives: 0, evolved: false, skillsFull: false, foreignSkill: false, bossKills: [], maxItems: 0,
       killsBy: {}, rankKills: { minion: 0, elite: 0, boss: 0 }, skillDmg: {}, taken: 0, healed: 0, crits: 0, dodges: 0, moneySpent: 0,
-      forms: [formOf(line, 0).dex], waves: [], mark: { kills: 0, damage: 0, taken: 0 }, kos: 0, deaths: 0,
+      forms: [formOf(line, 0).dex], waves: [], mark: { kills: 0, damage: 0, taken: 0 }, kos: 0, deaths: 0, recruits: [],
     },
   };
   recompute(p);
@@ -46,8 +51,8 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
 }
 
 /** 按背包里保存的构筑创建玩家（对战用）。大木研究所的强化照常生效。 */
-export function createPlayerFromBuild(sim: GameSim, id: number, name: string, b: SavedBuild, meta: Record<string, number>): SimPlayer {
-  const p = createPlayer(sim, id, name, b.line, meta);
+export function createPlayerFromBuild(sim: GameSim, id: number, name: string, b: SavedBuild, meta: Record<string, number>, trainer = ''): SimPlayer {
+  const p = createPlayer(sim, id, name, b.line, meta, trainer);
   p.stage = b.stage;
   p.level = b.level;
   p.items = Object.fromEntries(b.items.filter(([it, n]) => ITEMS[it] && n > 0));
@@ -64,10 +69,11 @@ export function recompute(p: SimPlayer) {
   const L = LINES[p.line];
   const form = formOf(p.line, p.stage);
   const m: Mods = emptyMods();
-  if (!(p.line === 'pikachu' && p.stage > 0)) addMods(m, L.mods);
+  if (!(L.flags.modsStage0Only && p.stage > 0)) addMods(m, L.mods);
   addMods(m, p.metaMods);
   addMods(m, p.levelMods);
-  const tm: TypeMods = {};
+  const tm: TypeMods = { ...p.trainerTypeMods };
+  const final = isFinal(p.line, p.stage);
   let itemCount = 0;
   for (const id in p.items) {
     const n = p.items[id];
@@ -76,8 +82,8 @@ export function recompute(p: SimPlayer) {
     itemCount += n;
     if (it.mods) addMods(m, it.mods, n);
     addTypeMods(tm, it.typeMods, n);
-    if (it.special === 'eviolite' && p.stage < L.forms.length - 1) { m.defPct += 40; m.spdPct += 40; }
-    if (it.special === 'everstone' && p.stage < L.forms.length - 1) { m.dmg += 10; m.xp += 15; }
+    if (it.special === 'eviolite' && !final) { m.defPct += 40; m.spdPct += 40; }
+    if (it.special === 'everstone' && !final) { m.dmg += 10; m.xp += 15; }
     if (it.special === 'light_ball' && p.line === 'pikachu' && p.stage === 0) { m.atkPct += 20; m.spaPct += 20; }
   }
   const aw = awakenings(p.line, p.level);
@@ -91,7 +97,7 @@ export function recompute(p: SimPlayer) {
   const prevMax = p.d.maxHp;
   p.d = derive(form.base, m);
   p.typeMods = tm;
-  p.slots = Math.max(1, form.slots + m.slots + (p.line === 'mewtwo' && aw >= 2 ? 1 : 0));
+  p.slots = Math.max(1, form.slots + m.slots + (L.awakenSlot && aw >= L.awakenSlot ? 1 : 0));
   if (p.d.maxHp > prevMax && p.alive && !p.down) p.hp = Math.min(p.d.maxHp, p.hp + (p.d.maxHp - prevMax));
   p.hp = Math.min(p.hp, p.d.maxHp);
   p.stats.maxItems = Math.max(p.stats.maxItems, itemCount);
@@ -118,7 +124,8 @@ export function levelUp(sim: GameSim, p: SimPlayer) {
   const awBefore = awakenings(p.line, p.level - 1);
   recompute(p);
   if (awakenings(p.line, p.level) > awBefore) {
-    sim.emit(['evo', p.id, formOf(p.line, p.stage).dex, '基因觉醒']);
+    const f = formOf(p.line, p.stage);
+    sim.emit(['evo', p.id, f.dex, p.line === 'mewtwo' ? '基因觉醒' : `${f.name}觉醒了！`]);
   }
   // 和原作一样，进化在战斗结束后发生，并且可以按 B 取消
   if (!couldEvolve && canEvolve(p)) {
@@ -147,11 +154,12 @@ export function chooseEvolution(sim: GameSim, p: SimPlayer, yes: boolean): strin
   return null;
 }
 
-export function evolve(sim: GameSim, p: SimPlayer) {
+/** 进化：按等级进化到下一阶段，或用进化石进化到指定形态（伊布） */
+export function evolve(sim: GameSim, p: SimPlayer, to = p.stage + 1) {
   const L = LINES[p.line];
-  if (p.stage >= L.forms.length - 1) return;
+  if (isFinal(p.line, p.stage) || to >= L.forms.length || to <= p.stage) return;
   const before = formOf(p.line, p.stage).name;
-  p.stage++;
+  p.stage = to;
   p.stats.evolved = true;
   const f = formOf(p.line, p.stage);
   p.stats.forms.push(f.dex);
@@ -261,8 +269,7 @@ export function learnSkill(p: SimPlayer, id: string, slot?: number): string | nu
     owned.lv++;
     return null;
   }
-  const L = LINES[p.line];
-  const native = L.start.includes(id) || L.learnset.some((e) => e.skill === id);
+  const native = isNative(p.line, id);
   if (p.skills.length < p.slots) {
     p.skills.push({ id, lv: 1, cd: 0.3 });
   } else {
@@ -277,10 +284,10 @@ export function learnSkill(p: SimPlayer, id: string, slot?: number): string | nu
 // ---------------------------------------------------------------- 商店
 
 function itemAllowed(p: SimPlayer, it: ItemDef): boolean {
-  if (it.only && it.only !== p.line) return false;
+  if (it.only && !it.only.includes(p.line)) return false;
   if (it.max && (p.items[it.id] ?? 0) >= it.max) return false;
-  const finalForm = p.stage >= LINES[p.line].forms.length - 1;
-  if (it.special === 'evo_stone' && (p.stage > 0 || p.items.everstone)) return false;
+  const finalForm = isFinal(p.line, p.stage);
+  if (it.special === 'evo_stone' && (p.stage > 0 || p.items.everstone || LINES[p.line].stones?.[it.id] === undefined)) return false;
   if ((it.special === 'eviolite' || it.special === 'everstone') && finalForm) return false;
   if (it.special === 'light_ball' && p.stage > 0) return false;
   return true;
@@ -292,14 +299,18 @@ function rollOffer(sim: GameSim, p: SimPlayer): ShopOffer {
   const form = formOf(p.line, p.stage);
   if (sim.rng.chance(0.38)) {
     const weights: Record<string, number> = {};
+    const L = LINES[p.line];
     for (const id of SKILL_IDS) {
       const s = SKILLS[id];
       if (s.tier !== tier) continue;
       const owned = p.skills.find((o) => o.id === id);
       if (owned && owned.lv >= SKILL_MAX_LV) continue;
+      // 技能种类很多，本系和自己技能表里的招式要明显更容易刷到
       let w = 1;
-      if (form.types.includes(s.type)) w += 2.5;
-      if (owned) w += 2;
+      if (form.types.includes(s.type)) w += 4;
+      else if (s.type === L.bonusType) w += 2;
+      if (L.learnset.some((e) => e.skill === id)) w += 2;
+      if (owned) w += 3;
       weights[id] = w;
     }
     if (Object.keys(weights).length) {
@@ -342,10 +353,12 @@ export function rollShop(sim: GameSim, p: SimPlayer, keepLocked = true) {
     if (keepLocked && s.locked[i] && cur && offerAllowed(p, cur)) continue;
     rollSlot(sim, p, i);
   }
-  // 保证皮卡丘迟早能买到雷之石
-  if (p.line === 'pikachu' && p.stage === 0 && !p.items.everstone && sim.wave >= 5 && !s.offers.some((o) => o?.id === 'thunder_stone') && sim.rng.chance(0.25)) {
+  // 保证用进化石进化的宝可梦（皮卡丘、伊布）迟早能买到进化石
+  const stones = Object.keys(LINES[p.line].stones ?? {});
+  if (stones.length && p.stage === 0 && !p.items.everstone && sim.wave >= 4 && !s.offers.some((o) => o && stones.includes(o.id)) && sim.rng.chance(0.3)) {
     const i = s.locked.findIndex((l) => !l);
-    if (i >= 0) s.offers[i] = { kind: 'item', id: 'thunder_stone', tier: 2, price: Math.round(ITEMS.thunder_stone.price * priceMult(sim.wave)) };
+    const id = sim.rng.pick(stones);
+    if (i >= 0) s.offers[i] = { kind: 'item', id, tier: 2, price: Math.round(ITEMS[id].price * priceMult(sim.wave)) };
   }
 }
 
@@ -437,7 +450,7 @@ export function giveItem(sim: GameSim, p: SimPlayer, id: string) {
     return;
   }
   if (it.special === 'evo_stone') {
-    evolve(sim, p);
+    evolve(sim, p, LINES[p.line].stones?.[id] ?? p.stage + 1);
     return;
   }
   p.items[id] = (p.items[id] ?? 0) + 1;
