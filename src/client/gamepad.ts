@@ -66,6 +66,20 @@ function activePad(): Gamepad | null {
   return null;
 }
 
+/** 设置界面用：现在连着的手柄（名字、是不是 PS 手柄、各按键是否按下、左摇杆） */
+export function padState(): { name: string; ps: boolean; pressed: boolean[]; stick: [number, number] } | null {
+  const pad = activePad();
+  if (!pad) return null;
+  return {
+    name: pad.id.replace(/\(.*?\)/g, '').trim().slice(0, 40) || '手柄',
+    ps: /054c|playstation|dualsense|dualshock/i.test(pad.id),
+    pressed: pad.buttons.map((b) => b.pressed || b.value > 0.5),
+    stick: [pad.axes[0] ?? 0, pad.axes[1] ?? 0],
+  };
+}
+
+export const PAD_BTN = BTN;
+
 function poll(now: number) {
   requestAnimationFrame(poll);
   const pad = activePad();

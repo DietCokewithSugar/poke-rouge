@@ -130,6 +130,11 @@ function fresh(): Profile {
   };
 }
 
+/** 设置的默认值（「恢复默认设置」用） */
+export function defaultSettings(): Settings {
+  return fresh().settings;
+}
+
 /** 徽章：和研究所强化一起发给服务器（badge_<道馆> = 1） */
 export function badgeMeta(p: Profile): Record<string, number> {
   return Object.fromEntries(Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).map((id) => [badgeKey(id), 1]));

@@ -11,7 +11,8 @@ import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
 import { trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
-import { buyUpgrade, isDifficultyUnlocked, refundUpgrades, saveProfile, type Profile } from '../save';
+import { buyUpgrade, defaultSettings, isDifficultyUnlocked, refundUpgrades, saveProfile, type Profile } from '../save';
+import { PAD_BTN, padState } from '../gamepad';
 import { clear, h, tip, toast } from './dom';
 import { UI_SCALES, confirmButton, iconBtn, pager } from './layout';
 import { STAT_LABEL_6, skillIcon, skillInfo, typeBadge } from './describe';
@@ -328,13 +329,36 @@ export function achList(p: Profile, page: number, onPage: (n: number) => void) {
 
 // ---------------------------------------------------------------- 设置 / 说明
 
-type Seg<T> = [T, string];
-function segmented<T>(value: T, options: Seg<T>[], onPick: (v: T) => void) {
-  return h('div', { class: 'seg' }, options.map(([v, label]) => h('button', {
-    class: `seg-btn ${v === value ? 'on' : ''}`,
-    onclick: () => { sfx('click'); onPick(v); },
-  }, label)));
+/** 选项：值、名字，以及可选的第二行小字 */
+type Seg<T> = [T, string, string?];
+/** 单选按钮组：选中的一项前面打勾 */
+function segmented<T>(value: T, options: Seg<T>[], onPick: (v: T) => void, label = '') {
+  return h('div', { class: 'seg', role: 'radiogroup', 'aria-label': label }, options.map(([v, text, sub]) => h('button', {
+    class: `seg-btn ${v === value ? 'on' : ''} ${sub ? 'two' : ''}`, role: 'radio', 'aria-checked': v === value ? 'true' : 'false',
+    onclick: () => { if (v === value) return; sfx('click'); onPick(v); },
+  }, h('span', { class: 'seg-main' }, v === value ? uiIcon('check', 1) : null, text), sub ? h('small', null, sub) : null)));
 }
+
+/** 设置项旁边的说明图标：悬停或手柄选中时显示详细说明 */
+function infoTip(text: string) {
+  const el = h('span', { class: 'set-info', tabindex: 0, 'data-pad': '1', 'aria-label': text }, uiIcon('info', 1));
+  tip(el, () => h('div', { class: 'info small' }, text));
+  return el;
+}
+
+/** 开关：滑块 + 「开 / 关」文字 */
+function switchBtn(on: boolean, label: string, onChange: (v: boolean) => void) {
+  return h('button', {
+    class: `switch ${on ? 'on' : ''}`, role: 'switch', 'aria-checked': on ? 'true' : 'false', 'aria-label': label,
+    onclick: () => { sfx('click'); onChange(!on); },
+  }, h('span', { class: 'switch-track' }, h('span', { class: 'switch-knob' })), h('span', { class: 'switch-text' }, on ? '开' : '关'));
+}
+
+/** 手柄的按键（按下时对应的格子会亮起来） */
+const PAD_KEYS: [keyof typeof PAD_BTN, string, string, string][] = [
+  ['A', 'A', '✕', '确认'], ['B', 'B', '○', '返回'], ['X', 'X', '□', '刷新商店'], ['Y', 'Y', '△', '出发 / 自动战斗'],
+  ['LB', 'LB', 'L1', '翻页 / 切换标签'], ['LT', 'LT', 'L2', '撤销购买'], ['START', 'Start', 'Options', '暂停 / 菜单'], ['UP', '十字键', '十字键', '移动 / 选择'],
+];
 
 export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => void, onBack: () => void) {
   const s = p.settings;
@@ -345,33 +369,103 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
     onChange();
     if (rerender) render();
   };
-  const slider = (label: string, key: 'volume' | 'music', icon: string) => {
-    const inp = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: String(s[key]) }) as HTMLInputElement;
-    inp.addEventListener('input', () => set(key, Number(inp.value), false));
-    return h('label', { class: 'set-row' }, h('span', null, uiIcon(icon, 2), ` ${label}`), inp);
+  const note = (text: string) => h('div', { class: 'set-note' }, text);
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const volume = (label: string, key: 'volume' | 'music', icon: string) => {
+    const val = h('b', { class: 'set-val' }, pct(s[key]));
+    const inp = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: String(s[key]), 'aria-label': label, 'aria-valuetext': pct(s[key]) }) as HTMLInputElement;
+    inp.addEventListener('input', () => {
+      const v = Number(inp.value);
+      val.textContent = pct(v);
+      inp.setAttribute('aria-valuetext', pct(v));
+      set(key, v, false);
+    });
+    return h('label', { class: 'set-row' }, h('span', { class: 'set-label' }, uiIcon(icon, 2), label), h('div', { class: 'set-ctl' }, inp, val));
   };
-  const toggle = (label: string, key: 'damageNumbers' | 'gbFilter' | 'shake' | 'transitions', note = '') =>
-    h('div', { class: 'set-row' }, h('span', null, label, note ? h('small', { class: 'muted' }, ` ${note}`) : null), segmented(s[key], [[true, '开'], [false, '关']], (v) => set(key, v)));
+  const toggle = (label: string, key: 'damageNumbers' | 'gbFilter' | 'shake' | 'transitions', hint: string) =>
+    h('div', { class: 'set-row' }, h('div', { class: 'set-label' }, h('span', null, label), note(hint)), switchBtn(s[key], label, (v) => set(key, v)));
   const scaleIdx = Math.max(0, UI_SCALES.findIndex((v) => Math.abs(v - s.uiScale) < 0.001));
-  const scaleLabel = h('b', { class: 'set-val' }, `${Math.round(s.uiScale * 100)}%`);
-  const scale = h('input', { type: 'range', min: 0, max: UI_SCALES.length - 1, step: 1, value: String(scaleIdx) }) as HTMLInputElement;
+  const scaleVal = h('b', { class: 'set-val' }, pct(s.uiScale));
+  const scale = h('input', { type: 'range', min: 0, max: UI_SCALES.length - 1, step: 1, value: String(scaleIdx), 'aria-label': '界面缩放', 'aria-valuetext': pct(s.uiScale) }) as HTMLInputElement;
   // 拖动时只更新数字，松手后再缩放，避免界面在手指下面跳动
-  scale.addEventListener('input', () => { scaleLabel.textContent = `${Math.round(UI_SCALES[Number(scale.value)] * 100)}%`; });
+  scale.addEventListener('input', () => { scaleVal.textContent = pct(UI_SCALES[Number(scale.value)]); });
   scale.addEventListener('change', () => set('uiScale', UI_SCALES[Number(scale.value)]));
-  mount(root, h('div', { class: 'box panel-md settings' },
+  const section = (icon: string, title: string, ...rows: Node[]) => h('section', { class: 'set-section' }, h('h3', null, uiIcon(icon, 2), title), ...rows);
+
+  // 手柄：连接状态和按键测试，每帧读一次（离开设置界面就停）
+  const padStatus = h('div', { class: 'pad-status' });
+  const keys = PAD_KEYS.map(([k, xbox, ps, what]) => {
+    const glyph = h('b', { class: `pad-glyph k-${k.toLowerCase()}` }, xbox);
+    const el = h('div', { class: 'pad-key' }, glyph, h('span', null, what));
+    return { k, el, glyph, xbox, ps };
+  });
+  let lastPad: string | null = null;
+  const poll = () => {
+    if (!padStatus.isConnected) return;
+    requestAnimationFrame(poll);
+    const pad = padState();
+    const sig = pad ? `${pad.name}|${pad.ps}` : '';
+    if (sig !== lastPad) {
+      lastPad = sig;
+      clear(padStatus);
+      padStatus.className = `pad-status ${pad ? 'on' : ''}`;
+      padStatus.append(h('i', { class: 'pad-dot' }), pad
+        ? h('span', null, h('b', null, '手柄已连接'), ` · ${pad.name}`)
+        : h('span', null, h('b', null, '手柄未连接'), ' · 插上或用蓝牙连上手柄后按任意键'));
+      for (const x of keys) x.glyph.textContent = pad?.ps ? x.ps : x.xbox;
+    }
+    for (const x of keys) {
+      const i = PAD_BTN[x.k];
+      const down = !!pad && (x.k === 'UP'
+        ? [PAD_BTN.UP, PAD_BTN.DOWN, PAD_BTN.LEFT, PAD_BTN.RIGHT].some((b) => pad.pressed[b]) || Math.hypot(pad.stick[0], pad.stick[1]) > 0.5
+        : x.k === 'LB' ? pad.pressed[i] || pad.pressed[PAD_BTN.RB] : pad.pressed[i]);
+      x.el.classList.toggle('on', down);
+    }
+  };
+
+  mount(root, h('div', { class: 'box panel settings' },
     h('div', { class: 'panel-head' }, h('div', { class: 'row' }, uiIcon('gear', 3), h('h2', null, '设置')), iconBtn('back', '返回', onBack, { attrs: { 'data-back': '1' }, cls: 'ghost small', text: '返回' })),
-    h('div', { class: 'set-list' },
-      slider('音效音量', 'volume', 'sound'),
-      slider('音乐音量', 'music', 'sound'),
-      h('div', { class: 'set-row' }, h('span', null, '界面大小', h('small', { class: 'muted' }, ' 100% 时界面占画面的 90%')), h('div', { class: 'row' }, scale, scaleLabel)),
-      h('div', { class: 'set-row' }, h('span', null, '帧率', h('small', { class: 'muted' }, ' 卡顿时选 30；120 需要高刷新率屏幕')), segmented<Profile['settings']['fps']>(s.fps, [[30, '30 帧'], [60, '60 帧'], [120, '120 帧']], (v) => set('fps', v))),
-      h('div', { class: 'set-row' }, h('span', null, '画质', h('small', { class: 'muted' }, ' 流畅：高分屏上按一半分辨率渲染')), segmented<Profile['settings']['quality']>(s.quality, [['high', '高清'], ['smooth', '流畅']], (v) => set('quality', v))),
-      toggle('过场动画', 'transitions', '切换界面、对战开场的动画'),
-      toggle('显示伤害数字', 'damageNumbers'),
-      toggle('屏幕震动', 'shake'),
-      toggle('初代 GB 绿屏滤镜', 'gbFilter'),
+    h('div', { class: 'set-grid' },
+      h('div', { class: 'set-col' },
+        section('sound', '声音',
+          volume('音效音量', 'volume', 'sound'),
+          volume('音乐音量', 'music', 'music'),
+        ),
+        section('star', '游戏效果',
+          toggle('过场动画', 'transitions', '切换界面、出发冒险、对战开场时的动画'),
+          toggle('伤害数字', 'damageNumbers', '战斗中在敌人头上显示伤害'),
+          toggle('屏幕震动', 'shake', '爆炸和受伤时画面晃动'),
+          toggle('GB 绿屏滤镜', 'gbFilter', '把画面变成初代 Game Boy 的绿色'),
+        ),
+      ),
+      h('div', { class: 'set-col' },
+        section('full', '画面与性能',
+          h('div', { class: 'set-row' },
+            h('div', { class: 'set-label' }, h('span', null, '界面缩放', infoTip('100% 时最大的界面占满屏幕的九成。电脑上默认 90%，手机上默认 100%。')), note('数值越大，界面越大')),
+            h('div', { class: 'set-ctl' }, scale, scaleVal)),
+          h('div', { class: 'set-row' },
+            h('div', { class: 'set-label' }, h('span', null, '帧率', infoTip('120 帧适合 120Hz 以上的高刷新率屏幕，普通屏幕选了也只显示 60 帧；电脑性能不够时画面会掉帧，这时推荐 60 帧，还卡就选 30 帧。')), note('一般选 60；卡顿时选 30')),
+            segmented<Profile['settings']['fps']>(s.fps, [[30, '30 帧'], [60, '60 帧'], [120, '120 帧']], (v) => set('fps', v), '帧率')),
+          h('div', { class: 'set-row' },
+            h('div', { class: 'set-label' }, h('span', null, '画质', infoTip('高清按屏幕的原生分辨率渲染；流畅在高分屏上按一半的分辨率渲染，像素减少到四分之一，显卡负担更小、更省电。')), note('流畅更省电、更不容易卡')),
+            segmented<Profile['settings']['quality']>(s.quality, [['high', '高清', '原生分辨率'], ['smooth', '流畅', '降低分辨率']], (v) => set('quality', v), '画质')),
+        ),
+        section('pad', '手柄', padStatus, h('div', { class: 'pad-keys' }, keys.map((x) => x.el)), note('按一下手柄上的键，对应的格子会亮起来')),
+      ),
+    ),
+    h('div', { class: 'panel-foot' },
+      confirmButton('恢复默认设置', '再点一次确认恢复', 'btn small ghost', () => {
+        p.settings = defaultSettings();
+        saveProfile(p);
+        onChange();
+        sfx('click');
+        toast('已恢复默认设置');
+        render();
+      }, {}, 'undo'),
+      h('span', { class: 'set-note' }, '设置会自动保存'),
     ),
   ), 'settings');
+  poll();
 }
 
 const CREDIT_TABS: [string, () => Node][] = [
