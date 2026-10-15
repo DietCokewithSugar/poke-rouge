@@ -35,7 +35,8 @@ interface Flyer { x: number; y: number; kind: number; value: number; pid: number
 
 export interface ViewHooks {
   onMessage(text: string): void;
-  onBoss(name: string): void;
+  /** 首领出现了（shinyDex：闪光首领的图鉴编号） */
+  onBoss(name: string, shinyDex?: number): void;
   onWave(n: number): void;
   onEvolve(pid: number, text: string): void;
   /** 野生宝可梦崇拜了某位玩家（shiny：闪光宝可梦） */
@@ -364,7 +365,12 @@ export class GameView {
         this.hooks.onRecruit(n(1), n(2), ev[3] as string, shiny);
         break;
       }
-      case 'boss': this.hooks.onBoss(ev[2] as string); sfx('boss'); break;
+      case 'boss': {
+        const sh = this.shinyEnemies.get(n(1));
+        this.hooks.onBoss(ev[2] as string, sh ? ENEMIES[ENEMY_IDS[sh.kind]]?.dex : undefined);
+        sfx('boss');
+        break;
+      }
       case 'wave':
         this.biome = n(3);
         this.local.synced = false;

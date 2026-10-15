@@ -6,7 +6,7 @@ import { LINES, LINE_IDS, LINE_OF_DEX, formOf, isFinal, type LineId } from '../p
 import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
-import { SHINY_STAT, shinyRate } from '../shiny';
+import { SHINY_STAT, shinyName, shinyRate } from '../shiny';
 import { SKILLS, skillLevelCd } from '../skills';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
@@ -273,6 +273,10 @@ export class GameSim {
       credit.stats.killsBy[e.def.id] = (credit.stats.killsBy[e.def.id] ?? 0) + 1;
       credit.stats.rankKills[e.def.rank]++;
       if (!silent) this.rollRecruit(e, credit);
+    } else if (e.shiny && !silent) {
+      // 闪光宝可梦被打倒却找不到是谁打的：交给离它最近的训练家，保证一定有人得到
+      const near = this.nearestPlayer(e.x, e.y) ?? this.players[0];
+      if (near) this.rollRecruit(e, near);
     }
     if (e.def.rank === 'boss') {
       this.bossDown = true;
@@ -309,8 +313,7 @@ export class GameSim {
   /**
    * 崇拜（参考宝可梦不可思议的迷宫的"想成为伙伴"）：击败野生宝可梦时，有几率让它崇拜你，
    * 解锁这一整条进化线。击败者已经有了的话，让给附近还没有的队友。
-   * 闪光宝可梦一定会崇拜还没有这只闪光宝可梦的训练家（首领和不会崇拜的宝可梦，要先拥有普通的才行）；
-   * 大家都有了，就和普通的野生宝可梦一样判定。
+   * 打倒闪光宝可梦 100% 得到它（首领和平时不会崇拜的宝可梦也一样）；大家都有了，就和普通的野生宝可梦一样判定。
    */
   private rollRecruit(e: Enemy, killer: SimPlayer) {
     const line = LINE_OF_DEX[e.def.dex];
@@ -318,7 +321,7 @@ export class GameSim {
     if (!L) return;
     const open = L.unlock.recruit > 0 && e.def.rank !== 'boss';
     if (e.shiny) {
-      const q = this.recruitTarget(e, killer, (p) => !p.ownedShiny.has(line) && (open || p.owned.has(line)));
+      const q = this.recruitTarget(e, killer, (p) => !p.ownedShiny.has(line));
       if (q) {
         q.ownedShiny.add(line);
         q.stats.shinyRecruits.push(line);
@@ -1080,7 +1083,7 @@ export class GameSim {
       dur: this.waveDur,
       biome: WAVES[Math.max(0, this.wave - 1)].biome,
       interLeft: this.players.length > 1 ? Math.max(0, Math.round(INTERMISSION_TIMEOUT - this.interT)) : -1,
-      boss: this.boss && !this.boss.dead ? { name: this.boss.def.name, hp: Math.max(0, Math.round(this.boss.hp)), max: this.boss.maxHp } : null,
+      boss: this.boss && !this.boss.dead ? { name: shinyName(this.boss.def.name, this.boss.shiny), hp: Math.max(0, Math.round(this.boss.hp)), max: this.boss.maxHp } : null,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, shiny: p.shiny || undefined, level: p.level,
         hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills, bot: p.bot || undefined, away: p.away || undefined,

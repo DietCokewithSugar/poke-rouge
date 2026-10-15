@@ -1049,7 +1049,8 @@ class App {
     if (shinyDex.length) void preload(shinyDex, true);
     this.view = new GameView(this.canvas, w, h, this.you, this.profile.settings, {
       onMessage: (text) => this.hud?.message(text),
-      onBoss: (name) => this.hud?.announce(`野生的${name}出现了！`),
+      // 闪光首领：闪光的提示已经先发过了，大字也写明是闪光的
+      onBoss: (name, shinyDex) => this.hud?.announce(shinyDex ? `野生的闪光${name}出现了！` : `野生的${name}出现了！`),
       onWave: (n) => {
         const b = this.view?.biome ?? 0;
         this.hud?.announce(`第 ${n} 波`, BIOMES[b]?.name ?? '');

@@ -71,7 +71,8 @@ export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
         const b = e.def.blast!;
         if (ai.state === 0) {
           mx = ux; my = uy;
-          if (d < b.radius * 0.6) {
+          // 闪光的不会自爆：打倒它就一定能得到，不会被自己炸没
+          if (d < b.radius * 0.6 && !e.shiny) {
             ai.state = 1; ai.t = 0.85;
             sim.emit(['warn', 0, r1(e.x), r1(e.y), b.radius, 850, 0, 0]);
           }

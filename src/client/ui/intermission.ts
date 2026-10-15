@@ -17,7 +17,7 @@ import { iconBtn, pager } from './layout';
 
 const INV_PER_PAGE = 26;
 const STATS_PER_PAGE = 12;
-import { STAT_ROWS, itemInfo, itemLines, skillCardBody, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
+import { STAT_ROWS, itemInfo, itemLines, shinyStatTip, skillCardBody, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
 import { forgetRefund } from '../../shared/sim/player';
 
 const STAT_ICON: Record<string, string> = {
@@ -435,13 +435,17 @@ export class Intermission {
     for (let i = me.skills.length; i < rows; i++) sk.appendChild(h('div', { class: `side-skill empty ${i >= me.slots ? 'locked' : ''}` }, i < me.slots ? '— 空 —' : ''));
     this.side.appendChild(sk);
 
-    const entries: [string, string][] = [];
+    const entries: [string, string, ReturnType<typeof shinyStatTip>?][] = [];
     for (const [k, label, fmt] of STAT_ROWS) {
       const v = me.stats[k];
-      if (v !== undefined) entries.push([label, fmt(v)]);
+      if (v !== undefined) entries.push([label, fmt(v), k === 'shiny' ? shinyStatTip(v) : undefined]);
     }
     for (const [t, v] of Object.entries(me.typeMods)) if (v) entries.push([`${TYPE_NAME[t as PType]}系`, `+${v}%`]);
-    const pg = pager(entries, STATS_PER_PAGE, this.statPage, ([label, v]) => h('div', { class: 'stat' }, h('span', { class: 'muted' }, label), h('b', null, v)), {
+    const pg = pager(entries, STATS_PER_PAGE, this.statPage, ([label, v, info]) => {
+      const el = h('div', { class: 'stat' }, h('span', { class: 'muted' }, label), h('b', { class: info?.max ? 'gold' : '' }, v));
+      if (info) tip(el, () => h('div', { class: 'info small' }, info.text));
+      return el;
+    }, {
       cls: 'stat-grid',
       keys: null,
       onPage: (n) => { this.statPage = n; this.render(); },
