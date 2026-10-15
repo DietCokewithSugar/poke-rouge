@@ -5,15 +5,26 @@ export type AnimName = 'Idle' | 'Walk' | 'Attack' | 'Shoot' | 'Hurt' | 'Faint';
 interface Sheet { img: HTMLImageElement; ready: boolean; white?: HTMLCanvasElement }
 const sheets = new Map<string, Sheet>();
 
-function sheet(dex: number, anim: string): Sheet {
-  const k = `${dex}/${anim}`;
+/** 这只宝可梦有没有闪光（异色）精灵图 */
+export function hasShiny(dex: number) {
+  return !!SPRITE_META[dex]?.sh;
+}
+
+/** 这个动画用不用闪光精灵表（闪光精灵表缺这个动画时用普通的） */
+function useShiny(dex: number, anim: string, shiny: boolean) {
+  const m = SPRITE_META[dex];
+  return shiny && !!m?.sh && !m.sm?.includes(anim);
+}
+
+function sheet(dex: number, anim: string, shiny = false): Sheet {
+  const k = `${dex}/${useShiny(dex, anim, shiny) ? 's/' : ''}${anim}`;
   let s = sheets.get(k);
   if (!s) {
     const img = new Image();
     s = { img, ready: false };
     const ref = s;
     img.onload = () => { ref.ready = true; };
-    img.src = `${import.meta.env.BASE_URL}sprites/${dex}/${anim}.png`;
+    img.src = `${import.meta.env.BASE_URL}sprites/${k}.png`;
     sheets.set(k, s);
   }
   return s;
@@ -33,12 +44,12 @@ function whiteOf(s: Sheet): HTMLCanvasElement {
   return c;
 }
 
-export function preload(dexes: number[]): Promise<void> {
+export function preload(dexes: number[], shiny = false): Promise<void> {
   const list: Sheet[] = [];
   for (const d of dexes) {
     const m = SPRITE_META[d];
     if (!m) continue;
-    for (const a of Object.keys(m.a)) list.push(sheet(d, a));
+    for (const a of Object.keys(m.a)) list.push(sheet(d, a, shiny));
   }
   return new Promise((res) => {
     const t0 = performance.now();
@@ -50,10 +61,12 @@ export function preload(dexes: number[]): Promise<void> {
   });
 }
 
-export function animMeta(dex: number, anim: string): AnimMeta | null {
+/** 帧尺寸与时长：闪光精灵表只有少数动画和普通的不一样 */
+export function animMeta(dex: number, anim: string, shiny = false): AnimMeta | null {
   const m = SPRITE_META[dex];
   if (!m) return null;
-  return m.a[anim] ?? m.a.Idle ?? m.a.Walk ?? null;
+  const name = m.a[anim] ? anim : m.a.Idle ? 'Idle' : 'Walk';
+  return (useShiny(dex, name, shiny) ? m.sa?.[name] : undefined) ?? m.a[name] ?? null;
 }
 
 export function hasAnim(dex: number, anim: string) {
@@ -73,9 +86,25 @@ export function dirRow(ang: number) {
   return ((Math.round((Math.PI / 2 - ang) / (Math.PI / 4)) % 8) + 8) % 8;
 }
 
-/** 一只宝可梦的动画播放器：循环动画（Idle/Walk）+ 一次性动画（Attack/Hurt…）。 */
+/** 闪光宝可梦头像右上角的四角星（7×7） */
+const SPARKLE = ['...k...', '..kwk..', '.kwywk.', 'kwyyywk', '.kwywk.', '..kwk..', '...k...'];
+const SPARKLE_PAL: Record<string, string> = { k: '#5a3a10', w: '#fff6b0', y: '#ffd23f' };
+
+function drawSparkle(x: CanvasRenderingContext2D, ox: number, oy: number, scale: number) {
+  SPARKLE.forEach((row, j) => {
+    for (let i = 0; i < row.length; i++) {
+      const c = SPARKLE_PAL[row[i]];
+      if (!c) continue;
+      x.fillStyle = c;
+      x.fillRect(ox + i * scale, oy + j * scale, scale, scale);
+    }
+  });
+}
+
+/** 一只宝可梦的动画播放器：循环动画（Idle/Walk）+ 一次性动画（Attack/Hurt…）。shiny 为闪光宝可梦 */
 export class Animator {
   dex: number;
+  shiny: boolean;
   base: AnimName = 'Idle';
   cur: AnimName = 'Idle';
   frame = 0;
@@ -86,11 +115,15 @@ export class Animator {
   dir = 0;
   speed = 1;
 
-  constructor(dex: number) { this.dex = dex; }
-
-  setDex(dex: number) {
-    if (dex === this.dex) return;
+  constructor(dex: number, shiny = false) {
     this.dex = dex;
+    this.shiny = shiny;
+  }
+
+  setDex(dex: number, shiny = this.shiny) {
+    if (dex === this.dex && shiny === this.shiny) return;
+    this.dex = dex;
+    this.shiny = shiny;
     this.start(this.base, false);
   }
 
@@ -118,7 +151,7 @@ export class Animator {
   }
 
   update(dt: number) {
-    const m = animMeta(this.dex, this.cur);
+    const m = animMeta(this.dex, this.cur, this.shiny);
     if (!m || this.done) return;
     this.t += dt * 60 * this.speed;
     let guard = 0;
@@ -137,21 +170,29 @@ export class Animator {
     }
   }
 
+  /** 要画的精灵表：还没加载完时先用 Idle，闪光的还没加载完时先用普通的 */
+  private pick(): { s: Sheet; meta: AnimMeta; frame: number } | null {
+    const tries: [AnimName, boolean][] = this.shiny
+      ? [[this.cur, true], ['Idle', true], [this.cur, false], ['Idle', false]]
+      : [[this.cur, false], ['Idle', false]];
+    for (const [anim, sh] of tries) {
+      const s = sheet(this.dex, anim, sh);
+      const meta = s.ready ? animMeta(this.dex, anim, sh) : null;
+      if (!meta) continue;
+      return { s, meta, frame: anim === this.cur ? Math.min(this.frame, meta.n - 1) : 0 };
+    }
+    return null;
+  }
+
   /** 以脚底 (x, y) 为锚点绘制，scale 为整数倍。 */
   draw(ctx: CanvasRenderingContext2D, x: number, y: number, scale = 1, flash = 0, alpha = 1) {
-    const m = animMeta(this.dex, this.cur);
-    let s = sheet(this.dex, this.cur);
-    let meta = m;
-    if (!s.ready) {
-      const idle = sheet(this.dex, 'Idle');
-      if (idle.ready) { s = idle; meta = animMeta(this.dex, 'Idle'); }
-    }
-    if (!meta || !s.ready) {
+    const p = this.pick();
+    if (!p) {
       ctx.fillStyle = '#6b7a94';
       ctx.fillRect(Math.round(x - 5), Math.round(y - 12), 10, 10);
       return;
     }
-    const frame = s === sheet(this.dex, this.cur) ? Math.min(this.frame, meta.n - 1) : 0;
+    const { s, meta, frame } = p;
     const row = Math.min(this.dir, meta.r - 1);
     const sx = frame * meta.w, sy = row * meta.h;
     const dx = Math.round(x - meta.ax * scale), dy = Math.round(y - meta.ay * scale);
@@ -165,26 +206,28 @@ export class Animator {
     ctx.globalAlpha = prev;
   }
 
-  /** 用于 UI 的静态画像（Idle 第 0 帧，朝下） */
-  static portrait(dex: number, scale = 2): HTMLCanvasElement {
+  /** 用于 UI 的静态画像（Idle 第 0 帧，朝下）；闪光宝可梦右上角画一颗星 */
+  static portrait(dex: number, scale = 2, shiny = false): HTMLCanvasElement {
     const c = document.createElement('canvas');
-    const m = animMeta(dex, 'Idle');
+    const sh = shiny && hasShiny(dex);
+    const m = animMeta(dex, 'Idle', sh);
     const w = m?.w ?? 32, h = m?.h ?? 32;
     c.width = w * scale;
     c.height = h * scale;
     c.style.setProperty('--pw', `${(w * scale) / 16}rem`);
     c.style.setProperty('--ph', `${(h * scale) / 16}rem`);
+    const s = sheet(dex, 'Idle', sh);
     const draw = () => {
-      const s = sheet(dex, 'Idle');
       if (!s.ready || !m) return false;
       const x = c.getContext('2d')!;
       x.imageSmoothingEnabled = false;
       x.clearRect(0, 0, c.width, c.height);
       x.drawImage(s.img, 0, 0, w, h, 0, 0, w * scale, h * scale);
+      if (shiny) drawSparkle(x, (w - SPARKLE.length - 1) * scale, scale, scale);
       return true;
     };
-    if (!draw()) sheet(dex, 'Idle').img.addEventListener('load', () => draw(), { once: true });
-    c.className = 'portrait';
+    if (!draw()) s.img.addEventListener('load', () => draw(), { once: true });
+    c.className = shiny ? 'portrait shiny' : 'portrait';
     return c;
   }
 }
