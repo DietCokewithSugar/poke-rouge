@@ -1,5 +1,5 @@
-import { ACHIEVEMENTS, META_UPGRADES, metaCost } from '../../shared/meta';
-import { LINES, LINE_IDS, type LineId } from '../../shared/pokemon';
+import { ACHIEVEMENTS, META_UPGRADES, metaCost, unlockHint } from '../../shared/meta';
+import { LINES, LINE_IDS, STONE_NAME, type LineId } from '../../shared/pokemon';
 import { DIFFICULTIES, DIFFICULTY_IDS, type DifficultyId } from '../../shared/difficulty';
 import type { LobbyPlayer, RoomInfo, ServerStats } from '../../shared/protocol';
 import { SKILLS } from '../../shared/skills';
@@ -80,7 +80,7 @@ export function lineDetail(line: LineId) {
   const L = LINES[line];
   const evo = h('div', { class: 'evo-chain' });
   L.forms.forEach((f, i) => {
-    if (i > 0) evo.appendChild(h('span', { class: 'evo-arrow' }, L.evoItem ? '雷之石 →' : `Lv${L.evoLevels[i - 1]} →`));
+    if (i > 0) evo.appendChild(h('span', { class: 'evo-arrow' }, L.stones ? `${STONE_NAME[Object.keys(L.stones).find((k) => L.stones![k] === i) ?? ''] ?? '进化石'} →` : `Lv${L.evoLevels[i - 1]} →`));
     evo.appendChild(h('div', { class: 'evo-form' }, portraitSlot(f.dex, 1, 'tiny'), h('div', { class: 'small' }, f.name)));
   });
   if (line === 'mewtwo') evo.appendChild(h('span', { class: 'muted small' }, `Lv${L.evoLevels.join(' / Lv')} 基因觉醒`));
@@ -111,7 +111,7 @@ export function pickGrid(p: Profile, selected: LineId | null, onPick: (l: LineId
   return h('div', { class: `pick-grid ${dir}` }, LINE_IDS.map((id) => {
     const L = LINES[id];
     const open = isUnlocked(p, id);
-    const el = h('button', { class: `pick ${selected === id ? 'on' : ''} ${open ? '' : 'locked'}`, onclick: () => { if (!open) { toast(L.unlockHint, 'error'); sfx('error'); return; } sfx('click'); onPick(id); } },
+    const el = h('button', { class: `pick ${selected === id ? 'on' : ''} ${open ? '' : 'locked'}`, onclick: () => { if (!open) { toast(unlockHint(id), 'error'); sfx('error'); return; } sfx('click'); onPick(id); } },
       portraitSlot(L.forms[0].dex, 2, 'pick-portrait'),
       h('div', { class: 'pick-body' },
         h('div', { class: 'pick-name' }, open ? L.name : '？？？'),
@@ -119,7 +119,7 @@ export function pickGrid(p: Profile, selected: LineId | null, onPick: (l: LineId
         h('div', { class: 'pick-note small' }, !open ? h('span', { class: 'neg' }, '未解锁') : taken.get(id) ? h('span', { class: 'muted' }, `${taken.get(id)} 也选了`) : null),
       ),
     );
-    if (!open) tip(el, () => L.unlockHint);
+    if (!open) tip(el, () => unlockHint(id));
     return el;
   }));
 }
@@ -149,7 +149,7 @@ export function difficultyPicker(p: Profile, current: DifficultyId, onPick: ((d:
 }
 
 export function selectScreen(root: HTMLElement, p: Profile, onStart: (l: LineId, d: DifficultyId) => void, onBack: () => void) {
-  let sel: LineId = isUnlocked(p, p.lastLine) ? p.lastLine : 'charmander';
+  let sel: LineId = isUnlocked(p, p.partner) ? p.partner : 'charmander';
   let diff: DifficultyId = isDifficultyUnlocked(p, p.lastDifficulty) ? p.lastDifficulty : 'easy';
   const render = () => {
     mount(root, h('div', { class: 'box panel select' },
@@ -158,7 +158,7 @@ export function selectScreen(root: HTMLElement, p: Profile, onStart: (l: LineId,
         difficultyPicker(p, diff, (d) => { diff = d; render(); }),
         h('div', { class: 'row' },
           h('button', { class: 'btn small ghost', 'data-back': '1', onclick: onBack }, '返回'),
-          h('button', { class: 'btn gold', 'data-key': 'y', onclick: () => { p.lastLine = sel; p.lastDifficulty = diff; saveProfile(p); sfx('wave'); onStart(sel, diff); } }, `就决定是你了，${LINES[sel].name}！`),
+          h('button', { class: 'btn gold', 'data-key': 'y', onclick: () => { p.partner = sel; p.lastDifficulty = diff; saveProfile(p); sfx('wave'); onStart(sel, diff); } }, `就决定是你了，${LINES[sel].name}！`),
         ),
       ),
       h('div', { class: 'select-body' },
@@ -363,7 +363,7 @@ export function achievementsScreen(root: HTMLElement, p: Profile, onBack: () => 
   const pg = pager(ACHIEVEMENTS, ACH_PER_PAGE, page, (a) => h('div', { class: `ach ${p.achievements[a.id] ? 'on' : ''}` },
     h('b', { class: 'ach-name' }, p.achievements[a.id] ? '★ ' : '☆ ', a.name),
     h('span', { class: 'small ach-desc' }, a.desc),
-    h('span', { class: 'small gold ach-reward' }, `+${a.reward} 星之沙${a.unlocks ? ` · 解锁${LINES[a.unlocks].name}` : ''}${a.unlocksDifficulty ? ` · 解锁${DIFFICULTIES[a.unlocksDifficulty].name}难度` : ''}`),
+    h('span', { class: 'small gold ach-reward' }, `+${a.reward} 星之沙${a.unlocks ? ` · 解锁${a.unlocks.map((l) => LINES[l].name).join('、')}` : ''}${a.unlocksDifficulty ? ` · 解锁${DIFFICULTIES[a.unlocksDifficulty].name}难度` : ''}`),
   ), { cls: 'ach-list', onPage: (n) => achievementsScreen(root, p, onBack, n) });
   mount(root, h('div', { class: 'box panel ach-screen' },
     h('div', { class: 'panel-head' },

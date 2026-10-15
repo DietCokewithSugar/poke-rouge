@@ -47,6 +47,8 @@ export interface SkillDef {
   buff?: { haste?: number; spe?: number; dur: number };
   /** 芳香治疗等：对附近队友也生效 */
   team?: boolean;
+  /** 聚宝功：命中时有几率捡到零钱 */
+  payday?: boolean;
   fx: string;
   desc: string;
 }
@@ -129,7 +131,141 @@ const LIST: SkillDef[] = [
   { id: 'sludge_bomb', name: '污泥炸弹', type: 'poison', cat: 'spec', tier: 3, pattern: 'strike', power: 36, cd: 1.6, range: 170, radius: 36, delay: 0.3, status: { kind: 'poison', chance: 0.4, dur: 4 }, fx: 'sludge', desc: '投掷污泥，在落点溅射并可能中毒。' },
   { id: 'rock_slide', name: '岩崩', type: 'rock', cat: 'phys', tier: 3, pattern: 'strike', power: 32, cd: 1.8, range: 170, radius: 24, delay: 0.45, strikes: 3, status: { kind: 'stun', chance: 0.2, dur: 0.5 }, fx: 'rockslide', desc: '落下 3 块巨石砸向敌人。' },
   { id: 'earthquake', name: '地震', type: 'ground', cat: 'phys', tier: 4, pattern: 'nova', power: 80, cd: 2.6, range: 100, radius: 104, fx: 'earthquake', desc: '引发地震，伤害周围所有敌人。' },
+
+  // ================= 以下为初代 151 只宝可梦补充的招式 =================
+  // ---------- 一般 ----------
+  { id: 'headbutt', name: '头锤', type: 'normal', cat: 'phys', tier: 2, pattern: 'melee', power: 22, cd: 1.0, range: 36, radius: 36, arc: deg(100), status: { kind: 'stun', chance: 0.25, dur: 0.5 }, fx: 'headbutt', desc: '用头猛撞前方，可能使敌人畏缩。' },
+  { id: 'hyper_fang', name: '必杀门牙', type: 'normal', cat: 'phys', tier: 2, pattern: 'melee', power: 25, cd: 1.0, range: 32, radius: 32, arc: deg(90), crit: 10, fx: 'hyperfang', desc: '用锋利的门牙狠狠咬下去。' },
+  { id: 'pay_day', name: '聚宝功', type: 'normal', cat: 'spec', tier: 1, pattern: 'proj', power: 8, cd: 0.9, range: 150, speed: 230, count: 2, spread: deg(18), size: 3, payday: true, fx: 'payday', desc: '扔出金币攻击，命中时有几率捡到零钱。' },
+  { id: 'sing', name: '唱歌', type: 'normal', cat: 'spec', tier: 2, pattern: 'nova', power: 3, cd: 4.0, range: 80, radius: 82, status: { kind: 'stun', chance: 0.7, dur: 1.4 }, fx: 'sing', desc: '温柔的歌声让周围的敌人睡着（短暂定身）。' },
+  { id: 'splash', name: '跃起', type: 'normal', cat: 'status', tier: 1, pattern: 'buff', power: 0, cd: 4, range: 130, buff: { spe: 25, dur: 2 }, fx: 'buff', desc: '只会跳来跳去……不过能跑得快一点。' },
+  { id: 'tri_attack', name: '三重攻击', type: 'normal', cat: 'spec', tier: 3, pattern: 'proj', power: 20, cd: 1.3, range: 165, speed: 220, count: 3, spread: deg(34), size: 5, status: { kind: 'burn', chance: 0.12, dur: 3 }, fx: 'triattack', desc: '同时发射 3 道光线，可能灼伤。' },
+  { id: 'body_slam', name: '泰山压顶', type: 'normal', cat: 'phys', tier: 3, pattern: 'nova', power: 36, cd: 1.7, range: 54, radius: 56, knock: 60, status: { kind: 'para', chance: 0.3, dur: 2 }, fx: 'bodyslam', desc: '用全身压向四周，可能麻痹敌人。' },
+  { id: 'double_edge', name: '舍身冲撞', type: 'normal', cat: 'phys', tier: 4, pattern: 'melee', power: 118, cd: 1.8, range: 52, radius: 52, arc: deg(170), recoil: 0.08, knock: 90, fx: 'doubleedge', desc: '不顾危险地猛撞，会受到少量反作用伤害。' },
+  { id: 'explosion', name: '大爆炸', type: 'normal', cat: 'phys', tier: 4, pattern: 'nova', power: 150, cd: 4.2, range: 96, radius: 100, knock: 140, recoil: 0.12, fx: 'explosion', desc: '引发剧烈的爆炸，自己也会受到一些伤害。' },
+
+  // ---------- 火 / 水 / 草 / 电（补充） ----------
+  { id: 'fire_punch', name: '火焰拳', type: 'fire', cat: 'phys', tier: 2, pattern: 'melee', power: 22, cd: 1.0, range: 36, radius: 36, arc: deg(100), status: { kind: 'burn', chance: 0.2, dur: 3 }, fx: 'firepunch', desc: '带着火焰的拳头，可能灼伤。' },
+  { id: 'heat_wave', name: '热风', type: 'fire', cat: 'spec', tier: 3, pattern: 'nova', power: 30, cd: 1.7, range: 74, radius: 76, status: { kind: 'burn', chance: 0.25, dur: 3 }, fx: 'heatwave', desc: '向四周吹出灼热的风。' },
+  { id: 'whirlpool', name: '潮旋', type: 'water', cat: 'spec', tier: 2, pattern: 'zone', power: 5, cd: 3.0, range: 165, radius: 32, duration: 3, tick: 0.5, status: { kind: 'slow', chance: 0.5, dur: 1.2, amount: 0.35 }, fx: 'whirlpool', desc: '卷起持续 3 秒的漩涡，困住并减速敌人。' },
+  { id: 'crabhammer', name: '蟹钳锤', type: 'water', cat: 'phys', tier: 3, pattern: 'melee', power: 46, cd: 1.2, range: 42, radius: 42, arc: deg(120), crit: 20, fx: 'crabhammer', desc: '用大钳子猛砸，容易击中要害。' },
+  { id: 'waterfall', name: '攀瀑', type: 'water', cat: 'phys', tier: 3, pattern: 'melee', power: 40, cd: 1.2, range: 46, radius: 46, arc: deg(150), knock: 70, status: { kind: 'stun', chance: 0.2, dur: 0.5 }, fx: 'waterfall', desc: '以逆流而上的气势冲撞前方。' },
+  { id: 'scald', name: '热水', type: 'water', cat: 'spec', tier: 3, pattern: 'proj', power: 34, cd: 1.3, range: 165, speed: 210, size: 7, pierce: 1, status: { kind: 'burn', chance: 0.3, dur: 3 }, fx: 'scald', desc: '喷出滚烫的热水，可能灼伤。' },
+  { id: 'mega_drain', name: '超级吸取', type: 'grass', cat: 'spec', tier: 2, pattern: 'proj', power: 14, cd: 1.2, range: 160, speed: 200, size: 5, homing: 4, status: { kind: 'leech', chance: 1, dur: 3 }, heal: 0.5, fx: 'megadrain', desc: '吸取敌人的养分，持续为自己回复。' },
+  { id: 'stun_spore', name: '麻痹粉', type: 'grass', cat: 'spec', tier: 2, pattern: 'zone', power: 2, cd: 3.2, range: 160, radius: 36, duration: 3, tick: 0.5, status: { kind: 'para', chance: 0.6, dur: 2 }, fx: 'stunspore', desc: '撒下麻痹粉，使范围内的敌人麻痹。' },
+  { id: 'giga_drain', name: '终极吸取', type: 'grass', cat: 'spec', tier: 3, pattern: 'proj', power: 32, cd: 1.4, range: 170, speed: 200, size: 7, homing: 4, status: { kind: 'leech', chance: 1, dur: 4 }, heal: 0.5, fx: 'gigadrain', desc: '大量吸取敌人的养分，持续为自己回复。' },
+  { id: 'leaf_blade', name: '叶刃', type: 'grass', cat: 'phys', tier: 3, pattern: 'melee', power: 44, cd: 1.1, range: 44, radius: 44, arc: deg(130), crit: 15, fx: 'leafblade', desc: '挥舞叶片之刃，容易击中要害。' },
+  { id: 'power_whip', name: '强力鞭打', type: 'grass', cat: 'phys', tier: 4, pattern: 'melee', power: 105, cd: 1.9, range: 74, radius: 74, arc: deg(80), knock: 80, fx: 'powerwhip', desc: '甩动粗壮的藤蔓，猛力抽打远处的敌人。' },
+  { id: 'thunder_punch', name: '雷电拳', type: 'electric', cat: 'phys', tier: 2, pattern: 'melee', power: 22, cd: 1.0, range: 36, radius: 36, arc: deg(100), status: { kind: 'para', chance: 0.2, dur: 2 }, fx: 'thunderpunch', desc: '带着电流的拳头，可能麻痹。' },
+  { id: 'zap_cannon', name: '电磁炮', type: 'electric', cat: 'spec', tier: 4, pattern: 'proj', power: 110, cd: 2.8, range: 190, speed: 170, size: 12, pierce: 2, status: { kind: 'para', chance: 1, dur: 2 }, fx: 'zapcannon', desc: '发射巨大的电磁炮弹，必定麻痹命中的敌人。' },
+
+  // ---------- 冰 ----------
+  { id: 'powder_snow', name: '细雪', type: 'ice', cat: 'spec', tier: 1, pattern: 'proj', power: 7, cd: 0.8, range: 150, speed: 220, count: 2, spread: deg(20), size: 3, status: { kind: 'freeze', chance: 0.08, dur: 0.8 }, fx: 'powdersnow', desc: '吹出细小的雪花，可能冻住敌人。' },
+  { id: 'ice_shard', name: '冰砾', type: 'ice', cat: 'phys', tier: 1, pattern: 'proj', power: 9, cd: 0.6, range: 150, speed: 320, size: 3, fx: 'iceshard', desc: '迅速掷出冰块，冷却很短。' },
+  { id: 'aurora_beam', name: '极光束', type: 'ice', cat: 'spec', tier: 2, pattern: 'beam', power: 20, cd: 1.2, range: 145, width: 9, status: { kind: 'slow', chance: 0.4, dur: 1.5, amount: 0.35 }, fx: 'aurorabeam', desc: '发射七彩的极光，可能减速敌人。' },
+  { id: 'ice_punch', name: '冰冻拳', type: 'ice', cat: 'phys', tier: 2, pattern: 'melee', power: 22, cd: 1.0, range: 36, radius: 36, arc: deg(100), status: { kind: 'freeze', chance: 0.12, dur: 0.8 }, fx: 'icepunch', desc: '带着寒气的拳头，可能冻住敌人。' },
+  { id: 'blizzard', name: '暴风雪', type: 'ice', cat: 'spec', tier: 4, pattern: 'nova', power: 80, cd: 2.6, range: 96, radius: 98, status: { kind: 'freeze', chance: 0.25, dur: 1 }, fx: 'blizzard', desc: '猛烈的暴风雪席卷四周，可能冻住敌人。' },
+
+  // ---------- 格斗 ----------
+  { id: 'karate_chop', name: '空手劈', type: 'fighting', cat: 'phys', tier: 1, pattern: 'melee', power: 11, cd: 0.8, range: 34, radius: 34, arc: deg(100), crit: 15, fx: 'karate', desc: '用手刀劈砍，容易击中要害。' },
+  { id: 'cross_chop', name: '十字劈', type: 'fighting', cat: 'phys', tier: 3, pattern: 'melee', power: 46, cd: 1.3, range: 42, radius: 42, arc: deg(140), crit: 20, fx: 'crosschop', desc: '双手交叉劈下，容易击中要害。' },
+  { id: 'close_combat', name: '近身战', type: 'fighting', cat: 'phys', tier: 4, pattern: 'nova', power: 95, cd: 2.0, range: 56, radius: 58, knock: 80, fx: 'closecombat', desc: '不顾防守地对周围的敌人一顿猛打。' },
+  { id: 'high_jump_kick', name: '飞膝踢', type: 'fighting', cat: 'phys', tier: 4, pattern: 'melee', power: 125, cd: 2.0, range: 56, radius: 56, arc: deg(120), recoil: 0.06, knock: 100, fx: 'hijump', desc: '跳起来用膝盖猛撞，会受到少量反作用伤害。' },
+  { id: 'focus_blast', name: '真气弹', type: 'fighting', cat: 'spec', tier: 4, pattern: 'proj', power: 115, cd: 2.6, range: 190, speed: 190, size: 12, pierce: 2, fx: 'focusblast', desc: '集中精神发射威力巨大的气弹。' },
+
+  // ---------- 毒 ----------
+  { id: 'poison_sting', name: '毒针', type: 'poison', cat: 'phys', tier: 1, pattern: 'proj', power: 8, cd: 0.75, range: 150, speed: 300, size: 3, status: { kind: 'poison', chance: 0.3, dur: 3 }, fx: 'poisonsting', desc: '射出毒针，可能使敌人中毒。' },
+  { id: 'acid', name: '溶解液', type: 'poison', cat: 'spec', tier: 1, pattern: 'proj', power: 7, cd: 0.9, range: 145, speed: 190, count: 2, spread: deg(20), size: 4, status: { kind: 'poison', chance: 0.2, dur: 3 }, fx: 'acid', desc: '喷出溶解液，可能使敌人中毒。' },
+  { id: 'poison_jab', name: '毒击', type: 'poison', cat: 'phys', tier: 3, pattern: 'melee', power: 40, cd: 1.1, range: 40, radius: 40, arc: deg(100), status: { kind: 'poison', chance: 0.4, dur: 4 }, fx: 'poisonjab', desc: '用带毒的触手或手臂刺击。' },
+  { id: 'sludge_wave', name: '污泥波', type: 'poison', cat: 'spec', tier: 4, pattern: 'nova', power: 80, cd: 2.4, range: 90, radius: 92, status: { kind: 'poison', chance: 0.3, dur: 4 }, fx: 'sludgewave', desc: '掀起污泥的巨浪冲刷四周。' },
+  { id: 'gunk_shot', name: '垃圾射击', type: 'poison', cat: 'phys', tier: 4, pattern: 'strike', power: 100, cd: 2.4, range: 175, radius: 42, delay: 0.4, status: { kind: 'poison', chance: 0.4, dur: 4 }, fx: 'gunkshot', desc: '投掷大团污物，在落点炸开。' },
+
+  // ---------- 地面 ----------
+  { id: 'mud_slap', name: '掷泥', type: 'ground', cat: 'spec', tier: 1, pattern: 'proj', power: 8, cd: 0.85, range: 145, speed: 210, size: 4, status: { kind: 'slow', chance: 0.3, dur: 1.2, amount: 0.3 }, fx: 'mudslap', desc: '扔出泥巴，可能减速敌人。' },
+  { id: 'bonemerang', name: '骨头回力镖', type: 'ground', cat: 'phys', tier: 2, pattern: 'proj', power: 13, cd: 1.1, range: 165, speed: 230, count: 2, spread: deg(14), pierce: 3, size: 5, fx: 'bonemerang', desc: '扔出 2 根骨头，贯穿多个敌人。' },
+  { id: 'bulldoze', name: '重踏', type: 'ground', cat: 'phys', tier: 2, pattern: 'nova', power: 20, cd: 1.5, range: 62, radius: 64, status: { kind: 'slow', chance: 0.6, dur: 1.5, amount: 0.35 }, fx: 'bulldoze', desc: '用力踩踏地面，减速周围的敌人。' },
+  { id: 'dig', name: '挖洞', type: 'ground', cat: 'phys', tier: 3, pattern: 'strike', power: 44, cd: 1.6, range: 165, radius: 34, delay: 0.5, fx: 'dig', desc: '钻进地下，从敌人脚下冲出来。' },
+  { id: 'earth_power', name: '大地之力', type: 'ground', cat: 'spec', tier: 3, pattern: 'strike', power: 40, cd: 1.6, range: 175, radius: 42, delay: 0.35, fx: 'earthpower', desc: '让敌人脚下的大地爆发出力量。' },
+
+  // ---------- 飞行 ----------
+  { id: 'gust', name: '起风', type: 'flying', cat: 'spec', tier: 1, pattern: 'proj', power: 8, cd: 0.85, range: 150, speed: 200, size: 5, knock: 40, fx: 'gust', desc: '扇起强风攻击并吹退敌人。' },
+  { id: 'peck', name: '啄', type: 'flying', cat: 'phys', tier: 1, pattern: 'melee', power: 10, cd: 0.7, range: 36, radius: 36, arc: deg(80), fx: 'peck', desc: '用尖嘴啄前方的敌人。' },
+  { id: 'wing_attack', name: '翅膀攻击', type: 'flying', cat: 'phys', tier: 2, pattern: 'melee', power: 22, cd: 1.0, range: 42, radius: 42, arc: deg(150), fx: 'wingattack', desc: '展开翅膀横扫前方。' },
+  { id: 'aerial_ace', name: '燕返', type: 'flying', cat: 'phys', tier: 2, pattern: 'proj', power: 18, cd: 1.0, range: 165, speed: 300, size: 5, homing: 10, fx: 'aerialace', desc: '必中的高速斩击，强力追踪。' },
+  { id: 'drill_peck', name: '啄钻', type: 'flying', cat: 'phys', tier: 3, pattern: 'melee', power: 42, cd: 1.1, range: 42, radius: 42, arc: deg(90), crit: 15, fx: 'drillpeck', desc: '像钻头一样旋转着啄击。' },
+  { id: 'hurricane', name: '暴风', type: 'flying', cat: 'spec', tier: 4, pattern: 'zone', power: 14, cd: 3.2, range: 175, radius: 44, duration: 3, tick: 0.3, status: { kind: 'stun', chance: 0.15, dur: 0.5 }, fx: 'hurricane', desc: '在敌人处卷起持续 3 秒的暴风。' },
+  { id: 'brave_bird', name: '勇鸟猛攻', type: 'flying', cat: 'phys', tier: 4, pattern: 'melee', power: 120, cd: 1.8, range: 50, radius: 50, arc: deg(160), recoil: 0.06, knock: 90, fx: 'bravebird', desc: '收起翅膀低空猛冲，会受到少量反作用伤害。' },
+
+  // ---------- 超能力 / 虫 ----------
+  { id: 'hypnosis', name: '催眠术', type: 'psychic', cat: 'spec', tier: 2, pattern: 'proj', power: 4, cd: 2.5, range: 160, speed: 170, size: 6, homing: 4, status: { kind: 'stun', chance: 0.8, dur: 1.2 }, fx: 'hypnosis', desc: '发出催眠的波动，让敌人睡着（短暂定身）。' },
+  { id: 'bug_bite', name: '虫咬', type: 'bug', cat: 'phys', tier: 1, pattern: 'melee', power: 11, cd: 0.8, range: 32, radius: 32, arc: deg(100), fx: 'bugbite', desc: '用小小的颚咬住敌人。' },
+  { id: 'struggle_bug', name: '虫之抵抗', type: 'bug', cat: 'spec', tier: 1, pattern: 'proj', power: 7, cd: 0.8, range: 145, speed: 210, count: 2, spread: deg(22), size: 3, status: { kind: 'slow', chance: 0.25, dur: 1.2, amount: 0.3 }, fx: 'strugglebug', desc: '拼命抵抗，可能减速敌人。' },
+  { id: 'pin_missile', name: '飞弹针', type: 'bug', cat: 'phys', tier: 2, pattern: 'proj', power: 7, cd: 1.0, range: 160, speed: 280, count: 4, spread: deg(26), size: 3, fx: 'pinmissile', desc: '连续射出 4 根尖针。' },
+  { id: 'signal_beam', name: '信号光束', type: 'bug', cat: 'spec', tier: 2, pattern: 'beam', power: 20, cd: 1.2, range: 145, width: 9, status: { kind: 'stun', chance: 0.15, dur: 0.5 }, fx: 'signalbeam', desc: '发射奇特的光束，可能使敌人混乱。' },
+  { id: 'x_scissor', name: '十字剪', type: 'bug', cat: 'phys', tier: 3, pattern: 'melee', power: 44, cd: 1.2, range: 44, radius: 44, arc: deg(140), crit: 10, fx: 'xscissor', desc: '镰刀或爪子交叉劈下。' },
+  { id: 'bug_buzz', name: '虫鸣', type: 'bug', cat: 'spec', tier: 3, pattern: 'nova', power: 32, cd: 1.8, range: 72, radius: 74, knock: 50, fx: 'bugbuzz', desc: '振动翅膀发出刺耳的声波。' },
+  { id: 'megahorn', name: '超级角击', type: 'bug', cat: 'phys', tier: 4, pattern: 'melee', power: 115, cd: 1.9, range: 54, radius: 54, arc: deg(120), knock: 120, fx: 'megahorn', desc: '用坚硬的大角全力冲撞。' },
+
+  // ---------- 岩石 ----------
+  { id: 'rock_throw', name: '落石', type: 'rock', cat: 'phys', tier: 1, pattern: 'strike', power: 12, cd: 1.0, range: 150, radius: 18, delay: 0.35, fx: 'rockthrow', desc: '扔出一块石头砸向敌人。' },
+  { id: 'rock_tomb', name: '岩石封锁', type: 'rock', cat: 'phys', tier: 2, pattern: 'strike', power: 20, cd: 1.5, range: 160, radius: 24, delay: 0.4, strikes: 2, status: { kind: 'slow', chance: 0.6, dur: 2, amount: 0.4 }, fx: 'rocktomb', desc: '落下 2 块岩石，困住并减速敌人。' },
+  { id: 'ancient_power', name: '原始之力', type: 'rock', cat: 'spec', tier: 2, pattern: 'proj', power: 10, cd: 1.2, range: 155, speed: 200, count: 3, spread: deg(30), size: 5, fx: 'ancientpower', desc: '用远古的力量发射 3 块岩石。' },
+  { id: 'power_gem', name: '力量宝石', type: 'rock', cat: 'spec', tier: 3, pattern: 'beam', power: 34, cd: 1.4, range: 160, width: 12, fx: 'powergem', desc: '发射宝石般闪耀的光芒。' },
+  { id: 'stone_edge', name: '尖石攻击', type: 'rock', cat: 'phys', tier: 4, pattern: 'nova', power: 85, cd: 2.4, range: 74, radius: 76, crit: 20, fx: 'stoneedge', desc: '让尖锐的岩石从四周刺出，容易击中要害。' },
+
+  // ---------- 幽灵 ----------
+  { id: 'lick', name: '舌舔', type: 'ghost', cat: 'phys', tier: 1, pattern: 'melee', power: 9, cd: 0.8, range: 32, radius: 32, arc: deg(90), status: { kind: 'para', chance: 0.3, dur: 2 }, fx: 'lick', desc: '用长长的舌头舔，可能麻痹敌人。' },
+  { id: 'night_shade', name: '黑夜魔影', type: 'ghost', cat: 'spec', tier: 1, pattern: 'proj', power: 9, cd: 0.9, range: 155, speed: 180, size: 4, homing: 4, fx: 'nightshade', desc: '让敌人看见恐怖的幻影，会轻微追踪。' },
+  { id: 'shadow_claw', name: '暗影爪', type: 'ghost', cat: 'phys', tier: 2, pattern: 'melee', power: 22, cd: 1.0, range: 40, radius: 40, arc: deg(130), crit: 10, fx: 'shadowclaw', desc: '用影子做成的利爪撕裂前方。' },
+  { id: 'hex', name: '祸不单行', type: 'ghost', cat: 'spec', tier: 2, pattern: 'zone', power: 6, cd: 2.8, range: 165, radius: 32, duration: 3, tick: 0.5, fx: 'hex', desc: '在敌人脚下留下持续 3 秒的诅咒。' },
+  { id: 'shadow_force', name: '暗影潜袭', type: 'ghost', cat: 'phys', tier: 4, pattern: 'strike', power: 100, cd: 2.4, range: 180, radius: 42, delay: 0.6, fx: 'shadowforce', desc: '消失在影子里，片刻后从敌人身边现身攻击。' },
+
+  // ---------- 龙 / 恶 / 钢 ----------
+  { id: 'twister', name: '龙卷风', type: 'dragon', cat: 'spec', tier: 2, pattern: 'zone', power: 6, cd: 2.8, range: 165, radius: 34, duration: 2.5, tick: 0.4, status: { kind: 'stun', chance: 0.12, dur: 0.4 }, fx: 'twister', desc: '卷起龙卷风，可能使敌人畏缩。' },
+  { id: 'dragon_rage', name: '龙之怒', type: 'dragon', cat: 'spec', tier: 2, pattern: 'proj', power: 18, cd: 1.2, range: 160, speed: 200, size: 6, pierce: 1, fx: 'dragonrage', desc: '喷出愤怒的龙之火焰。' },
+  { id: 'dragon_pulse', name: '龙之波动', type: 'dragon', cat: 'spec', tier: 3, pattern: 'beam', power: 36, cd: 1.4, range: 165, width: 14, fx: 'dragonpulse', desc: '从口中发射冲击波。' },
+  { id: 'outrage', name: '逆鳞', type: 'dragon', cat: 'phys', tier: 4, pattern: 'nova', power: 100, cd: 2.2, range: 66, radius: 68, knock: 90, fx: 'outrage', desc: '在愤怒中大闹一番，攻击周围所有敌人。' },
+  { id: 'dragon_dance', name: '龙之舞', type: 'dragon', cat: 'status', tier: 3, pattern: 'buff', power: 0, cd: 10, range: 130, buff: { haste: 25, spe: 30, dur: 5 }, fx: 'buff', desc: '跳起神秘的舞蹈，5 秒内速度与技能急速提升。' },
+  { id: 'night_slash', name: '暗袭要害', type: 'dark', cat: 'phys', tier: 2, pattern: 'melee', power: 22, cd: 1.0, range: 42, radius: 42, arc: deg(130), crit: 25, fx: 'nightslash', desc: '抓住瞬间的破绽劈砍，很容易击中要害。' },
+  { id: 'crunch', name: '咬碎', type: 'dark', cat: 'phys', tier: 3, pattern: 'melee', power: 44, cd: 1.1, range: 38, radius: 38, arc: deg(100), status: { kind: 'stun', chance: 0.2, dur: 0.5 }, fx: 'crunch', desc: '用利牙咬碎敌人。' },
+  { id: 'steel_wing', name: '钢翼', type: 'steel', cat: 'phys', tier: 2, pattern: 'melee', power: 22, cd: 1.0, range: 42, radius: 42, arc: deg(150), fx: 'steelwing', desc: '用坚硬的翅膀横扫前方。' },
+  { id: 'iron_defense', name: '铁壁', type: 'steel', cat: 'status', tier: 2, pattern: 'shield', power: 0, cd: 10, range: 130, shield: 0.25, duration: 5, fx: 'shield', desc: '让身体变得像铁一样硬，获得 25% 最大HP 的护盾。' },
+  { id: 'flash_cannon', name: '加农光炮', type: 'steel', cat: 'spec', tier: 3, pattern: 'beam', power: 36, cd: 1.4, range: 165, width: 12, fx: 'flashcannon', desc: '把光汇聚起来一口气发射出去。' },
+  { id: 'meteor_mash', name: '彗星拳', type: 'steel', cat: 'phys', tier: 4, pattern: 'melee', power: 110, cd: 1.9, range: 50, radius: 50, arc: deg(140), knock: 100, fx: 'meteormash', desc: '像彗星一样的铁拳。' },
+
+  // ---------- 妖精 ----------
+  { id: 'fairy_wind', name: '妖精之风', type: 'fairy', cat: 'spec', tier: 1, pattern: 'proj', power: 7, cd: 0.8, range: 150, speed: 210, count: 2, spread: deg(18), size: 4, fx: 'fairywind', desc: '刮起妖精之风攻击敌人。' },
+  { id: 'disarming_voice', name: '魅惑之声', type: 'fairy', cat: 'spec', tier: 2, pattern: 'nova', power: 18, cd: 1.3, range: 60, radius: 62, fx: 'disarm', desc: '发出迷人的声音，伤害周围的敌人。' },
+  { id: 'draining_kiss', name: '吸取之吻', type: 'fairy', cat: 'spec', tier: 2, pattern: 'proj', power: 15, cd: 1.2, range: 155, speed: 200, size: 5, homing: 4, status: { kind: 'leech', chance: 1, dur: 3 }, heal: 0.6, fx: 'drainkiss', desc: '用一个吻吸取敌人的 HP，持续为自己回复。' },
+  { id: 'dazzling_gleam', name: '魔法闪耀', type: 'fairy', cat: 'spec', tier: 3, pattern: 'nova', power: 34, cd: 1.8, range: 76, radius: 78, fx: 'dazzle', desc: '向四周释放强光。' },
+  { id: 'play_rough', name: '嬉闹', type: 'fairy', cat: 'phys', tier: 3, pattern: 'melee', power: 44, cd: 1.2, range: 42, radius: 42, arc: deg(160), fx: 'playrough', desc: '和敌人嬉闹着扭打成一团。' },
+  { id: 'moonblast', name: '月亮之力', type: 'fairy', cat: 'spec', tier: 4, pattern: 'proj', power: 105, cd: 2.4, range: 190, speed: 190, size: 12, pierce: 3, fx: 'moonblast', desc: '借用月亮的力量发射光球。' },
+  { id: 'moonlight', name: '月光', type: 'fairy', cat: 'status', tier: 3, pattern: 'heal', power: 0, cd: 11, range: 0, heal: 0.22, fx: 'heal', desc: '沐浴月光，回复 22% 最大HP。' },
+
+  // ---------- 远程的物理招式（让物攻高的宝可梦不必总是贴身肉搏） ----------
+  { id: 'spike_cannon', name: '针刺加农炮', type: 'normal', cat: 'phys', tier: 2, pattern: 'proj', power: 7, cd: 1.0, range: 160, speed: 280, count: 4, spread: deg(24), size: 3, fx: 'spikecannon', desc: '连续发射 4 根尖刺。' },
+  { id: 'egg_bomb', name: '炸蛋', type: 'normal', cat: 'phys', tier: 3, pattern: 'strike', power: 40, cd: 1.6, range: 170, radius: 38, delay: 0.4, fx: 'eggbomb', desc: '扔出巨大的蛋，在落点爆炸。' },
+  { id: 'vacuum_wave', name: '真空波', type: 'fighting', cat: 'phys', tier: 1, pattern: 'proj', power: 8, cd: 0.7, range: 150, speed: 320, size: 4, fx: 'vacuum', desc: '挥拳打出真空的波动，冷却很短。' },
+  { id: 'seismic_toss', name: '地球上投', type: 'fighting', cat: 'phys', tier: 2, pattern: 'strike', power: 24, cd: 1.4, range: 160, radius: 28, delay: 0.45, knock: 60, fx: 'seismic', desc: '抓住远处的敌人狠狠摔在地上。' },
+  { id: 'pursuit', name: '追打', type: 'dark', cat: 'phys', tier: 1, pattern: 'proj', power: 9, cd: 0.8, range: 160, speed: 300, size: 4, homing: 10, fx: 'pursuit', desc: '追上逃走的敌人攻击，强力追踪。' },
+  { id: 'aqua_jet', name: '水流喷射', type: 'water', cat: 'phys', tier: 1, pattern: 'proj', power: 9, cd: 0.6, range: 150, speed: 330, size: 4, fx: 'aquajet', desc: '以迅雷不及掩耳之势射出水流，冷却很短。' },
+  { id: 'bullet_punch', name: '子弹拳', type: 'steel', cat: 'phys', tier: 1, pattern: 'proj', power: 9, cd: 0.6, range: 150, speed: 340, size: 3, fx: 'bulletpunch', desc: '像子弹一样快的拳击，冷却很短。' },
+  { id: 'gyro_ball', name: '陀螺球', type: 'steel', cat: 'phys', tier: 3, pattern: 'proj', power: 36, cd: 1.3, range: 165, speed: 170, size: 8, pierce: 2, fx: 'gyroball', desc: '高速旋转的钢球，能贯穿敌人。' },
+  { id: 'dragon_darts', name: '龙箭', type: 'dragon', cat: 'phys', tier: 3, pattern: 'proj', power: 22, cd: 1.2, range: 170, speed: 300, count: 2, spread: deg(10), size: 4, homing: 6, fx: 'dragondarts', desc: '射出 2 支会追踪敌人的龙之箭。' },
+  { id: 'flame_wheel', name: '火焰轮', type: 'fire', cat: 'phys', tier: 2, pattern: 'proj', power: 20, cd: 1.2, range: 160, speed: 230, size: 7, pierce: 2, status: { kind: 'burn', chance: 0.2, dur: 3 }, fx: 'flamewheel', desc: '滚出燃烧的火轮，贯穿敌人并可能灼伤。' },
+  { id: 'wild_charge', name: '疯狂伏特', type: 'electric', cat: 'phys', tier: 3, pattern: 'proj', power: 36, cd: 1.3, range: 165, speed: 260, size: 7, pierce: 2, status: { kind: 'para', chance: 0.2, dur: 2 }, fx: 'wildcharge', desc: '全身缠绕电流冲出一道电光，贯穿敌人。' },
 ];
+
+/** 不需要贴身的攻击方式 */
+export const RANGED_PATTERNS = new Set<Pattern>(['proj', 'beam', 'chain', 'strike', 'zone']);
+
+/** 宝可梦的专属招式：只出现在指定宝可梦的技能表里（商店里仍然可能刷到） */
+export const SIGNATURE: Record<string, string[]> = {
+  volt_tackle: ['pikachu'], psystrike: ['mewtwo'], frenzy_plant: ['bulbasaur'], pay_day: ['meowth'], splash: ['magikarp'],
+  sing: ['jigglypuff', 'clefairy', 'lapras', 'chansey'], explosion: ['geodude', 'voltorb', 'koffing', 'onix'],
+  hyper_fang: ['rattata'], bonemerang: ['cubone'], crabhammer: ['krabby'], hypnosis: ['drowzee', 'gastly', 'exeggcute', 'poliwag', 'jynx'],
+  egg_bomb: ['exeggcute', 'chansey'], spike_cannon: ['shellder', 'seel'], dragon_darts: ['dratini'],
+};
 
 export const SKILLS: Record<string, SkillDef> = Object.fromEntries(LIST.map((s) => [s.id, s]));
 export const SKILL_IDS = LIST.map((s) => s.id);
@@ -147,5 +283,6 @@ export const FX_KINDS: string[] = [
   'none', ...new Set(LIST.map((s) => s.fx)),
   // 敌人弹体
   'e_sting', 'e_acid', 'e_spore', 'e_shock', 'e_shadow', 'e_psy', 'e_gust', 'e_rock', 'e_bubble', 'e_star', 'e_ring',
+  'e_fire', 'e_ice', 'e_leaf', 'e_mud', 'e_dragon', 'e_dark',
 ];
 export const FX_INDEX: Record<string, number> = Object.fromEntries(FX_KINDS.map((k, i) => [k, i]));

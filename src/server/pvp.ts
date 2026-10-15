@@ -10,7 +10,8 @@ import type { PvpBoardRow, PvpHistory, PvpRatingChange, PvpRecord, S2C } from '.
 import { PROTOCOL_VERSION } from '../shared/protocol';
 import { Rng } from '../shared/rng';
 import { cleanMeta, cleanName, type Conn } from '../shared/room';
-import { NPC_NAMES, buildDex, buildPower, generateBuild, validateBuild, type SavedBuild } from '../shared/pvp/build';
+import { NPC_NAMES, buildDex, buildPower, generateBuild, npcTrainer, validateBuild, type SavedBuild } from '../shared/pvp/build';
+import { trainerOf } from '../shared/trainers';
 import { START_RATING, eloDelta, kFactor } from '../shared/pvp/rating';
 import { PvpRoom, type PvpSeat } from '../shared/pvp/room';
 import { PVP_MODES, PVP_MODE_IDS, type PvpMatchResult, type PvpMode } from '../shared/pvp/sim';
@@ -24,8 +25,8 @@ export interface PvpClient {
 
 interface ModeRec { rating: number; best: number; wins: number; losses: number; draws: number; streak: number; games: number; dex: number }
 interface StoredPlayer { pid: string; hash: string; name: string; created: number; last: number; modes: Partial<Record<PvpMode, ModeRec>>; history: PvpHistory[] }
-interface Ghost { pid: string; name: string; build: SavedBuild; meta: Record<string, number>; rating: number; power: number; at: number }
-interface Entry { c: PvpClient; pid: string; name: string; build: SavedBuild; meta: Record<string, number>; rating: number; power: number; mode: PvpMode; at: number }
+interface Ghost { pid: string; name: string; build: SavedBuild; meta: Record<string, number>; trainer?: string; rating: number; power: number; at: number }
+interface Entry { c: PvpClient; pid: string; name: string; build: SavedBuild; meta: Record<string, number>; trainer: string; rating: number; power: number; mode: PvpMode; at: number }
 
 const MAX_GHOSTS = 400;
 
@@ -131,7 +132,7 @@ export class PvpService {
 
   queued(c: PvpClient) { return this.queue.some((e) => e.c === c); }
 
-  enqueue(c: PvpClient, msg: { mode: unknown; build: unknown; name: unknown; meta: unknown; v: unknown; pid: unknown; secret: unknown }): string | null {
+  enqueue(c: PvpClient, msg: { mode: unknown; build: unknown; name: unknown; meta: unknown; v: unknown; pid: unknown; secret: unknown; trainer?: unknown }): string | null {
     if (msg.v !== PROTOCOL_VERSION) return '客户端版本与服务器不一致，请刷新页面';
     const mode = msg.mode as PvpMode;
     if (!PVP_MODE_IDS.includes(mode)) return '未知的对战模式';
@@ -144,7 +145,7 @@ export class PvpService {
     for (const r of this.rooms) if (!r.ended && r.seats.some((s) => s.pid === p.pid && s.conn && !s.left)) return '这个对战身份正在对战中';
     this.cancel(c);
     const meta = cleanMeta(msg.meta);
-    const e: Entry = { c, pid: p.pid, name: p.name, build: b, meta, rating: this.rec(p, mode).rating, power: buildPower(b), mode, at: Date.now() };
+    const e: Entry = { c, pid: p.pid, name: p.name, build: b, meta, trainer: trainerOf(msg.trainer).id, rating: this.rec(p, mode).rating, power: buildPower(b), mode, at: Date.now() };
     this.queue.push(e);
     p.last = Date.now();
     this.addGhost(e);
@@ -161,7 +162,7 @@ export class PvpService {
   private addGhost(e: Entry) {
     const key = JSON.stringify(e.build);
     this.ghosts = this.ghosts.filter((g) => !(g.pid === e.pid && JSON.stringify(g.build) === key));
-    this.ghosts.push({ pid: e.pid, name: e.name, build: e.build, meta: e.meta, rating: e.rating, power: e.power, at: Date.now() });
+    this.ghosts.push({ pid: e.pid, name: e.name, build: e.build, meta: e.meta, trainer: e.trainer, rating: e.rating, power: e.power, at: Date.now() });
     if (this.ghosts.length > MAX_GHOSTS) this.ghosts.splice(0, this.ghosts.length - MAX_GHOSTS);
     this.touch();
   }
@@ -212,13 +213,13 @@ export class PvpService {
       const g = this.rng.pick(top).g;
       exclude.add(g.pid);
       names.add(g.name);
-      return { id, name: g.name, team: 0, build: g.build, meta: g.meta, conn: null, bot: true, rating };
+      return { id, name: g.name, team: 0, build: g.build, meta: g.meta, trainer: trainerOf(g.trainer).id, conn: null, bot: true, rating };
     }
     const build = generateBuild(this.rng, near.build.level + this.rng.int(-1, 1));
     const free = NPC_NAMES.filter((n) => !names.has(n));
     const name = free.length ? this.rng.pick(free) : `训练家${id}`;
     names.add(name);
-    return { id, name, team: 0, build, meta: near.meta, conn: null, bot: true, rating };
+    return { id, name, team: 0, build, meta: near.meta, trainer: npcTrainer(this.rng, name), conn: null, bot: true, rating };
   }
 
   private startMatch(mode: PvpMode, group: Entry[]) {
@@ -226,7 +227,7 @@ export class PvpService {
     const exclude = new Set(group.map((e) => e.pid));
     const avg = group.reduce((a, e) => a + e.rating, 0) / group.length;
     let id = 1;
-    const seats: PvpSeat[] = group.map((e) => ({ id: id++, name: e.name, team: 0, build: e.build, meta: e.meta, conn: e.c.conn, bot: false, rating: e.rating, pid: e.pid }));
+    const seats: PvpSeat[] = group.map((e) => ({ id: id++, name: e.name, team: 0, build: e.build, meta: e.meta, trainer: e.trainer, conn: e.c.conn, bot: false, rating: e.rating, pid: e.pid }));
     const names = new Set(group.map((e) => e.name));
     while (seats.length < need) seats.push(this.botSeat(id++, this.rng.pick(group), exclude, avg, names));
     // 按构筑强度蛇形分队，让两队实力接近

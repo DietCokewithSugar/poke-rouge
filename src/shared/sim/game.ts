@@ -2,15 +2,15 @@ import { difficultyOf, type Difficulty, type DifficultyId } from '../difficulty'
 import { ENEMIES, ENEMY_INDEX } from '../enemies';
 import { ITEMS } from '../items';
 import type { RunSummary } from '../meta';
-import { LINES, formOf, type LineId } from '../pokemon';
+import { LINES, LINE_IDS, LINE_OF_DEX, formOf, isFinal, type LineId } from '../pokemon';
 import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
 import { SKILLS } from '../skills';
-import { TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, spawnRateMult, waveDuration } from '../waves';
+import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
 import { updateEnemy } from './ai';
-import { PLAYER_R, beamHit, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
+import { PLAYER_R, beamHit, healMult, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
 import {
   addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, refreshOffers, rerollCards,
@@ -28,7 +28,15 @@ export const REVIVE_TIME = 2.5;
 export type SimPhase = 'wave' | 'inter' | 'over' | 'won';
 export type Ev = (string | number | number[])[];
 
-export interface PlayerInit { id: number; name: string; line: LineId; meta: Record<string, number> }
+export interface PlayerInit {
+  id: number; name: string; line: LineId; meta: Record<string, number>;
+  trainer?: string;
+  /** 已经拥有的宝可梦（进化线）：击败没有的宝可梦时才会崇拜 */
+  owned?: string[];
+}
+
+/** 击败后崇拜你的基础几率：乱入的野生宝可梦最高，普通小怪很低，首领不会崇拜 */
+export const RECRUIT_BASE = { wild: 0.1, treasure: 0.12, minion: 0.0025, elite: 0.02 };
 
 export type Command =
   | { t: 'level'; i: number; slot?: number }
@@ -87,7 +95,7 @@ export interface PublicState {
   biome: number;
   interLeft: number;
   boss: { name: string; hp: number; max: number } | null;
-  players: { id: number; name: string; line: LineId; dex: number; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean }[];
+  players: { id: number; name: string; trainer: string; line: LineId; dex: number; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean }[];
   /** 对战模式的额外信息 */
   pvp?: PvpPublic;
 }
@@ -129,11 +137,13 @@ export class GameSim {
   /** 群聚波：本波刷怪翻倍 */
   horde = false;
   private extraElites: string[] = [];
+  /** 本波乱入的野生宝可梦：[出现时间, 敌人 id] */
+  private intruders: [number, string][] = [];
 
   constructor(inits: PlayerInit[], seed: number, difficulty: DifficultyId = 'easy', start = true) {
     this.rng = new Rng(seed);
     this.diff = difficultyOf(difficulty);
-    for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta));
+    for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta, i.trainer, i.owned));
     this.startPlayers = inits.length;
     if (start) this.startWave();
   }
@@ -184,7 +194,7 @@ export class GameSim {
 
   pressureAt(x: number, y: number) {
     for (const p of this.players) {
-      if (p.line === 'mewtwo' && p.alive && !p.down && (p.x - x) ** 2 + (p.y - y) ** 2 < 90 * 90) return true;
+      if (LINES[p.line].flags.pressure && p.alive && !p.down && (p.x - x) ** 2 + (p.y - y) ** 2 < 90 * 90) return true;
     }
     return false;
   }
@@ -232,6 +242,7 @@ export class GameSim {
       credit.stats.kills++;
       credit.stats.killsBy[e.def.id] = (credit.stats.killsBy[e.def.id] ?? 0) + 1;
       credit.stats.rankKills[e.def.rank]++;
+      if (!silent) this.rollRecruit(e, credit);
     }
     if (e.def.rank === 'boss') {
       this.bossDown = true;
@@ -250,6 +261,65 @@ export class GameSim {
     const luck = 1 + Math.max(0, this.players.reduce((a, p) => a + p.d.luck, 0) / Math.max(1, this.players.length)) / 100;
     if (e.def.rank !== 'minion' || this.rng.chance(0.004 * luck)) this.dropPickup('ball', e.x + this.rng.range(-8, 8), e.y + this.rng.range(-8, 8), 1);
     if (e.def.id === 'chansey' || this.rng.chance(0.012 * luck)) this.dropPickup('berry', e.x + this.rng.range(-6, 6), e.y + this.rng.range(-6, 6), 1);
+  }
+
+  /**
+   * 崇拜（参考宝可梦不可思议的迷宫的"想成为伙伴"）：击败野生宝可梦时，有几率让它崇拜你，
+   * 解锁这一整条进化线。击败者已经有了的话，让给附近还没有的队友。
+   */
+  private rollRecruit(e: Enemy, killer: SimPlayer) {
+    const line = LINE_OF_DEX[e.def.dex];
+    const L = line ? LINES[line] : null;
+    if (!L || L.unlock.recruit <= 0 || e.def.rank === 'boss') return;
+    const want = (p: SimPlayer) => !p.owned.has(line);
+    let p: SimPlayer | null = want(killer) ? killer : null;
+    if (!p) {
+      let bd = Infinity;
+      for (const q of this.players) {
+        if (!want(q) || !this.isAlly(killer, q)) continue;
+        const d = (q.x - e.x) ** 2 + (q.y - e.y) ** 2;
+        if (d < bd) { bd = d; p = q; }
+      }
+    }
+    if (!p) return;
+    const B = RECRUIT_BASE;
+    const base = e.def.wild ? B.wild : e.def.ai === 'flee' ? B.treasure : e.def.rank === 'elite' ? B.elite : B.minion;
+    if (!this.rng.chance(base * L.unlock.recruit * p.d.recruitMult)) return;
+    p.owned.add(line);
+    p.stats.recruits.push(line);
+    this.emit(['recruit', p.id, e.def.dex, line, Math.round(e.x), Math.round(e.y)]);
+    this.dirty.add(p.id);
+  }
+
+  /** 这一波乱入哪些野生宝可梦：按地区属性挑选，优先挑还有人没有的 */
+  private pickIntruders(): [number, string][] {
+    const n = intruderCount(this.wave);
+    if (!n || !this.players.length) return [];
+    const biome = WAVES[this.wave - 1].biome;
+    const bt = BIOME_TYPES[biome] ?? {};
+    const weights: Record<string, number> = {};
+    for (const id of LINE_IDS) {
+      const L = LINES[id];
+      if (L.unlock.recruit <= 0) continue;
+      const types = new Set(L.forms.flatMap((f) => f.types));
+      let w = 0;
+      for (const t of types) w += bt[t] ?? 0;
+      if (!w) continue;
+      const missing = this.players.some((p) => !p.owned.has(id));
+      weights[id] = w * (missing ? 3 : 0.3) * Math.min(1, L.unlock.recruit + 0.3);
+    }
+    const out: [number, string][] = [];
+    for (let i = 0; i < n && Object.keys(weights).length; i++) {
+      const id = this.rng.weighted(weights);
+      delete weights[id];
+      const L = LINES[id];
+      // 后期出现的多半是进化后的样子
+      const k = this.wave >= 14 ? 2 : this.wave >= 7 ? 1 : 0;
+      const evo = L.stones || L.forms.length === 1 ? 0 : Math.max(0, Math.min(L.forms.length - 1, k - (this.rng.chance(0.3) ? 1 : 0)));
+      const t = this.waveDur * (0.15 + (0.7 * (i + this.rng.next() * 0.6)) / n);
+      out.push([t, `w${L.forms[evo].dex}`]);
+    }
+    return out.sort((a, b) => a[0] - b[0]);
   }
 
   private dropCandy(x: number, y: number, value: number) {
@@ -325,6 +395,7 @@ export class GameSim {
       p.buffT = 0;
       p.slowT = 0;
       p.sashUsed = false;
+      p.sturdyUsed = false;
       p.ready = false;
       p.cards = null;
       p.undo = null;
@@ -335,7 +406,9 @@ export class GameSim {
       recompute(p);
       this.dirty.add(p.id);
     });
+    this.intruders = this.pickIntruders();
     this.emit(['wave', this.wave, this.waveDur, W.biome]);
+    if (this.intruders.length) this.emit(['wild', this.intruders.map(([, id]) => ENEMIES[id].dex)]);
     if (this.horde) this.emit(['msg', '群聚出现了！野生宝可梦成群结队地来了！']);
   }
 
@@ -485,6 +558,12 @@ export class GameSim {
         this.queueSpawn(id, x, y, 1.2);
       }
     }
+    while (this.intruders.length && this.waveT >= this.intruders[0][0]) {
+      const [, id] = this.intruders.shift()!;
+      this.emit(['msg', `野生的${ENEMIES[id].name}乱入了！击败它也许会崇拜你`]);
+      const { x, y } = this.spawnPoint(130);
+      this.queueSpawn(id, x, y, 1);
+    }
     if (this.treasureAt >= 0 && this.waveT >= this.treasureAt && W.treasure) {
       this.treasureAt = -1;
       this.emit(['msg', `${ENEMIES[W.treasure.id].name}出现了！快抓住它！`]);
@@ -590,7 +669,7 @@ export class GameSim {
             st.leech -= 0.5;
             parts.push([st.leechDps * 0.5, st.leechSrc]);
             const src = this.players.find((p) => p.id === st.leechSrc);
-            if (src) healPlayer(this, src, st.leechDps * 0.5 * st.leechHeal * (src.line === 'bulbasaur' ? 1.3 : 1) * (src.items.big_root ? 1.3 : 1), true);
+            if (src) healPlayer(this, src, st.leechDps * 0.5 * st.leechHeal * healMult(src), true);
           }
           for (const [d, src] of parts) {
             if (e.dead) break;
@@ -886,6 +965,7 @@ export class GameSim {
         thorns: Math.round(p.d.thorns), pickup: Math.round(p.d.pickupRadius), physTaken: Math.round(p.d.physTaken * 100), specTaken: Math.round(p.d.specTaken * 100),
         moveSpeed: Math.round(this.moveSpeed(p)),
         enemies: Math.round(p.d.enemies),
+        recruit: Math.round((p.d.recruitMult - 1) * 100),
       },
       cards: p.cards,
       cardRerollCost: cardRerollCost(this, p),
@@ -917,7 +997,7 @@ export class GameSim {
       interLeft: this.players.length > 1 ? Math.max(0, Math.round(INTERMISSION_TIMEOUT - this.interT)) : -1,
       boss: this.boss && !this.boss.dead ? { name: this.boss.def.name, hp: Math.max(0, Math.round(this.boss.hp)), max: this.boss.maxHp } : null,
       players: this.players.map((p) => ({
-        id: p.id, name: p.name, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level,
+        id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, level: p.level,
         hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills,
       })),
     };
@@ -926,8 +1006,14 @@ export class GameSim {
   summary(p: SimPlayer): RunSummary {
     const wavesCleared = this.phase === 'won' ? TOTAL_WAVES : Math.max(0, this.wave - 1);
     const L = LINES[p.line];
+    const typeDmg: Record<string, number> = {};
+    for (const [id, v] of Object.entries(p.stats.skillDmg)) {
+      const t = SKILLS[id]?.type;
+      if (t) typeDmg[t] = Math.round((typeDmg[t] ?? 0) + v);
+    }
     return {
       line: p.line,
+      trainer: p.trainer,
       difficulty: this.diff.id,
       neverEvolved: L.forms.length > 1 && p.stage === 0,
       wavesCleared,
@@ -935,7 +1021,7 @@ export class GameSim {
       kills: p.stats.kills,
       level: p.level,
       stage: p.stage,
-      finalForm: L.forms.length > 1 && p.stage >= L.forms.length - 1,
+      finalForm: L.forms.length > 1 && isFinal(p.line, p.stage),
       evolved: p.stats.evolved,
       skillsFull: p.stats.skillsFull,
       foreignSkill: p.stats.foreignSkill,
@@ -946,6 +1032,8 @@ export class GameSim {
       revives: p.stats.revives,
       bossKills: p.stats.bossKills,
       damage: Math.round(p.stats.damage),
+      recruits: p.stats.recruits.slice(),
+      typeDmg,
       detail: {
         time: Math.round(this.time),
         dex: formOf(p.line, p.stage).dex,

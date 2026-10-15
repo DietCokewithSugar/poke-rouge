@@ -268,7 +268,7 @@ class App {
     saveProfile(this.profile);
     this.pvpMatch = { mode, uid: mon.uid, practice: true, seats: [] };
     const allies = this.profile.party.filter((m) => m.uid !== mon.uid).map((m) => m.build);
-    const t = new LocalPvpTransport(mode, { name: this.name(), build: mon.build, meta: this.meta() }, allies);
+    const t = new LocalPvpTransport(mode, { name: this.name(), build: mon.build, meta: this.meta(), trainer: this.profile.trainer }, allies);
     this.t = t;
     t.onMessage = (m) => this.onMessage(m);
   }

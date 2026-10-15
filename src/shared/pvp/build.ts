@@ -3,7 +3,7 @@
  * 可以放进背包，用来和其他玩家对战。
  */
 import { ITEMS, ITEM_IDS } from '../items';
-import { LINES, LINE_IDS, formOf, maxStageByLevel, type LineId } from '../pokemon';
+import { LINES, LINE_IDS, formOf, isLine, maxStage, type LineId } from '../pokemon';
 import type { Rng } from '../rng';
 import { SKILLS, SKILL_MAX_LV } from '../skills';
 import type { Mods } from '../stats';
@@ -28,6 +28,12 @@ export const MAX_BUILD_LEVEL = 60;
 /** AI 训练家的名字 */
 export const NPC_NAMES = ['小智', '小霞', '小刚', '小茂', '娜姿', '夏伯', '阿桔', '阿柳', '科拿', '希巴', '菊子', '阿渡', '小遥', '小胜', '小光', '小建', '莉佳', '马志士', '坂木', '大吾'];
 
+/** AI 训练家用的形象：名字对得上的用本人，其余随机 */
+export function npcTrainer(rng: Rng, name: string): string {
+  const known: Record<string, string> = { 小智: 'ash', 小霞: 'misty', 小刚: 'brock', 小茂: 'gary', 娜姿: 'sabrina', 阿渡: 'lance', 坂木: 'giovanni' };
+  return known[name] ?? rng.pick(['ash', 'misty', 'brock', 'gary', 'rocket', 'sabrina']);
+}
+
 const isInt = (v: unknown, a: number, b: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= a && v <= b;
 
 /** 校验并清洗客户端提交的构筑；不合理时返回错误信息。 */
@@ -35,12 +41,11 @@ export function validateBuild(raw: unknown): SavedBuild | string {
   if (!raw || typeof raw !== 'object') return '构筑数据无效';
   const b = raw as Record<string, unknown>;
   const line = b.line as LineId;
-  if (!LINE_IDS.includes(line)) return '未知的宝可梦';
+  if (!isLine(line)) return '未知的宝可梦';
   if (!isInt(b.level, 1, MAX_BUILD_LEVEL)) return '等级不合法';
   const level = b.level;
   const L = LINES[line];
-  const maxStage = line === 'pikachu' ? 1 : maxStageByLevel(line, level);
-  if (!isInt(b.stage, 0, Math.min(maxStage, L.forms.length - 1))) return '形态不合法';
+  if (!isInt(b.stage, 0, Math.min(maxStage(line, level), L.forms.length - 1))) return '形态不合法';
   const skills: SavedBuild['skills'] = [];
   if (!Array.isArray(b.skills) || b.skills.length < 1 || b.skills.length > 6) return '技能数量不合法';
   for (const s of b.skills as { id?: unknown; lv?: unknown }[]) {
@@ -94,13 +99,19 @@ export function buildDex(b: SavedBuild) {
   return formOf(b.line, b.stage).dex;
 }
 
+/** AI 训练家常用的宝可梦：御三家与人气宝可梦更常见，传说的宝可梦很少见 */
+const BOT_LINES: LineId[] = LINE_IDS.flatMap((id) => {
+  const L = LINES[id];
+  const n = ['charmander', 'squirtle', 'bulbasaur', 'pikachu', 'eevee', 'dratini', 'gastly', 'abra', 'machop', 'geodude'].includes(id) ? 4 : L.legend ? 1 : 2;
+  return Array.from({ length: n }, () => id);
+});
+
 /** 生成一个指定等级附近的构筑（AI 训练家用） */
 export function generateBuild(rng: Rng, level: number): SavedBuild {
-  const lines: LineId[] = ['charmander', 'squirtle', 'bulbasaur', 'pikachu', 'charmander', 'squirtle', 'bulbasaur', 'mewtwo'];
-  const line = rng.pick(lines);
+  const line = rng.pick(BOT_LINES);
   const L = LINES[line];
   level = Math.max(2, Math.min(40, Math.round(level)));
-  const stage = line === 'pikachu' ? (level >= 12 ? 1 : 0) : maxStageByLevel(line, level);
+  const stage = L.stones ? (level >= 12 ? rng.int(1, L.forms.length - 1) : 0) : maxStage(line, level);
   const form = formOf(line, stage);
   const pool = [...L.start, ...L.learnset.filter((e) => e.lv <= level).map((e) => e.skill)];
   const skills = pool.slice(-form.slots).map((id) => ({ id, lv: Math.min(SKILL_MAX_LV, 1 + Math.floor(rng.range(0, level / 9))) }));
@@ -109,7 +120,7 @@ export function generateBuild(rng: Rng, level: number): SavedBuild {
   const maxTier = level >= 18 ? 4 : level >= 10 ? 3 : level >= 5 ? 2 : 1;
   const candidates = ITEM_IDS.filter((id) => {
     const it = ITEMS[id];
-    return it.tier <= maxTier && !it.special && !(it.mods?.slots) && (!it.only || it.only === line) && !((it.mods?.enemies ?? 0) !== 0);
+    return it.tier <= maxTier && !it.special && !(it.mods?.slots) && (!it.only || it.only.includes(line)) && !((it.mods?.enemies ?? 0) !== 0);
   });
   for (let i = 0; i < nItems; i++) {
     const id = rng.pick(candidates);

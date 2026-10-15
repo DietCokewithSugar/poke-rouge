@@ -7,8 +7,9 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { C2S, RoomInfo, S2C, ServerStats } from '../shared/protocol';
-import { Room } from '../shared/room';
+import { TOWN_WHERE, type C2S, type RoomInfo, type S2C, type ServerStats, type TownPeer, type TownWhere } from '../shared/protocol';
+import { Room, cleanName } from '../shared/room';
+import { trainerOf } from '../shared/trainers';
 import type { PvpRoom } from '../shared/pvp/room';
 import type { PvpMode } from '../shared/pvp/sim';
 import { TICK_RATE } from '../shared/sim/game';
@@ -100,12 +101,24 @@ function newCode(): string {
   throw new Error('no room code available');
 }
 
+interface Presence { name: string; trainer: string; dex: number; town: boolean; x: number; y: number; d: number; m: 0 | 1 }
+
 interface Client {
   ws: WebSocket; room: Room | null; id: number; alive: boolean; budget: number; browsing: boolean; lastStats: string;
   conn: { send(data: string | ArrayBuffer, droppable?: boolean): void; buffered(): number };
   pvp: PvpRoom | null; pvpId: number;
+  /** 在线玩家编号（真新镇里区分玩家用） */
+  uid: number;
+  presence: Presence | null;
+  lastTown: string;
   send(msg: S2C): void;
 }
+
+let uidSeq = 0;
+/** 真新镇地图的大小（世界像素），位置超出范围的上报会被截断 */
+const TOWN_W = 1024, TOWN_H = 900;
+/** 真新镇里最多同时显示多少位其他玩家 */
+const TOWN_MAX = 80;
 
 /** 在线人数 = 打开着游戏页面的连接数（单人游戏、浏览大厅、房间里的都算） */
 function stats(): ServerStats {
@@ -145,6 +158,7 @@ wss.on('connection', (ws: WebSocket) => {
   };
   const c: Client = {
     ws, room: null, id: 0, alive: true, budget: 200, browsing: false, lastStats: '', conn, pvp: null, pvpId: 0,
+    uid: ++uidSeq, presence: null, lastTown: '',
     send: (msg) => conn.send(JSON.stringify(msg)),
   };
   const fail = (msg: string) => conn.send(JSON.stringify({ t: 'error', msg } satisfies S2C));
@@ -164,6 +178,22 @@ wss.on('connection', (ws: WebSocket) => {
     if (msg.t === 'browse') {
       c.browsing = !!msg.on;
       if (c.browsing) sendJson(c, { t: 'rooms', stats: stats(), rooms: publicRooms() });
+      return;
+    }
+    if (msg.t === 'presence') {
+      const prev = c.presence;
+      const dex = Number.isInteger(msg.dex) && msg.dex >= 1 && msg.dex <= 151 ? msg.dex : 25;
+      c.presence = { name: cleanName(msg.name), trainer: trainerOf(msg.trainer).id, dex, town: !!msg.town, x: prev?.x ?? -1, y: prev?.y ?? -1, d: prev?.d ?? 0, m: 0 };
+      if (c.presence.town) c.lastTown = '';
+      return;
+    }
+    if (msg.t === 'tpos') {
+      const p = c.presence;
+      if (!p || !Number.isFinite(msg.x) || !Number.isFinite(msg.y)) return;
+      p.x = Math.round(Math.max(0, Math.min(TOWN_W, msg.x)));
+      p.y = Math.round(Math.max(0, Math.min(TOWN_H, msg.y)));
+      p.d = Number.isInteger(msg.d) ? msg.d & 7 : 0;
+      p.m = msg.m ? 1 : 0;
       return;
     }
     if (msg.t === 'pvpBoard') { sendJson(c, pvp.board(msg.mode, msg.pid, msg.secret)); return; }
@@ -190,7 +220,7 @@ wss.on('connection', (ws: WebSocket) => {
         const room = new Room(newCode());
         room.isPublic = msg.public !== false;
         room.onEmpty = () => rooms.delete(room.code);
-        const res = room.join(conn, msg.name, msg.meta, msg.v);
+        const res = room.join(conn, msg.name, msg.meta, msg.v, msg);
         if (typeof res === 'string') return fail(res);
         rooms.set(room.code, room);
         c.room = room; c.id = res; c.browsing = false;
@@ -198,7 +228,7 @@ wss.on('connection', (ws: WebSocket) => {
       } else if (msg.t === 'join') {
         const room = rooms.get(String(msg.code).trim());
         if (!room) return fail('找不到这个房间号');
-        const res = room.join(conn, msg.name, msg.meta, msg.v);
+        const res = room.join(conn, msg.name, msg.meta, msg.v, msg);
         if (typeof res === 'string') return fail(res);
         c.room = room; c.id = res; c.browsing = false;
       }
@@ -231,6 +261,34 @@ setInterval(() => {
     else if (!c.room?.inGame && !(c.pvp && !c.pvp.ended) && c.lastStats !== statsJson) { c.lastStats = statsJson; c.ws.send(statsJson); }
   }
 }, 2000);
+
+/** 这位玩家现在在做什么 */
+function whereOf(c: Client): TownWhere {
+  if (c.pvp && !c.pvp.ended) return 'pvp';
+  if (c.room?.inGame) return 'game';
+  if (c.room) return 'room';
+  return c.presence?.town ? 'town' : 'menu';
+}
+
+// 真新镇：每 0.25 秒把所有在线玩家的位置与状态发给镇上的玩家（没有变化就不发）
+setInterval(() => {
+  const peers: TownPeer[] = [];
+  const inTown: Client[] = [];
+  for (const c of clients) {
+    const p = c.presence;
+    if (!p || c.ws.readyState !== c.ws.OPEN) continue;
+    const w = whereOf(c);
+    if (w === 'town') inTown.push(c);
+    if (peers.length < TOWN_MAX || w !== 'town') peers.push({ id: c.uid, name: p.name, trainer: p.trainer, dex: p.dex, x: p.x, y: p.y, d: p.d, m: p.m, w: TOWN_WHERE.indexOf(w) });
+  }
+  if (!inTown.length) return;
+  const list = JSON.stringify(peers.slice(0, TOWN_MAX * 2));
+  for (const c of inTown) {
+    if (c.lastTown === list) continue;
+    c.lastTown = list;
+    c.conn.send(`{"t":"town","you":${c.uid},"peers":${list}}`, true);
+  }
+}, 250);
 
 // 消息额度：每秒恢复，防止刷屏
 setInterval(() => { for (const c of clients) c.budget = Math.min(200, c.budget + 120); }, 1000);

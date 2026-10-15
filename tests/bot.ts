@@ -19,7 +19,9 @@ function preferredRange(p: SimPlayer) {
 /** 走位机器人：躲开近身的敌人与弹幕，保持在技能射程边缘，远离墙角，安全时捡糖果。 */
 export function botMove(sim: GameSim, p: SimPlayer, dt: number) {
   if (p.down) return;
-  const want = Math.max(28, preferredRange(p) * 0.75);
+  const want = Math.max(26, preferredRange(p) * 0.75);
+  // 近战型的宝可梦要贴上去打：只躲开快要碰到的敌人
+  const flee = Math.min(70, want + 12);
   let fx = 0, fy = 0;
   let nearest = Infinity, nx = 0, ny = 0;
   for (const e of sim.enemies) {
@@ -27,7 +29,8 @@ export function botMove(sim: GameSim, p: SimPlayer, dt: number) {
     const d = Math.hypot(dx, dy) || 1;
     if (d < nearest) { nearest = d; nx = dx / d; ny = dy / d; }
     const danger = e.def.rank === 'minion' ? 1 : 2.5;
-    if (d < 70) { fx += (dx / d) * danger * (70 - d) / 70 * 2.2; fy += (dy / d) * danger * (70 - d) / 70 * 2.2; }
+    const r = e.def.rank === 'minion' ? flee : Math.max(flee, 46);
+    if (d < r) { fx += (dx / d) * danger * (r - d) / r * 2.2; fy += (dy / d) * danger * (r - d) / r * 2.2; }
   }
   for (const st of sim.strikes) {
     if (!st.enemy) continue;
@@ -48,7 +51,7 @@ export function botMove(sim: GameSim, p: SimPlayer, dt: number) {
     if (d < 50) { fx += (dx / d) * 1.8 * (50 - d) / 50; fy += (dy / d) * 1.8 * (50 - d) / 50; }
   }
   if (nearest < Infinity) {
-    if (nearest > want + 20) { fx -= nx * 0.6; fy -= ny * 0.6; }
+    if (nearest > want + Math.min(20, want * 0.3)) { fx -= nx * 0.6; fy -= ny * 0.6; }
     // 绕圈走
     fx += -ny * 0.5; fy += nx * 0.5;
   } else if (sim.pickups.length) {
@@ -89,7 +92,9 @@ export function botShop(sim: GameSim, p: SimPlayer) {
         const err = sim.command(p.id, { t: 'level', i, slot: me.skills.length >= me.slots ? weakestSlot(p) : undefined });
         if (!err) continue;
       }
-      const pref = ['spa', 'atk', 'haste', 'maxHp', 'def', 'spd', 'crit'];
+      const phys = p.skills.filter((s) => SKILLS[s.id].cat === 'phys').length;
+      const spec = p.skills.filter((s) => SKILLS[s.id].cat === 'spec').length;
+      const pref = phys > spec ? ['atk', 'maxHp', 'haste', 'def', 'spa', 'spd', 'crit'] : ['spa', 'atk', 'haste', 'maxHp', 'def', 'spd', 'crit'];
       let best = 0, bs = 99;
       me.cards.forEach((c, j) => {
         if (c.kind !== 'stat') return;

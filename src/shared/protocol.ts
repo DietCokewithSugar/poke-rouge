@@ -7,7 +7,7 @@ import type { SavedBuild } from './pvp/build';
 import type { PvpMatchResult, PvpMode } from './pvp/sim';
 import { formOf } from './pokemon';
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const MAX_PLAYERS = 4;
 
 // ---------------------------------------------------------------- 对战
@@ -16,15 +16,24 @@ export interface PvpRecord { mode: PvpMode; rating: number; best: number; wins: 
 export interface PvpBoardRow { rank: number; name: string; rating: number; wins: number; losses: number; draws: number; streak: number; dex: number; you?: boolean }
 export interface PvpHistory { at: number; mode: PvpMode; result: 'win' | 'loss' | 'draw'; delta: number; dex: number; opp: string }
 export interface PvpRatingChange { mode: PvpMode; before: number; after: number; delta: number; record: PvpRecord }
-export interface PvpSeatInfo { id: number; name: string; team: number; bot: boolean; rating: number; line: LineId; dex: number; level: number }
+export interface PvpSeatInfo { id: number; name: string; team: number; bot: boolean; rating: number; trainer: string; line: LineId; dex: number; level: number }
 
-export interface LobbyPlayer { id: number; name: string; line: LineId | null; ready: boolean; host: boolean }
+export interface LobbyPlayer { id: number; name: string; trainer: string; line: LineId | null; ready: boolean; host: boolean }
+
+// ---------------------------------------------------------------- 真新镇
+
+/** 在线玩家在做什么 */
+export const TOWN_WHERE = ['town', 'menu', 'room', 'game', 'pvp'] as const;
+export type TownWhere = (typeof TOWN_WHERE)[number];
+
+/** 真新镇里的其他玩家：w 为 TOWN_WHERE 的序号，不在镇上的玩家只出现在在线列表里 */
+export interface TownPeer { id: number; name: string; trainer: string; dex: number; x: number; y: number; d: number; m: 0 | 1; w: number }
 
 /** 匹配大厅里展示的房间信息 */
 export interface RoomInfo {
   code: string;
   host: string;
-  players: { name: string; line: LineId | null }[];
+  players: { name: string; trainer: string; line: LineId | null }[];
   max: number;
   inGame: boolean;
   wave: number;
@@ -35,11 +44,14 @@ export interface ServerStats { online: number; playing: number; rooms: number; p
 
 export interface MeDyn { hp: number; maxHp: number; xp: number; money: number; down: boolean; speed: number; cds: number[] }
 
-export interface BoardEntry { id: number; name: string; line: LineId; dex: number; level: number; kills: number; damage: number; taken: number; revives: number }
+export interface BoardEntry { id: number; name: string; trainer: string; line: LineId; dex: number; level: number; kills: number; damage: number; taken: number; revives: number }
+
+/** 加入房间时带上的身份：训练家、跟随的宝可梦与已经拥有的宝可梦 */
+export interface JoinIdentity { trainer?: string; line?: LineId; owned?: string[] }
 
 export type C2S =
-  | { t: 'create'; name: string; meta: Record<string, number>; v: number; public?: boolean }
-  | { t: 'join'; code: string; name: string; meta: Record<string, number>; v: number }
+  | ({ t: 'create'; name: string; meta: Record<string, number>; v: number; public?: boolean } & JoinIdentity)
+  | ({ t: 'join'; code: string; name: string; meta: Record<string, number>; v: number } & JoinIdentity)
   | { t: 'pick'; line: LineId }
   | { t: 'ready'; on: boolean }
   | { t: 'start' }
@@ -56,7 +68,11 @@ export type C2S =
   /** 客户端画面能看到的世界范围（宽高，世界像素），服务器据此裁剪快照 */
   | { t: 'view'; w: number; h: number }
   | { t: 'ping'; at: number }
-  | { t: 'pvpQueue'; mode: PvpMode; build: SavedBuild; name: string; meta: Record<string, number>; v: number; pid: string; secret: string }
+  | { t: 'pvpQueue'; mode: PvpMode; build: SavedBuild; name: string; meta: Record<string, number>; v: number; pid: string; secret: string; trainer?: string }
+  /** 在线身份：名字、训练家、跟随的宝可梦，以及是不是在真新镇里 */
+  | { t: 'presence'; name: string; trainer: string; dex: number; town: boolean }
+  /** 真新镇里的位置 */
+  | { t: 'tpos'; x: number; y: number; d: number; m: 0 | 1 }
   | { t: 'pvpCancel' }
   | { t: 'pvpBoard'; mode: PvpMode; pid?: string; secret?: string }
   | Command;
@@ -68,7 +84,7 @@ export type S2C =
   | { t: 'rooms'; stats: ServerStats; rooms: RoomInfo[] }
   | { t: 'stats'; stats: ServerStats }
   | { t: 'left' }
-  | { t: 'start'; w: number; h: number; players: { id: number; name: string; line: LineId }[]; pvp?: { mode: PvpMode; seats: PvpSeatInfo[] } }
+  | { t: 'start'; w: number; h: number; players: { id: number; name: string; trainer: string; line: LineId }[]; pvp?: { mode: PvpMode; seats: PvpSeatInfo[] } }
   | { t: 'ev'; e: Ev[] }
   | { t: 'st'; s: PublicState }
   | { t: 'me'; s: MeState }
@@ -81,7 +97,8 @@ export type S2C =
   | { t: 'pvpQueued'; mode: PvpMode; wait: number; range: number; searching: number; botIn: number }
   | { t: 'pvpCancelled' }
   | { t: 'pvpBoard'; mode: PvpMode; rows: PvpBoardRow[]; me: PvpRecord | null; players: number; history: PvpHistory[] }
-  | { t: 'pvpEnd'; result: PvpMatchResult; you: number; rating: PvpRatingChange | null };
+  | { t: 'pvpEnd'; result: PvpMatchResult; you: number; rating: PvpRatingChange | null }
+  | { t: 'town'; you: number; peers: TownPeer[] };
 
 // ---------------------------------------------------------------- 二进制快照
 

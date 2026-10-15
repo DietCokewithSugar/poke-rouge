@@ -22,8 +22,8 @@ export interface ItemDef {
   special?: ItemSpecial;
   /** 复活类道具复活时的 HP 比例 */
   reviveHp?: number;
-  /** 只对某个精灵系列出现 */
-  only?: string;
+  /** 只对这些进化线出现 */
+  only?: string[];
   icon: string;
   group: ItemGroup;
   desc?: string;
@@ -83,7 +83,7 @@ const LIST: ItemDef[] = [
   I({ id: 'repel', name: '除虫喷雾', tier: 1, price: 18, mods: { enemies: -10 }, icon: 'spray_purple', group: 'field', desc: '让弱小的野生宝可梦不再靠近。' }),
   I({ id: 'white_flute', name: '白色玻璃哨', tier: 1, price: 16, mods: { enemies: 8, luck: 5 }, icon: 'flute_white', group: 'field' }),
   I({ id: 'black_flute', name: '黑色玻璃哨', tier: 1, price: 16, mods: { enemies: -8, luck: 3 }, icon: 'flute_black', group: 'field' }),
-  I({ id: 'poke_ball', name: '精灵球', tier: 1, price: 16, mods: { luck: 5 }, icon: 'ball_poke', group: 'ball' }),
+  I({ id: 'poke_ball', name: '精灵球', tier: 1, price: 16, mods: { luck: 5, recruit: 8 }, icon: 'ball_poke', group: 'ball' }),
   I({ id: 'smoke_ball', name: '烟雾球', tier: 1, price: 18, mods: { dodge: 4, spe: 4 }, icon: 'smokeball', group: 'held' }),
   I({ id: 'poke_doll', name: '皮皮玩偶', tier: 1, price: 18, mods: { dodge: 3, maxHp: 3 }, icon: 'doll', group: 'field' }),
   I({ id: 'amulet_coin', name: '护符金币', tier: 1, price: 24, mods: { money: 10 }, icon: 'coin', group: 'held' }),
@@ -118,7 +118,7 @@ const LIST: ItemDef[] = [
   I({ id: 'super_lure', name: '白银香水', tier: 2, price: 38, mods: { enemies: 20, money: 8 }, icon: 'perfume_silver', group: 'field', desc: '吸引大量野生宝可梦。' }),
   I({ id: 'super_repel', name: '白银喷雾', tier: 2, price: 38, mods: { enemies: -15, dodge: 2 }, icon: 'spray_silver', group: 'field' }),
   I({ id: 'cleanse_tag', name: '洁净之符', tier: 2, price: 42, mods: { enemies: -12, dmgBoss: 8 }, icon: 'tag_clean', group: 'held' }),
-  I({ id: 'great_ball', name: '超级球', tier: 2, price: 36, mods: { luck: 10 }, icon: 'ball_great', group: 'ball' }),
+  I({ id: 'great_ball', name: '超级球', tier: 2, price: 36, mods: { luck: 10, recruit: 15 }, icon: 'ball_great', group: 'ball' }),
   I({ id: 'sitrus_berry', name: '文柚果', tier: 2, price: 40, mods: { maxHp: 8, regen: 3 }, icon: 'berry_yellow', group: 'berry' }),
   I({ id: 'lansat_berry', name: '兰萨果', tier: 2, price: 42, mods: { crit: 5, haste: 3 }, icon: 'berry_red', group: 'berry' }),
   I({ id: 'silver_bottle_cap', name: '银色王冠', tier: 2, price: 50, mods: { atk: 4, def: 4, spa: 4, spd: 4, spe: 4 }, icon: 'cap_silver', group: 'held', desc: '极限特训：全部基础属性小幅提升。' }),
@@ -140,8 +140,10 @@ const LIST: ItemDef[] = [
   I({ id: 'icicle_plate', name: '冰柱石板', tier: 2, price: 42, typeMods: { ice: 20 }, icon: 'plate_ice', group: 'plate' }),
   I({ id: 'iron_plate', name: '钢铁石板', tier: 2, price: 42, typeMods: { steel: 20 }, icon: 'plate_steel', group: 'plate' }),
   // 进化相关
-  I({ id: 'thunder_stone', name: '雷之石', tier: 2, price: 40, special: 'evo_stone', only: 'pikachu', max: 1, icon: 'tstone', group: 'key', desc: '让皮卡丘进化为雷丘（会失去电气球加成）。' }),
-  I({ id: 'light_ball', name: '电气球', tier: 2, price: 46, special: 'light_ball', only: 'pikachu', max: 1, icon: 'lightball', group: 'held', desc: '皮卡丘未进化时物攻、特攻 +20%。' }),
+  I({ id: 'thunder_stone', name: '雷之石', tier: 2, price: 40, special: 'evo_stone', only: ['pikachu', 'eevee'], max: 1, icon: 'tstone', group: 'key', desc: '让皮卡丘进化为雷丘（会失去电气球加成），或让伊布进化为雷伊布。' }),
+  I({ id: 'water_stone', name: '水之石', tier: 2, price: 40, special: 'evo_stone', only: ['eevee'], max: 1, icon: 'wstone', group: 'key', desc: '让伊布进化为水伊布。' }),
+  I({ id: 'fire_stone', name: '火之石', tier: 2, price: 40, special: 'evo_stone', only: ['eevee'], max: 1, icon: 'fstone', group: 'key', desc: '让伊布进化为火伊布。' }),
+  I({ id: 'light_ball', name: '电气球', tier: 2, price: 46, special: 'light_ball', only: ['pikachu'], max: 1, icon: 'lightball', group: 'held', desc: '皮卡丘未进化时物攻、特攻 +20%。' }),
   I({ id: 'everstone', name: '不变之石', tier: 2, price: 36, special: 'everstone', max: 1, icon: 'everstone', group: 'held', desc: '携带后不会再进化；尚未进化到最终形态时，全伤害 +10%、经验 +15%。' }),
 
   // ======================= 三阶 =======================
@@ -159,13 +161,13 @@ const LIST: ItemDef[] = [
   I({ id: 'metronome', name: '节拍器', tier: 3, price: 92, mods: { haste: 18, crit: 3 }, icon: 'metronome', group: 'held' }),
   I({ id: 'max_lure', name: '黄金香水', tier: 3, price: 80, mods: { enemies: 30, money: 12, xp: 12 }, icon: 'perfume_gold', group: 'field', desc: '吸引成群的野生宝可梦。' }),
   I({ id: 'max_repel', name: '黄金喷雾', tier: 3, price: 80, mods: { enemies: -22, maxHp: 5 }, icon: 'spray_gold', group: 'field' }),
-  I({ id: 'ultra_ball', name: '高级球', tier: 3, price: 78, mods: { luck: 15, harvest: 5 }, icon: 'ball_ultra', group: 'ball' }),
+  I({ id: 'ultra_ball', name: '高级球', tier: 3, price: 78, mods: { luck: 15, harvest: 5, recruit: 25 }, icon: 'ball_ultra', group: 'ball' }),
   I({ id: 'bicycle', name: '自行车', tier: 3, price: 88, mods: { spePct: 15, dodge: 2 }, max: 1, icon: 'bike', group: 'key' }),
   I({ id: 'starf_berry', name: '星桃果', tier: 3, price: 95, mods: { atk: 6, def: 6, spa: 6, spd: 6, spe: 6, maxHp: 4 }, icon: 'berry_star', group: 'berry' }),
   I({ id: 'revive', name: '活力碎片', tier: 3, price: 80, special: 'revive', reviveHp: 0.5, max: 1, icon: 'revive_half', group: 'held', desc: '倒下时自动以一半 HP 复活一次（用后消失）。' }),
 
   // ======================= 四阶 =======================
-  I({ id: 'master_ball', name: '大师球', tier: 4, price: 170, mods: { luck: 20, dmg: 12 }, max: 1, icon: 'masterball', group: 'ball' }),
+  I({ id: 'master_ball', name: '大师球', tier: 4, price: 170, mods: { luck: 20, dmg: 12, recruit: 50 }, max: 1, icon: 'masterball', group: 'ball' }),
   I({ id: 'rainbow_wing', name: '彩虹之羽', tier: 4, price: 180, mods: { maxHp: 15, atk: 8, def: 8, spa: 8, spd: 8, spe: 8 }, icon: 'wing', group: 'held' }),
   I({ id: 'dynamax_band', name: '极巨腕带', tier: 4, price: 190, mods: { dmg: 25, range: 15 }, max: 1, icon: 'dynamax', group: 'key' }),
   I({ id: 'key_stone', name: '钥石', tier: 4, price: 200, mods: { atkPct: 12, spaPct: 12, defPct: 12, spdPct: 12, spePct: 12 }, max: 1, icon: 'keystone', group: 'key' }),

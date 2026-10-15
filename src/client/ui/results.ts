@@ -2,6 +2,7 @@ import { DIFFICULTIES } from '../../shared/difficulty';
 import { ENEMIES } from '../../shared/enemies';
 import { ITEMS } from '../../shared/items';
 import { ACHIEVEMENTS, type RunSummary } from '../../shared/meta';
+import { TRAINERS } from '../../shared/trainers';
 import { LINES } from '../../shared/pokemon';
 import type { BoardEntry } from '../../shared/protocol';
 import { SKILLS, TIER_COLOR } from '../../shared/skills';
@@ -208,7 +209,8 @@ export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary
     if (reward?.newAchievements.length) {
       const pg = pager(reward.newAchievements, 6, state.achs, (a) => {
         const def = ACHIEVEMENTS.find((x) => x.id === a.id);
-        const unlock = a.unlocks ? `解锁 ${LINES[a.unlocks].name}！` : def?.unlocksDifficulty ? `解锁${DIFFICULTIES[def.unlocksDifficulty].name}难度！` : '';
+        const names = [...(a.unlocks ?? []).map((l) => LINES[l].name), ...(a.trainer ? [`训练家${TRAINERS[a.trainer]?.name ?? ''}`] : [])];
+        const unlock = names.length ? `解锁 ${names.join('、')}！` : def?.unlocksDifficulty ? `解锁${DIFFICULTIES[def.unlocksDifficulty].name}难度！` : '';
         const el = h('div', { class: `r-ach ${unlock ? 'unlock' : ''}` }, h('b', null, `★ ${a.name}`), h('span', { class: 'muted' }, ` +${a.reward}`), unlock ? h('span', { class: 'gold' }, ` · ${unlock}`) : null);
         if (def) tip(el, () => `${def.desc}${unlock ? ` · ${unlock}` : ''}`);
         return el;

@@ -18,15 +18,17 @@ function angDiff(a: number, b: number) {
 /** 技能对所有敌人通用的伤害部分（不含克制、首领加成、暴击）。 */
 export function baseDamage(p: SimPlayer, s: SkillDef, lv: number): number {
   const L = LINES[p.line];
+  const F = L.flags;
   const form = formOf(p.line, p.stage);
   const stat = s.cat === 'phys' ? p.d.physMult : p.d.specMult;
-  const stab = form.types.includes(s.type) ? 1.5 : 1;
+  const stab = F.imposter || form.types.includes(s.type) ? (F.adaptability ? 2 : 1.5) : 1;
   let typeBonus = 1 + (p.typeMods[s.type] ?? 0) / 100;
   if (L.bonusType === s.type) {
     typeBonus += L.bonusPct / 100;
-    if (p.line !== 'pikachu' && p.line !== 'mewtwo' && p.hp < p.d.maxHp / 3) typeBonus += 0.5;
+    if (F.lowHp && p.hp < p.d.maxHp / 3) typeBonus += 0.5;
   }
   let dmg = s.power * skillLevelDmg(lv) * stat * stab * typeBonus * p.d.dmgMult;
+  if (F.technician && s.power <= 15) dmg *= 1.4;
   if (s.speedScale) dmg *= 1 + Math.max(0, p.d.spe - 50) / 60;
   return dmg;
 }
@@ -71,6 +73,12 @@ export function hitEnemy(sim: GameSim, e: Enemy, p: SimPlayer | null, raw: numbe
     p.stats.skillDmg[key] = (p.stats.skillDmg[key] ?? 0) + dmg;
     if (!o.dot && p.d.lifesteal > 0 && sim.rng.chance(p.d.lifesteal)) healPlayer(sim, p, 1, true);
     if (!o.dot && p.d.stun > 0 && sim.rng.chance(p.d.stun)) applyStatus(e, { kind: 'stun', chance: 1, dur: 0.5 }, dmg, p.id);
+    if (o.skill?.payday && sim.rng.chance(0.12)) {
+      const coin = Math.max(1, Math.round((1 + sim.wave * 0.15) * p.d.moneyMult));
+      p.money += coin;
+      p.stats.moneyEarned += coin;
+      sim.dirty.add(p.id);
+    }
   }
   sim.addHit(e, dmg, flags, TYPES.indexOf(type));
   if (o.status && sim.rng.chance(o.status.chance)) applyStatus(e, o.status, dmg, p?.id ?? -1, o.heal);
@@ -146,13 +154,23 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
   p.stats.taken += dmg;
   if (!o.pvp) p.invuln = 0.45;
   sim.emit(['ph', p.id, dmg, 0, ...tail]);
+  const F = LINES[p.line].flags;
   if (src && src.hp > 0) {
     if (p.d.thorns > 0) hitEnemy(sim, src, p, p.d.thorns * (1 + sim.wave * 0.1), 'normal', { noEff: true });
-    if (p.line === 'pikachu' && sim.rng.chance(0.3)) applyStatus(src, { kind: 'para', chance: 1, dur: 2 }, 0, p.id);
+    if (F.contact && sim.rng.chance(F.contact[1])) {
+      const kind = F.contact[0];
+      // 中毒、灼伤的持续伤害按波次成长，和反伤一样
+      applyStatus(src, { kind, chance: 1, dur: kind === 'stun' ? 0.8 : kind === 'para' ? 2 : 3 }, 6 + sim.wave * 2, p.id);
+    }
   }
   if (p.hp <= 0) {
     const reviveItem = Object.keys(p.items).find((id) => ITEMS[id]?.special === 'revive' && p.items[id] > 0);
-    if (p.items.focus_sash && !p.sashUsed) {
+    if (F.sturdy && !p.sturdyUsed) {
+      p.hp = 1;
+      p.sturdyUsed = true;
+      p.invuln = 1;
+      sim.emit(['txt', p.x, p.y - 26, '结实！', '#ffd23f']);
+    } else if (p.items.focus_sash && !p.sashUsed) {
       p.hp = 1;
       p.sashUsed = true;
       p.invuln = 1;
@@ -217,7 +235,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
     case 'heal': return castHeal(sim, p, s);
     case 'shield': {
       if (!nearest(sim, p, range)) return false;
-      const mult = (p.line === 'squirtle' ? 1.5 : 1) * (p.items.light_clay ? 1.6 : 1);
+      const mult = (LINES[p.line].flags.shieldMult ?? 1) * (p.items.light_clay ? 1.6 : 1);
       p.shield = Math.max(p.shield, p.d.maxHp * (s.shield ?? 0.15) * mult);
       p.shieldT = s.duration ?? 4;
       sim.emit(['fx', s.fx, p.x, p.y, 0, 16, 0, p.id]);
@@ -243,7 +261,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
 
   switch (s.pattern) {
     case 'proj': {
-      const n = s.count ?? 1;
+      const n = (s.count ?? 1) + ((s.count ?? 1) > 1 && LINES[p.line].flags.skillLink ? 1 : 0);
       const spd = s.speed ?? 200;
       for (let i = 0; i < n; i++) {
         const a = n > 1 ? ang + (s.spread ?? 0) * (i / (n - 1) - 0.5) : ang;
@@ -371,7 +389,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
 }
 
 function castHeal(sim: GameSim, p: SimPlayer, s: SkillDef): boolean {
-  const mult = (p.line === 'bulbasaur' ? 1.3 : 1) * (p.items.big_root ? 1.3 : 1);
+  const mult = healMult(p);
   const targets = s.team
     ? sim.players.filter((q) => q.alive && !q.down && sim.isAlly(p, q) && Math.hypot(q.x - p.x, q.y - p.y) <= (s.radius ?? 120))
     : [p];
@@ -382,8 +400,13 @@ function castHeal(sim: GameSim, p: SimPlayer, s: SkillDef): boolean {
   return true;
 }
 
+/** 回复类技能、寄生种子吸取的倍率 */
+export function healMult(p: SimPlayer) {
+  return (LINES[p.line].flags.healMult ?? 1) * (p.items.big_root ? 1.3 : 1);
+}
+
 function recoil(p: SimPlayer, s: SkillDef, total: number) {
-  if (!s.recoil || total <= 0) return;
+  if (!s.recoil || total <= 0 || LINES[p.line].flags.rockHead) return;
   const r = Math.min(total * s.recoil, p.d.maxHp * 0.06);
   p.hp = Math.max(1, p.hp - r);
 }
