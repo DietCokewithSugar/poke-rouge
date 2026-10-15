@@ -3,7 +3,7 @@
  * 左边是八个道馆（按顺序解锁）；馆主的完整台词点气泡用对话框看，徽章的详细加成和挑战记录放在提示里。
  */
 import { GUIDE, GYMS, GYM_BY_ID, counters, gymOpen, nextGym, type GymDef } from '../../shared/gyms';
-import { formOf } from '../../shared/pokemon';
+import { LINES, formOf } from '../../shared/pokemon';
 import { teamLevel } from '../../shared/pvp/build';
 import { gymTeam } from '../../shared/pvp/gym';
 import { shinyName } from '../../shared/shiny';
@@ -117,7 +117,10 @@ export function gymScreen(root: HTMLElement, p: Profile, a: GymActions, sel?: st
   // ② 我的队伍能不能应对：等级够不够、属性克不克制
   const lv = team.length ? teamLevel(team.map((m) => m.build)) : 0;
   const gap = lv - g.leader.level;
-  const verdict = !team.length ? ['bad', '背包里还没有宝可梦'] : gap >= 0 ? ['good', `等级足够（比推荐高 ${gap} 级）`] : gap >= -6 ? ['warn', `低了 ${-gap} 级，有点吃力`] : ['bad', `低了 ${-gap} 级，建议先去冒险练级`];
+  // 队长是背包里和跟随的伙伴同一只的构筑：背包里有宝可梦但没有它时，要先去背包设队长
+  const noLeader = !team.length && p.party.length > 0;
+  const partnerName = shinyName(LINES[p.partner]?.name ?? '伙伴', p.partnerShiny);
+  const verdict = !team.length ? ['bad', noLeader ? `跟随的${partnerName}还没有对战构筑` : '背包里还没有宝可梦'] : gap >= 0 ? ['good', `等级足够（比推荐高 ${gap} 级）`] : gap >= -6 ? ['warn', `低了 ${-gap} 级，有点吃力`] : ['bad', `低了 ${-gap} 级，建议先去冒险练级`];
   const slots = Array.from({ length: 3 }, (_, i) => team[i] ?? null);
   const autoBtn = h('button', {
     class: `btn small pvp-auto ${p.pvpAuto ? 'on' : ''}`, role: 'switch', 'aria-checked': p.pvpAuto ? 'true' : 'false',
@@ -126,7 +129,7 @@ export function gymScreen(root: HTMLElement, p: Profile, a: GymActions, sel?: st
   tip(autoBtn, () => h('div', { class: 'info small' }, '开启后队长也交给 AI，整场观战；对战中按 T 随时切换。'));
   const yours = h('section', { class: 'pvp-step gym-yours' },
     step(2, '我的队伍能不能应对', h('div', { class: 'row tight pvp-step-tools' },
-      team.length ? iconBtn('swap', '在对战场的背包里调整出战的三只', () => { sfx('click'); a.team(g); }, { cls: 'small', text: '调整队伍' }) : null,
+      p.party.length ? iconBtn('swap', '在对战场的背包里调整出战的三只', () => { sfx('click'); a.team(g); }, { cls: 'small', text: '调整队伍' }) : null,
       autoBtn)),
     h('div', { class: 'gym-yours-body' },
       h('div', { class: 'gym-slots' }, slots.map((m, i) => {
@@ -161,7 +164,9 @@ export function gymScreen(root: HTMLElement, p: Profile, a: GymActions, sel?: st
           class: 'btn gold big go gym-go', 'data-key': 'y', disabled: !open || !team.length,
           onclick: () => { if (open && team.length) { sfx('click'); a.challenge(g, team); } },
         }, got ? '再战馆主' : beatJunior ? '挑战馆主' : '挑战道馆', h('small', null, open ? `对手：${target}` : `先拿到${prev?.badge.name ?? ''}才能挑战`))
-        : h('button', { class: 'btn gold big go gym-go', 'data-key': 'y', onclick: () => { sfx('click'); a.adventure(); } }, '先去冒险', h('small', null, '冒险结束后把宝可梦放进背包，就能组队挑战道馆')),
+        : noLeader
+          ? h('button', { class: 'btn gold big go gym-go', 'data-key': 'y', onclick: () => { sfx('click'); a.team(g); } }, '先设一只队长', h('small', null, '在背包里把一只宝可梦设为队长，它会变成跟随的伙伴'))
+          : h('button', { class: 'btn gold big go gym-go', 'data-key': 'y', onclick: () => { sfx('click'); a.adventure(); } }, '先去冒险', h('small', null, '冒险结束后把宝可梦放进背包，就能组队挑战道馆')),
       reward,
     ),
   );
