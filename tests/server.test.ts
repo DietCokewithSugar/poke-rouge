@@ -15,9 +15,10 @@ let server: ChildProcess;
 
 before(async () => {
   fs.rmSync(PVP_DATA, { force: true });
-  server = spawn(process.execPath, ['--import', 'tsx', 'src/server/index.ts'], {
-    env: { ...process.env, PORT: String(PORT), PVP_DATA, PVP_BOT_AFTER: '1.5', POKE_DEBUG: '1' }, stdio: 'pipe',
-  });
+  const env: NodeJS.ProcessEnv = { ...process.env, PORT: String(PORT), PVP_DATA, PVP_BOT_AFTER: '1.5', POKE_DEBUG: '1' };
+  // 本机如果配了 Supabase，也不要让联机测试去连它：对战数据用上面的临时文件
+  for (const k of ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SECRET_KEY']) delete env[k];
+  server = spawn(process.execPath, ['--import', 'tsx', 'src/server/index.ts'], { env, stdio: 'pipe' });
   await new Promise<void>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('server start timeout')), 15000);
     server.stdout!.on('data', (d) => { if (String(d).includes('已启动')) { clearTimeout(t); resolve(); } });

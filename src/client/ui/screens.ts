@@ -414,9 +414,9 @@ const PAD_KEYS: [keyof typeof PAD_BTN, string, string, string][] = [
   ['LB', 'LB', 'L1', '翻页 / 切换标签'], ['LT', 'LT', 'L2', '撤销购买'], ['START', 'Start', 'Options', '暂停 / 菜单'], ['UP', '十字键', '十字键', '移动 / 选择'],
 ];
 
-export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => void, onBack: () => void) {
+export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => void, onBack: () => void, onAccount?: () => void) {
   const s = p.settings;
-  const render = () => settingsScreen(root, p, onChange, onBack);
+  const render = () => settingsScreen(root, p, onChange, onBack, onAccount);
   const set = <K extends keyof Profile['settings']>(k: K, v: Profile['settings'][K], rerender = true) => {
     s[k] = v;
     saveProfile(p);
@@ -508,6 +508,8 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
       ),
     ),
     h('div', { class: 'panel-foot' },
+      onAccount ? h('button', { class: 'btn small ghost with-ico', onclick: () => { sfx('click'); onAccount(); } }, uiIcon('user', 2), '账号与云存档') : h('span'),
+      h('span', { class: 'set-note' }, '音量和画面只存在这台设备'),
       confirmButton('恢复默认设置', '再点一次确认恢复', 'btn small ghost', () => {
         p.settings = defaultSettings();
         saveProfile(p);
@@ -516,7 +518,6 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
         toast('已恢复默认设置');
         render();
       }, {}, 'undo'),
-      h('span', { class: 'set-note' }, '设置会自动保存'),
     ),
   ), 'settings');
   poll();
@@ -535,6 +536,7 @@ const CREDIT_TABS: [string, () => Node][] = [
     h('li', null, '难度分简单 / 普通 / 困难：通关上一档才能解锁下一档。'),
     h('li', null, '训练家各有加成：小智更容易让宝可梦崇拜、小霞擅长水系、火箭队赚得多还专门盯着闪光宝可梦，但宝可梦不太信任他们……其他训练家靠成就或星之沙解锁。'),
     h('li', null, '联机时倒下的队友身边会出现绿色救援圈，站进去就能把它救起来。首次通关后可以开启 AI 辅助战斗，由 AI 替你走位。'),
+    h('li', null, '账号：在标题或设置里用邮箱注册登录（也可以用 Google）。宝可梦、背包、星之沙、研究所、成就、徽章、训练家和对战身份会存到云端，换设备登录同一个账号就能继续。音量、界面缩放、帧率和画质留在每台设备上。不登录也能玩，进度只在这台设备。两台设备的进度对不上时，会让你选保留哪一份。'),
     h('li', null, '联机冒险中按 Esc 或右上角的按钮打开菜单（设置、离开房间）。离开或断线后由 AI 接手你的宝可梦，之后从真新镇或宝可梦中心回到房间，错过的结算也会补发。'),
     h('li', null, '冒险结束后可以把宝可梦放进背包（12 格，对战场达到超级球级后再多 6 格），在对战场里排位：单挑是三只同时上场（你操作队长），团战四人各一只；每场 60 秒，也可以整场交给 AI。'),
     h('li', null, '排行榜：单挑、团战、冒险（难度 → 波次 → 用时）、道馆（徽章数），每人只算最好的一次。'),

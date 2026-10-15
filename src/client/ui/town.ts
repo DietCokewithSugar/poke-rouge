@@ -49,13 +49,13 @@ export function trainerBonus(id: string): string[] {
 
 // ---------------------------------------------------------------- 标题
 
-export interface TitleActions { play(): void; settings(): void; credits(): void }
+export interface TitleActions { play(): void; account(): void; settings(): void; credits(): void }
 
 export function onlineText(stats: ServerStats | null) {
   return stats ? `在线 ${stats.online} 人 · ${stats.playing} 人游戏中` : '正在连接联机服务器…';
 }
 
-export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stats: ServerStats | null) {
+export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stats: ServerStats | null, account?: { title: string; detail: string }) {
   const owned = unlockedLines(p).length;
   mount(root, h('div', { class: 'title-wrap' },
     h('div', { class: 'logo' }, h('div', { class: 'logo-main' }, '宝可肉鸽'), h('div', { class: 'logo-sub' }, 'POKé ROUGE · 宝可梦割草肉鸽')),
@@ -64,6 +64,8 @@ export function titleScreen(root: HTMLElement, p: Profile, a: TitleActions, stat
         h('span', { class: 'mi-ico' }, uiIcon('play', 3)),
         h('span', { class: 'mi-text' }, p.setup ? '继续游戏' : '开始游戏',
           h('small', null, p.setup ? `${p.name || '训练家'} · ${TRAINERS[p.trainer]?.name ?? ''} · 伙伴 ${partnerName(p)} · 已有 ${owned} 种宝可梦` : '选择训练家与第一只宝可梦，从真新镇出发'))),
+      h('button', { class: 'menu-item', onclick: () => { sfx('click'); a.account(); } },
+        h('span', { class: 'mi-ico' }, uiIcon('user', 3)), h('span', { class: 'mi-text' }, account?.title ?? '账号', h('small', null, account?.detail ?? '登录后换设备也能继续'))),
       h('button', { class: 'menu-item', onclick: () => { sfx('click'); a.settings(); } },
         h('span', { class: 'mi-ico' }, uiIcon('gear', 3)), h('span', { class: 'mi-text' }, '设置', h('small', null, '音量、界面缩放、帧率与画质、手柄'))),
       h('button', { class: 'menu-item', onclick: () => { sfx('click'); a.credits(); } },
