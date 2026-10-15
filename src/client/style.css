@@ -1157,3 +1157,6 @@ body.pad .th-key::after { content: var(--g-a); }
 /* 对战场：伙伴还没有构筑 */
 .pvp-nobuild { padding: 0.5rem 0.625rem; background: rgba(0, 0, 0, .2); border-radius: 0.5rem; }
 .pvp-nobuild p { margin: 0.25rem 0 0; }
+.card .lock { display: inline-flex; align-items: center; gap: 0.1875rem; }
+.card .lock img.uico { width: 0.75rem; height: 0.75rem; }
+.btn.undo .undo-head { display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem; }

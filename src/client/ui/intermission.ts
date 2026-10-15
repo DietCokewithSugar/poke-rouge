@@ -9,9 +9,10 @@ import { ENEMIES } from '../../shared/enemies';
 import { BIOMES, TOTAL_WAVES, WAVES, waveDuration } from '../../shared/waves';
 import { sfx } from '../audio';
 import { iconImg } from '../gfx/icons';
+import { uiIcon } from '../gfx/uiicons';
 import { Animator } from '../gfx/sprites';
 import { clear, h, hideTip, tip } from './dom';
-import { pager } from './layout';
+import { iconBtn, pager } from './layout';
 
 const INV_PER_PAGE = 26;
 const STATS_PER_PAGE = 12;
@@ -227,7 +228,7 @@ export class Intermission {
       h('div', { class: 'swap-card new' }, skillCardBody(s.id, s.lv, me.line)),
       h('div', { class: 'sub' }, `遗忘后返还 ₽${refund}，空出的技能栏可以学习新技能。`, s.lv > 1 ? '技能强化等级不会保留。' : ''),
       h('div', { class: 'swap-foot' },
-        h('button', { class: 'btn ghost', 'data-back': '1', onclick: () => { sfx('click'); this.closeModal(); } }, '取消'),
+        iconBtn('close', '取消', () => { sfx('click'); this.closeModal(); }, { cls: 'ghost', attrs: { 'data-back': '1' }, text: '取消' }),
         h('button', { class: 'btn gold', 'data-key': 'y', onclick: () => { this.closeModal(); sfx('pickup'); this.send({ t: 'forget', slot }); } }, `遗忘「${SKILLS[s.id].name}」 +₽${refund}`),
       ),
     ));
@@ -276,15 +277,15 @@ export class Intermission {
     return h('div', { class: 'shop-actions' },
       h('div', { class: 'shop-btns' },
         shopping
-          ? h('button', { class: 'btn', 'data-key': 'x', onclick: () => { sfx('click'); this.send({ t: 'reroll' }); }, disabled: me.money < me.shop.rerollCost },
-            me.shop.rerollCost === 0 ? '免费刷新' : `刷新 ₽${me.shop.rerollCost}`)
+          ? h('button', { class: 'btn with-ico', 'data-key': 'x', title: '刷新商店', onclick: () => { sfx('click'); this.send({ t: 'reroll' }); }, disabled: me.money < me.shop.rerollCost },
+            uiIcon('refresh', 2), h('span', null, me.shop.rerollCost === 0 ? '免费刷新' : `刷新 ₽${me.shop.rerollCost}`))
           : null,
         shopping
           ? h('button', {
             class: 'btn ghost undo', 'data-key': 'lt', disabled: !me.undo,
             title: me.undo ? `撤销购买「${me.undo}」，退还全部金钱（只能撤销最近一次购买）` : '买错了可以撤销最近一次购买',
             onclick: () => this.undo(),
-          }, '撤销', h('small', null, me.undo ? me.undo : '上一次购买'))
+          }, h('span', { class: 'undo-head' }, uiIcon('undo', 2), '撤销'), h('small', null, me.undo ? me.undo : '上一次购买'))
           : null,
       ),
       team,
@@ -365,7 +366,7 @@ export class Intermission {
     if (!o) return h('div', { class: 'card sold' }, h('div', { class: 'card-title muted' }, '已售出'));
     const locked = me.shop.locked[i];
     const afford = me.money >= o.price;
-    const lockBtn = h('button', { class: `lock ${locked ? 'on' : ''}`, title: '锁定：刷新时保留', onclick: (e: Event) => { e.stopPropagation(); this.send({ t: 'lock', i }); } }, locked ? '已锁' : '锁定');
+    const lockBtn = h('button', { class: `lock ${locked ? 'on' : ''}`, title: locked ? '已锁定：刷新时保留（再点解锁）' : '锁定：刷新时保留', 'aria-label': locked ? '已锁定' : '锁定', onclick: (e: Event) => { e.stopPropagation(); this.send({ t: 'lock', i }); } }, uiIcon(locked ? 'lock' : 'unlock', 1), locked ? '已锁' : '锁定');
     let el: HTMLElement;
     if (o.kind === 'item') {
       const it = ITEMS[o.id];
