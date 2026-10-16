@@ -88,6 +88,8 @@ export class GameView {
   private hurtFlash = 0;
   private superEffAt = 0;
   private trailT = new Map<number, number>();
+  /** 每位玩家最近一次踩到种子的时间和第几行提示：连着踩到时往上错开，不叠在一起 */
+  private boostTxt = new Map<number, { at: number; row: number }>();
   private lastSnapPhase = 0;
   private ringR = 0;
   settings: Settings;
@@ -407,19 +409,21 @@ export class GameView {
     if (!this.settings.shake) this.fx.shake = 0;
   }
 
-  /** 踩到橙橙果、种子：头顶飘字说明效果（回复的绿色数字由 'heal' 事件显示） */
+  /** 踩到种子：头顶飘字说明效果；橙橙果只冒一点光（回复的绿色数字由 'heal' 事件显示） */
   private pickedItem(kind: number, boost: BoostId | null, pid: number) {
     if (!hasArt(kind)) return;
     const pos = this.playerPos(pid);
     if (!pos) return;
     if (boost) {
       const B = BOOSTS[boost];
-      this.fx.text(pos.x, pos.y - 38, B.text, B.color, 12, 1.3);
+      const now = performance.now(), last = this.boostTxt.get(pid);
+      const row = last && now - last.at < 900 ? (last.row + 1) % 3 : 0;
+      this.boostTxt.set(pid, { at: now, row });
+      this.fx.text(pos.x, pos.y - 38 - row * 14, B.text, B.color, 12, 1.3);
       this.fx.burst(pos.x, pos.y - 8, [B.color, '#ffffff'], 14, 70);
       this.fx.ring(pos.x, pos.y, 4, 18, B.color, 0.4, 1, 0.5);
     } else {
-      this.fx.text(pos.x, pos.y - 38, '橙橙果', artGlow(kind), 10, 1);
-      this.fx.burst(pos.x, pos.y - 8, ['#78f878', artGlow(kind)], 8, 45);
+      this.fx.burst(pos.x, pos.y - 8, ['#78f878', artGlow(kind)], 10, 50);
     }
   }
 
