@@ -878,6 +878,13 @@ export class GameView {
     this.ctx.fillRect(Math.round(x - rx + 2), Math.round(y - 2), Math.round(rx * 2 - 4), 5);
   }
 
+  /** 减速时身体两侧往上飘的冰晶：深浅两种蓝，冰面和草地上都看得清；side 为离中线的距离，hgt 为身体高度 */
+  private iceBit(x: number, y: number, side: number, hgt: number) {
+    const s = Math.random() < 0.5 ? -1 : 1;
+    const deep = Math.random() < 0.5;
+    this.fx.px(x + s * (side * 0.6 + Math.random() * side * 0.5), y - 2 - Math.random() * hgt, deep ? '#2f8ce8' : '#c8f0ff', { vy: -16, life: 0.55, size: deep || Math.random() < 0.4 ? 2 : 1 });
+  }
+
   /** want：heart 还没有的乱入宝可梦（头上一颗爱心），shiny 还没有的闪光宝可梦（头上一颗星） */
   private drawEnemy(e: SnapEnemy, rank: string, dex: number, x: number, y: number, v: EnemyVis, t: number, want: '' | 'heart' | 'shiny', shiny: boolean) {
     const ctx = this.ctx;
@@ -902,7 +909,7 @@ export class GameView {
     if (f & 4 && Math.random() < 0.2) this.fx.px(jx(), y - 4, '#d995f2', { vy: -25, life: 0.5, size: 2 });
     if (f & 8 && Math.random() < 0.12) this.fx.sp('spark', 'electric', jx(), y - 6 - Math.random() * 12 * v.scale, { life: 0.15, fr: 20 });
     if (f & 16) { ctx.globalAlpha = 0.33; pxCircle(ctx, x, y - 8 * v.scale, 7 * v.scale, '#bff3ff'); ctx.globalAlpha = 1; }
-    if (f & 32 && Math.random() < 0.14) this.fx.px(jx(), y - 1 - Math.random() * 5 * v.scale, Math.random() < 0.5 ? '#8fd8ff' : '#d0f2ff', { vy: -14, life: 0.45 });
+    if (f & 32 && Math.random() < 0.18) this.iceBit(x, y, 8 * v.scale, 10 * v.scale);
     if (f & 64) {
       ctx.fillStyle = '#f83838';
       ctx.fillRect(Math.round(x) - 1, Math.round(top) - 6, 2, 5);
@@ -949,8 +956,10 @@ export class GameView {
     const invuln = (p.flags & 2) !== 0 && !(p.flags & 1);
     const alpha = invuln && Math.floor(t * 16) % 2 ? 0.55 : 1;
     const white = v.flash > 0 || v.evoFlash > 0;
-    const flash = v.flash > 0 ? 0.6 : v.evoFlash > 0 ? Math.min(1, v.evoFlash) : Math.min(0.55, v.burn * 3);
-    v.anim.draw(ctx, x, y, 1, flash, alpha, white ? '#ffffff' : '#ff4a2a');
+    // 寒霜冻得减速时身上一直带一层淡蓝（灼伤的红闪优先）
+    const chill = !white && v.burn <= 0 && (p.tst & 2) !== 0;
+    const flash = v.flash > 0 ? 0.6 : v.evoFlash > 0 ? Math.min(1, v.evoFlash) : v.burn > 0 ? Math.min(0.55, v.burn * 3) : chill ? 0.22 + 0.08 * Math.sin(t * 6) : 0;
+    v.anim.draw(ctx, x, y, 1, flash, alpha, white ? '#ffffff' : chill ? '#58b8ff' : '#ff4a2a');
     if (v.evoFlash > 0) {
       ctx.globalAlpha = v.evoFlash / 1.4;
       pxRing(ctx, x, y - 10, 10 + (1.4 - v.evoFlash) * 30, '#ffffff', 2);
@@ -970,7 +979,7 @@ export class GameView {
     }
     // 局部属性场地：灼伤冒火星，减速冒蓝色的冰晶
     if (p.tst & 1 && Math.random() < 0.3) this.fx.px(x + (Math.random() - 0.5) * 12, y - 4 - Math.random() * 12, Math.random() < 0.5 ? '#ff6a1f' : '#ffb22e', { vy: -38, life: 0.4 });
-    if (p.tst & 6 && Math.random() < (p.tst & 2 ? 0.25 : 0.15)) this.fx.px(x + (Math.random() - 0.5) * 14, y - 1 - Math.random() * 4, Math.random() < 0.5 ? '#8fd8ff' : '#d0f2ff', { vy: -14, life: 0.5 });
+    if (p.tst & 6 && Math.random() < (p.tst & 2 ? 0.3 : 0.2)) this.iceBit(x, y, 9, 12);
     // 名字与血条
     const name = this.names.get(p.id) ?? '';
     ctx.font = '10px FusionPixel, monospace';
