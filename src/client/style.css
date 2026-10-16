@@ -1119,6 +1119,11 @@ body.pad .pager-nav [data-key]::after, body.pad .tab-nav[data-key]::after { top:
 .modal { background: rgba(5, 9, 20, .62); }
 .modal-box.skill-swap { width: 52rem; height: 27rem; display: flex; flex-direction: column; gap: 0.625rem; }
 .modal-box.skill-forget { width: 28rem; display: flex; flex-direction: column; gap: 0.625rem; }
+.modal-box.release-warn { width: 34rem; display: flex; flex-direction: column; gap: 0.625rem; }
+.release-warn-head { display: flex; align-items: center; gap: 0.75rem; }
+.release-warn-head .sub { margin: 0.25rem 0 0; }
+.release-warn-portrait { flex: none; width: 4rem; height: 4rem; }
+.modal-box.release-warn p { margin: 0; }
 .modal-box h2 { margin: 0; }
 .swap-head .sub, .skill-forget .sub { margin: 0.25rem 0 0; }
 .swap-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 14rem 2rem minmax(0, 1fr); gap: 0.5rem; }
