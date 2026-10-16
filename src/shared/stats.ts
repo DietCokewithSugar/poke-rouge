@@ -100,6 +100,7 @@ export interface Derived {
 }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+export const MOVE_SPEED_MAX = 220;
 
 /** shiny：闪光宝可梦，六项能力各 +1% */
 export function derive(base: BaseStats, m: Mods, shiny = false): Derived {
@@ -117,7 +118,7 @@ export function derive(base: BaseStats, m: Mods, shiny = false): Derived {
     specMult: spa / 50,
     physTaken: 100 / (50 + def),
     specTaken: 100 / (50 + spd),
-    moveSpeed: clamp(80 + spe * 0.5, 50, 220),
+    moveSpeed: clamp(80 + spe * 0.5, 50, MOVE_SPEED_MAX),
     cdMult: m.haste >= 0 ? Math.max(0.5, 1 / (1 + m.haste / 100)) : 1 + -m.haste / 100,
     crit: clamp(0.05 + m.crit / 100, 0, 1),
     rangeMult: clamp(1 + m.range / 100, 0.5, 3),

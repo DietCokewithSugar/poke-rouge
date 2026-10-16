@@ -1,8 +1,9 @@
 /**
  * 自动走位（冒险的 AI 辅助战斗）：躲开近身的敌人、弹幕与即将落下的攻击，保持在技能射程边缘绕圈，
- * 安全时去捡糖果、救倒下的队友，血少时去吃树果，远离墙角。
+ * 安全时去捡糖果和增幅种子、救倒下的队友，血少时去吃橙橙果，远离墙角。
  * 只负责走位：技能本来就是自动释放的，商店、升级与进化仍由玩家自己决定。
  */
+import { boostOfSeed } from '../pickups';
 import { SKILLS } from '../skills';
 import type { SimPlayer } from './entities';
 import { REVIVE_RADIUS, type GameSim } from './game';
@@ -53,7 +54,7 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
     if (d < 50) { fx += (dx / d) * 1.8 * (50 - d) / 50; fy += (dy / d) * 1.8 * (50 - d) / 50; }
   }
   const safe = nearest > want + 40;
-  // 安全时的目标：倒下的队友 > 血少时的树果 > 附近的糖果和道具球
+  // 安全时的目标：倒下的队友 > 血少时的橙橙果 > 增幅种子 > 附近的糖果和道具球
   let goal: { x: number; y: number; w: number } | null = null;
   for (const q of sim.players) {
     if (q === p || !q.down || !q.alive || !sim.isAlly(p, q)) continue;
@@ -65,8 +66,11 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
     let bd = (safe ? 160 : 70) ** 2;
     for (const pk of sim.pickups) {
       if (pk.kind === 'berry' && !low) continue;
+      // 同一种增幅还剩很久时不急着去踩
+      const b = boostOfSeed(pk.kind);
+      if (b && p.boosts[b] > 2) continue;
       const d = (pk.x - p.x) ** 2 + (pk.y - p.y) ** 2;
-      const k = pk.kind === 'berry' ? 0.3 : 1;
+      const k = pk.kind === 'berry' ? 0.3 : b ? 0.5 : 1;
       if (d * k < bd) { bd = d * k; goal = { x: pk.x, y: pk.y, w: 1.2 }; }
     }
   }

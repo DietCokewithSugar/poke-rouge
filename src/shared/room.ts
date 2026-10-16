@@ -1,5 +1,6 @@
 import { LINES, formOf, isLine, type LineId } from './pokemon';
 import { DIFFICULTY_IDS, type DifficultyId } from './difficulty';
+import { pickupCode } from './pickups';
 import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type JoinIdentity, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
 import { trainerOf } from './trainers';
 import { PeerSync, cullEvents, type Conn } from './netsync';
@@ -169,7 +170,7 @@ export class Room {
     if (!sim) { this.sendLobby(); return; }
     this.send(m.conn, { t: 'start', w: sim.w, h: sim.h, players: this.startPlayers() });
     const ev: Ev[] = [];
-    for (const pk of sim.pickups) ev.push(['drop', pk.id, pk.kind === 'candy' ? 0 : pk.kind === 'berry' ? 1 : 2, Math.round(pk.x), Math.round(pk.y), Math.round(pk.value * 10) / 10]);
+    for (const pk of sim.pickups) ev.push(['drop', pk.id, pickupCode(pk.kind), Math.round(pk.x), Math.round(pk.y), Math.round(pk.value * 10) / 10]);
     for (const e of sim.enemies) if (e.shiny && !e.dead) ev.push(['shiny', e.id, e.kind, Math.round(e.x), Math.round(e.y)]);
     if (ev.length) this.send(m.conn, { t: 'ev', e: ev });
     this.send(m.conn, { t: 'st', s: sim.publicState() });
@@ -253,6 +254,7 @@ export class Room {
         else if (msg.cmd === 'endWave') sim.waveT = sim.waveDur;
         else if (msg.cmd === 'xp') sim.debugXp(p, 400);
         else if (msg.cmd === 'shiny') sim.forceShiny += 3;
+        else if (msg.cmd === 'items') sim.debugItems(p);
         return;
       }
       case 'pause':

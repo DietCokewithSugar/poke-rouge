@@ -2,6 +2,10 @@ import { difficultyOf, type Difficulty, type DifficultyId } from '../difficulty'
 import { ENEMIES, ENEMY_INDEX } from '../enemies';
 import { ITEMS } from '../items';
 import type { RunSummary } from '../meta';
+import {
+  BOOSTS, BOOST_DUR, BOOST_IDS, MAX_BERRIES, MAX_SEEDS, SEED_DROP_ELITE, SEED_DROP_MINION, berryHeal, boostOfSeed, isSeed, pickupCode,
+  type BoostId, type PickupKind,
+} from '../pickups';
 import { LINES, LINE_IDS, LINE_OF_DEX, formOf, isFinal, type LineId } from '../pokemon';
 import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
@@ -89,6 +93,8 @@ export interface MeState {
   typeMods: Record<string, number>;
   /** 可以进化时：prompt 表示需要弹窗询问 */
   evo: { prompt: boolean; from: string; fromDex: number; to: string; toDex: number } | null;
+  /** 正在生效的增幅种子与剩余秒数 */
+  boosts: [BoostId, number][];
 }
 
 export interface PublicState {
@@ -114,6 +120,12 @@ export class GameSim {
   rng: Rng;
   /** 闪光判定单独用一个随机数：不打乱同一个种子下其它随机事件的顺序 */
   private shinyRng: Rng;
+  /** 地图道具（场上刷出的橙橙果、种子，击倒敌人掉的种子）也单独用一个随机数 */
+  private itemRng: Rng;
+  /** 冒险里地图上会出现橙橙果和增幅种子（对战里没有） */
+  protected mapItems = true;
+  /** 本波场上刷出地图道具的时间表：[出现时间, 种类]，种子的种类出现时再定 */
+  private itemPlan: [number, 'berry' | 'seed'][] = [];
   /** 调试：接下来出现的 N 只宝可梦一定是闪光的 */
   forceShiny = 0;
   time = 0;
@@ -157,6 +169,7 @@ export class GameSim {
   constructor(inits: PlayerInit[], seed: number, difficulty: DifficultyId = 'easy', start = true) {
     this.rng = new Rng(seed);
     this.shinyRng = new Rng(seed ^ 0x5a17c0de);
+    this.itemRng = new Rng(seed ^ 0x3c6ef372);
     this.diff = difficultyOf(difficulty);
     for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta, i));
     this.startPlayers = inits.length;
@@ -294,7 +307,10 @@ export class GameSim {
     this.dropCandy(e.x, e.y, e.def.candy * cm * (e.shiny ? 3 : 1));
     const luck = 1 + Math.max(0, this.players.reduce((a, p) => a + p.d.luck, 0) / Math.max(1, this.players.length)) / 100;
     if (e.def.rank !== 'minion' || this.rng.chance(0.004 * luck)) this.dropPickup('ball', e.x + this.rng.range(-8, 8), e.y + this.rng.range(-8, 8), 1);
-    if (e.def.id === 'chansey' || this.rng.chance(0.012 * luck)) this.dropPickup('berry', e.x + this.rng.range(-6, 6), e.y + this.rng.range(-6, 6), 1);
+    if (e.def.id === 'chansey' || this.rng.chance(0.012 * luck)) this.dropItem('berry', e.x + this.rng.range(-6, 6), e.y + this.rng.range(-6, 6));
+    if (this.mapItems && this.itemRng.chance(e.def.rank === 'minion' ? SEED_DROP_MINION * luck : SEED_DROP_ELITE)) {
+      this.dropItem(this.pickSeed(), e.x + this.itemRng.range(-8, 8), e.y + this.itemRng.range(-8, 8));
+    }
   }
 
   /** 击败者想要的话给击败者，否则给附近想要的队友 */
@@ -382,15 +398,77 @@ export class GameSim {
     }
   }
 
-  private dropPickup(kind: Pickup['kind'], x: number, y: number, value: number) {
+  private dropPickup(kind: PickupKind, x: number, y: number, value: number): Pickup | null {
     if (this.pickups.length > 600) {
       // 掉落物太多时合并到最老的糖果上，避免无限增长
       const old = this.pickups.find((p) => p.kind === 'candy');
-      if (old && kind === 'candy') { old.value += value; return; }
+      if (old && kind === 'candy') { old.value += value; return null; }
     }
     const p: Pickup = { id: this.newId(), kind, x: Math.max(8, Math.min(this.w - 8, x)), y: Math.max(12, Math.min(this.h - 8, y)), value };
     this.pickups.push(p);
-    this.emit(['drop', p.id, kind === 'candy' ? 0 : kind === 'berry' ? 1 : 2, Math.round(p.x), Math.round(p.y), Math.round(value * 10) / 10]);
+    this.emit(['drop', p.id, pickupCode(kind), Math.round(p.x), Math.round(p.y), Math.round(value * 10) / 10]);
+    return p;
+  }
+
+  /** 橙橙果和种子：场上已经很多时不再出现 */
+  private dropItem(kind: PickupKind, x: number, y: number) {
+    if (!this.mapItems) return;
+    const seed = isSeed(kind);
+    let n = 0;
+    for (const pk of this.pickups) if (seed ? isSeed(pk.kind) : pk.kind === kind) n++;
+    if (n >= (seed ? MAX_SEEDS : MAX_BERRIES)) return;
+    this.dropPickup(kind, x, y, 1);
+  }
+
+  /** 随机一种种子，优先挑场上还没有的 */
+  private pickSeed(): PickupKind {
+    const all = BOOST_IDS.map((id) => BOOSTS[id].seed);
+    const free = all.filter((k) => !this.pickups.some((pk) => pk.kind === k));
+    return this.itemRng.pick(free.length ? free : all);
+  }
+
+  /**
+   * 每波在场上刷出的地图道具：橙橙果、种子各 1~2 个，首领波和群聚波各多 1 个，三人以上联机再各多 1 个，
+   * 在波次的 12%~88% 之间陆续出现
+   */
+  private planItems(big: boolean): [number, 'berry' | 'seed'][] {
+    if (!this.mapItems) return [];
+    const extra = (big ? 1 : 0) + Math.floor((this.players.length - 1) / 2);
+    const list: ('berry' | 'seed')[] = [];
+    for (let i = this.itemRng.int(1, 2) + extra; i > 0; i--) list.push('berry');
+    for (let i = this.itemRng.int(1, 2) + extra; i > 0; i--) list.push('seed');
+    this.itemRng.shuffle(list);
+    return list.map((k, i) => [this.waveDur * (0.12 + (0.76 * (i + this.itemRng.next())) / list.length), k]);
+  }
+
+  private updateItems() {
+    while (this.itemPlan.length && this.waveT >= this.itemPlan[0][0]) {
+      const [, k] = this.itemPlan.shift()!;
+      // 出现在某位玩家附近（大多在画面里），联机时轮流随机挑一位
+      const ps = this.activePlayers();
+      if (!ps.length) continue;
+      const p = this.itemRng.pick(ps);
+      const a = this.itemRng.range(0, Math.PI * 2), d = this.itemRng.range(70, 180);
+      const x = Math.max(36, Math.min(this.w - 36, p.x + Math.cos(a) * d));
+      const y = Math.max(40, Math.min(this.h - 36, p.y + Math.sin(a) * d));
+      this.dropItem(k === 'berry' ? 'berry' : this.pickSeed(), x, y);
+    }
+  }
+
+  /** 踩到种子：这一种增幅刷新为 5 秒（不叠加数值） */
+  private boost(p: SimPlayer, id: BoostId) {
+    p.boosts[id] = BOOST_DUR;
+    this.recompute(p);
+  }
+
+  /** 清掉所有增幅；返回是不是有增幅被清掉 */
+  private clearBoosts(p: SimPlayer): boolean {
+    let had = false;
+    for (const id of BOOST_IDS) {
+      if (p.boosts[id] > 0) had = true;
+      p.boosts[id] = 0;
+    }
+    return had;
   }
 
   downPlayer(p: SimPlayer) {
@@ -399,6 +477,7 @@ export class GameSim {
     p.revive = 0;
     p.downT = 0;
     p.shield = 0;
+    if (this.clearBoosts(p)) recompute(p);
     this.emit(['down', p.id]);
     this.dirty.add(p.id);
   }
@@ -444,6 +523,7 @@ export class GameSim {
       p.invuln = 1.5;
       p.shield = 0;
       p.buffT = 0;
+      this.clearBoosts(p);
       p.slowT = 0;
       p.sashUsed = false;
       p.sturdyUsed = false;
@@ -457,6 +537,7 @@ export class GameSim {
       recompute(p);
       this.dirty.add(p.id);
     });
+    this.itemPlan = this.planItems(!!W.boss || this.horde);
     this.intruders = this.pickIntruders();
     this.emit(['wave', this.wave, this.waveDur, W.biome]);
     if (this.intruders.length) this.emit(['wild', this.intruders.map(([, id]) => ENEMIES[id].dex)]);
@@ -487,8 +568,10 @@ export class GameSim {
     this.strikes = [];
     this.pending = [];
     this.boss = null;
-    // 场上剩余掉落物自动归最近的玩家
+    // 场上剩余的糖果和道具球自动归最近的玩家；橙橙果和种子留到下一波也没用，直接消失
+    this.itemPlan = [];
     for (const pk of this.pickups) {
+      if (pk.kind !== 'candy' && pk.kind !== 'ball') continue;
       let best = this.players[0], bd = Infinity;
       for (const p of this.players) {
         const d = (p.x - pk.x) ** 2 + (p.y - pk.y) ** 2;
@@ -507,6 +590,7 @@ export class GameSim {
     this.interT = 0;
     this.emit(['msg', `第 ${this.wave} 波 完成！`]);
     for (const p of this.players) {
+      if (this.clearBoosts(p)) recompute(p);
       if (p.down) { p.down = false; p.hp = p.d.maxHp; this.emit(['rev', p.id]); }
       if (p.d.harvest > 0) { p.money += p.d.harvest; p.stats.moneyEarned += p.d.harvest; }
       p.ready = false;
@@ -537,10 +621,13 @@ export class GameSim {
         this.dirty.add(q.id);
       }
     } else if (pk.kind === 'berry') {
-      healPlayer(this, p, 4 + p.d.maxHp * 0.06);
-    } else {
+      healPlayer(this, p, berryHeal(p.d.maxHp));
+    } else if (pk.kind === 'ball') {
       p.crates.push(rollCrateItem(this, p));
       this.emit(['txt', Math.round(p.x), Math.round(p.y) - 26, '获得道具球！', '#ffd23f']);
+    } else {
+      const b = boostOfSeed(pk.kind);
+      if (b) this.boost(p, b);
     }
     this.dirty.add(p.id);
   }
@@ -564,6 +651,7 @@ export class GameSim {
     if (this.phase !== 'wave') return;
     this.waveT += dt;
     this.updateSpawning(dt);
+    this.updateItems();
     for (const p of this.players) {
       if (p.bot) autopilot(this, p, dt);
       this.updatePlayer(p, dt);
@@ -694,6 +782,13 @@ export class GameSim {
     if (p.shieldT > 0) { p.shieldT -= dt; if (p.shieldT <= 0) p.shield = 0; }
     if (p.slowT > 0) p.slowT -= dt;
     if (p.buffT > 0) { p.buffT -= dt; if (p.buffT <= 0) this.recompute(p); }
+    let boostEnded = false;
+    for (const id of BOOST_IDS) {
+      if (p.boosts[id] <= 0) continue;
+      p.boosts[id] -= dt;
+      if (p.boosts[id] <= 1e-6) { p.boosts[id] = 0; boostEnded = true; }
+    }
+    if (boostEnded) this.recompute(p);
     p.lsWindow += dt;
     if (p.lsWindow >= 1) { p.lsWindow = 0; p.lsCount = 0; }
     if (p.d.regenPerSec > 0 && p.hp < p.d.maxHp) {
@@ -1069,6 +1164,7 @@ export class GameSim {
       evo: canEvolve(p)
         ? { prompt: p.evoPrompt, from: form.name, fromDex: form.dex, to: formOf(p.line, p.stage + 1).name, toDex: formOf(p.line, p.stage + 1).dex }
         : null,
+      boosts: boostsOf(p),
     };
   }
 
@@ -1157,4 +1253,23 @@ export class GameSim {
     const p = this.players.find((q) => q.id === id);
     if (p && ITEMS[item]) { p.items[item] = (p.items[item] ?? 0) + 1; recompute(p); }
   }
+
+  /** 调试与测试：在指定位置放一个地图道具（不受场上数量限制；对战里没有地图道具） */
+  placeItem(kind: PickupKind, x: number, y: number): Pickup | null {
+    return this.mapItems ? this.dropPickup(kind, x, y, 1) : null;
+  }
+
+  /** 调试：在玩家身边放一颗橙橙果和每种种子各一颗 */
+  debugItems(p: SimPlayer) {
+    const kinds: PickupKind[] = ['berry', ...BOOST_IDS.map((id) => BOOSTS[id].seed)];
+    kinds.forEach((k, i) => {
+      const a = -Math.PI / 2 + (i / kinds.length) * Math.PI * 2;
+      this.placeItem(k, p.x + Math.cos(a) * 34, p.y + Math.sin(a) * 26);
+    });
+  }
+}
+
+/** 正在生效的增幅与剩余秒数（保留一位小数） */
+export function boostsOf(p: SimPlayer): [BoostId, number][] {
+  return BOOST_IDS.filter((id) => p.boosts[id] > 0).map((id) => [id, Math.ceil(p.boosts[id] * 10) / 10]);
 }

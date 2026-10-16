@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ITEMS } from '../src/shared/items';
 import { ACHIEVEMENT_BY_ID, NO_RUN, metaBonus, type LifetimeStats } from '../src/shared/meta';
-import { decodeSnapshot, encodeSnapshot, type S2C } from '../src/shared/protocol';
+import { PROTOCOL_VERSION, decodeSnapshot, encodeSnapshot, type S2C } from '../src/shared/protocol';
 import { buildOf, validateBuild } from '../src/shared/pvp/build';
 import { Room } from '../src/shared/room';
 import { SHINY_BASE, SHINY_MAX, shinyOdds, shinyRate } from '../src/shared/shiny';
@@ -228,8 +228,8 @@ function conn() {
 test('联机房间：带着闪光伙伴加入、换成闪光的、开局时传给模拟', () => {
   const room = new Room('12345');
   const c1 = conn(), c2 = conn();
-  const a = room.join(c1, 'A', {}, 7, { line: 'pikachu', shiny: true, ownedShiny: ['pikachu', 'nope'] }) as number;
-  const b = room.join(c2, 'B', {}, 7, { line: 'squirtle' }) as number;
+  const a = room.join(c1, 'A', {}, PROTOCOL_VERSION, { line: 'pikachu', shiny: true, ownedShiny: ['pikachu', 'nope'] }) as number;
+  const b = room.join(c2, 'B', {}, PROTOCOL_VERSION, { line: 'squirtle' }) as number;
   assert.ok(room.lobbyPlayers().find((p) => p.id === a)!.shiny);
   assert.ok(!room.lobbyPlayers().find((p) => p.id === b)!.shiny);
   room.handle(b, { t: 'pick', line: 'charmander', shiny: true });
