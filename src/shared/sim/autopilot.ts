@@ -1,7 +1,7 @@
 /**
  * 自动走位（冒险的 AI 辅助战斗）：躲开近身的敌人、弹幕与即将落下的攻击，保持在技能射程边缘绕圈，
  * 安全时去捡糖果和增幅种子、救倒下的队友，血少时去吃橙橙果，远离墙角；
- * 有利的局部属性场地会靠过去站着打，不利的（灼伤、减速、招式受损）会绕开。
+ * 安全时走进有利的局部属性场地，站进不利的（灼伤、减速、招式受损）会走出来。
  * 只负责走位：技能本来就是自动释放的，商店、升级与进化仍由玩家自己决定。
  */
 import { boostOfSeed } from '../pickups';
@@ -95,18 +95,19 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
     // 绕圈走
     fx += -ny * 0.5; fy += nx * 0.5;
   }
-  // 局部属性场地
+  // 局部属性场地：安全时才往有利的场地里走，站进不利的场地就往外走。
+  // 场地常在墙边，拉得太狠或为了绕开场地硬改躲避方向，都容易被敌人堵在角落（机器人测试里胜率明显下降）
   const T = sim.terrain;
-  let tv = 0, inside = false;
-  if (T) tv = valueOf(T, p);
-  if (T && (tv < -0.2 || tv > 0.2)) {
-    inside = inTerrain(T, p.x, p.y);
+  const tv = T ? valueOf(T, p) : 0;
+  if (T && (tv < -0.4 || (tv > 0.2 && safe && !goal))) {
+    const inside = inTerrain(T, p.x, p.y);
     const dx = T.cx - p.x, dy = T.cy - p.y, d = Math.hypot(dx, dy) || 1;
-    if (tv < -0.2 && inside) { fx -= (dx / d) * 1.6; fy -= (dy / d) * 1.6; }
-    else if (tv > 0.2 && !goal && d < 320) {
-      // 共鸣晶石要站进中心的能量圈才有加成
-      const hold = TERRAINS[T.kind].circle ? T.cr * 0.6 : inside ? 40 : 0;
-      if (d > hold) { const w = (inside ? 0.35 : 0.8) * Math.min(1, tv); fx += (dx / d) * w; fy += (dy / d) * w; }
+    if (tv < -0.4) {
+      if (inside) { const w = Math.min(1.2, -tv * 0.8); fx -= (dx / d) * w; fy -= (dy / d) * w; }
+    } else if (d < 320 && (TERRAINS[T.kind].circle ? d > T.cr * 0.6 : !inside)) {
+      // 共鸣晶石要走进中心的能量圈才有加成
+      const w = 0.5 * Math.min(1, tv);
+      fx += (dx / d) * w; fy += (dy / d) * w;
     }
   }
   const wall = 80;
@@ -115,17 +116,7 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
   if (p.y < wall) fy += ((wall - p.y) / wall) * 3;
   if (p.y > sim.h - wall) fy -= ((p.y - (sim.h - wall)) / wall) * 3;
   const len = Math.hypot(fx, fy);
-  if (len < 1e-6) return null;
-  let vx = fx / len, vy = fy / len;
-  // 不利的场地：快要走进去时往旁边偏一点绕开
-  if (T && tv < -0.2 && !inside && inTerrain(T, p.x + vx * 20, p.y + vy * 20)) {
-    for (const a of [0.6, -0.6, 1.2, -1.2, 1.8, -1.8]) {
-      const c = Math.cos(a), s = Math.sin(a);
-      const rx = vx * c - vy * s, ry = vx * s + vy * c;
-      if (!inTerrain(T, p.x + rx * 20, p.y + ry * 20)) { vx = rx; vy = ry; break; }
-    }
-  }
-  return { x: vx, y: vy };
+  return len < 1e-6 ? null : { x: fx / len, y: fy / len };
 }
 
 /** 由服务器替玩家走一步 */
