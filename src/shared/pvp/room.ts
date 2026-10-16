@@ -8,7 +8,7 @@ import { Room } from '../room';
 import { PeerSync, cullEvents, type Conn } from '../netsync';
 import { TICK_RATE } from '../sim/game';
 import type { SavedBuild } from './build';
-import { PVP_MODES, PvpSim, type PvpInit, type PvpMatchResult, type PvpMode } from './sim';
+import { PVP_MODES, PvpSim, type PvpInit, type PvpMatchResult, type PvpMode, type PvpOpts } from './sim';
 
 /** 一位训练家（真人或 AI）：派出 team 里的宝可梦，自己控制第一只 */
 export interface PvpSeat {
@@ -46,7 +46,7 @@ export class PvpRoom {
   /** 对局结束时调用：返回每个座位的积分变化（练习赛返回 null） */
   onEnd?: (res: PvpMatchResult, room: PvpRoom) => Map<number, PvpRatingChange> | null;
 
-  constructor(readonly code: string, readonly mode: PvpMode, seats: PvpSeat[], seed = (Math.random() * 2 ** 31) | 0) {
+  constructor(readonly code: string, readonly mode: PvpMode, seats: PvpSeat[], seed = (Math.random() * 2 ** 31) | 0, opts: PvpOpts = {}) {
     this.seats = seats;
     const inits: PvpInit[] = [];
     let uid = 1;
@@ -58,7 +58,7 @@ export class PvpRoom {
         inits.push({ id, name: s.name, team: s.team, build, meta: s.meta, trainer: s.trainer, bot: s.bot || (i === 0 && !!s.auto), owner: s.id, helper: i > 0 });
       });
     }
-    this.sim = new PvpSim(mode, inits, seed);
+    this.sim = new PvpSim(mode, inits, seed, opts);
   }
 
   /** 座位 ↔ 它控制的宝可梦 */

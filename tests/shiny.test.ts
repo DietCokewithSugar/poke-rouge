@@ -216,7 +216,7 @@ test('闪光宝可梦的构筑：分别保存，对战里也是 +1%', () => {
 });
 
 test('闪光宝可梦的成就', () => {
-  const s = (shinies: number): LifetimeStats => ({ runs: 1, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 3, badges: 0, shinies });
+  const s = (shinies: number): LifetimeStats => ({ runs: 1, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 3, badges: 0, masters: 0, shinies });
   const A = ACHIEVEMENT_BY_ID;
   assert.ok(!A.shiny_1.check(NO_RUN, s(0)));
   assert.ok(A.shiny_1.check(NO_RUN, s(1)));

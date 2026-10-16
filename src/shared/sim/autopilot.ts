@@ -15,7 +15,7 @@ import { REVIVE_RADIUS, blastable, type GameSim } from './game';
 export const AUTO_BLAST_CROWD = 10;
 
 /** 场上每种场地对这只宝可梦的好坏（> 0 有利，< 0 不利） */
-function fieldScores(sim: GameSim, p: SimPlayer): Map<FieldId, number> {
+export function fieldScores(sim: GameSim, p: SimPlayer): Map<FieldId, number> {
   const types = formOf(p.line, p.stage).types;
   const moves = p.skills.map((s) => SKILLS[s.id]).filter(Boolean).map((d) => ({ type: d.type, damaging: d.cat !== 'status', phys: d.cat === 'phys' }));
   const out = new Map<FieldId, number>();
@@ -24,7 +24,7 @@ function fieldScores(sim: GameSim, p: SimPlayer): Map<FieldId, number> {
 }
 
 /** 从 (x, y) 出发，往哪个方向走最快能到满足 ok 的地方（max 像素以内，找不到时为 null） */
-function towards(sim: GameSim, x: number, y: number, ok: (x: number, y: number) => boolean, max = 320) {
+export function towards(sim: GameSim, x: number, y: number, ok: (x: number, y: number) => boolean, max = 320) {
   for (let d = 24; d <= max; d += 24) {
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;

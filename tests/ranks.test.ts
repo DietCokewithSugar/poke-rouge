@@ -17,7 +17,8 @@ test('冒险成绩：上报的数据要校验，打完全部波次才算通关',
   assert.deepEqual(cleanRun(run()), run());
   assert.equal(cleanRun(null), null);
   assert.equal(cleanRun('easy'), null);
-  assert.equal(cleanRun(run({ difficulty: 'nightmare' as never })), null);
+  assert.equal(cleanRun(run({ difficulty: 'inferno' as never })), null);
+  assert.equal(cleanRun(run({ difficulty: 'nightmare' }))!.difficulty, 'nightmare');
   assert.equal(cleanRun(run({ waves: TOTAL_WAVES + 1 })), null);
   assert.equal(cleanRun(run({ waves: 2.5 })), null);
   assert.equal(cleanRun(run({ time: -1 })), null);
@@ -86,7 +87,7 @@ test('服务器：道馆榜按徽章数排名，一样多时先拿到的在前�
   const s = new PvpService(file, { '1v1': 12, '4v4': 18 });
   const a = ident(1), b = ident(2), c = ident(3);
   assert.equal(s.reportGym({ ...a, name: '小赤', badges: 0, dex: 4 }), '徽章数据无效');
-  assert.equal(s.reportGym({ ...a, name: '小赤', badges: 9, dex: 4 }), '徽章数据无效');
+  assert.equal(s.reportGym({ ...a, name: '小赤', badges: 17, dex: 4 }), '徽章数据无效', '普通徽章 8 枚 + 大师徽章 8 枚，最多 16');
   assert.equal(s.reportGym({ ...a, name: '小赤', badges: 3, dex: 4 }), null);
   await sleep(5);
   assert.equal(s.reportGym({ ...b, name: '小茂', badges: 3, dex: 7 }), null);

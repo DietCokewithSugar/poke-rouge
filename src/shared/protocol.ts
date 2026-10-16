@@ -9,7 +9,7 @@ import type { PvpMatchResult, PvpMode } from './pvp/sim';
 import type { RankKind, RankRow, RunRecord } from './ranks';
 import { formOf } from './pokemon';
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 export const MAX_PLAYERS = 4;
 
 // ---------------------------------------------------------------- 对战

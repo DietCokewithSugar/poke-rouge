@@ -177,6 +177,8 @@ export interface Enemy {
   /** 繁茂草丛的命中回复：这一秒从什么时候开始、已经回复了多少 */
   drainAt?: number;
   drained?: number;
+  /** 掉落的糖果（地狱、噩梦里进化出来的小怪按进化前算） */
+  candy?: number;
 }
 
 /** 招式命中时还要结算的场地效果：暴击率（百分点）、命中回复的比例、命中减速 */
@@ -259,6 +261,7 @@ export interface PendingSpawn {
   t: number;
   id: string;
   x: number; y: number;
+  candy?: number;
 }
 
 export type StatusApply = { kind: StatusKind; chance: number; dur?: number; amount?: number };

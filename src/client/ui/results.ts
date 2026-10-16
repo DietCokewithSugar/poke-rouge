@@ -138,7 +138,7 @@ function waveTable(s: RunSummary, page: number, onPage: (n: number) => void) {
     pg.list, pg.nav);
 }
 
-/** 结算后把这只宝可梦放进背包（满了要先放生一只） */
+/** 结算后把这只宝可梦放进背包（满了要先放生一只）；store(after) 放好以后接着做 after */
 function storeButton(p: Profile, s: RunSummary, state: { stored: boolean }) {
   const form = s.detail.form;
   const max = partyMax(p);
@@ -150,33 +150,64 @@ function storeButton(p: Profile, s: RunSummary, state: { stored: boolean }) {
     sfx('buy');
     toast(`${form} Lv${s.level} 已放入背包，可以在对战场和道馆里使用`, 'gold', 3200);
   };
-  btn.addEventListener('click', () => {
-    if (btn.disabled) return;
-    if (addToParty(p, s)) { done(); return; }
+  const store = (after?: () => void) => {
+    if (state.stored) { after?.(); return; }
+    if (addToParty(p, s)) { done(); after?.(); return; }
     sfx('click');
     releaseModal(p.party, max, s.build ?? null, (uid) => {
       releaseFromParty(p, uid);
-      if (addToParty(p, s)) done();
+      if (addToParty(p, s)) { done(); after?.(); }
     }, () => btn.focus());
-  });
+  };
+  btn.addEventListener('click', () => { if (!btn.disabled) store(); });
   tip(btn, () => h('div', { class: 'info' },
     h('b', null, '放入背包'),
     h('div', { class: 'small' }, '保留这一局的等级、形态、技能（含等级）、道具和升级强化。'),
     h('div', { class: 'small' }, `可以用来对战和挑战道馆，最多保存 ${max} 只${max < PARTY_LIMIT ? `（对战场达到${PARTY_BONUS_TIER.name}后可以保存 ${PARTY_LIMIT} 只）` : ''}。`),
   ));
-  return btn;
+  return { btn, store };
+}
+
+/** 没放进背包就要离开结算：提醒这一局的宝可梦会被放生 */
+function releaseWarn(s: RunSummary, onStore: () => void, onLeave: () => void) {
+  const overlay = h('div', { class: 'modal' });
+  const close = () => overlay.remove();
+  const name = shinyName(s.detail.form, s.shiny);
+  overlay.appendChild(h('div', { class: 'box modal-box release-warn' },
+    h('div', { class: 'release-warn-head' }, portraitSlot(s.detail.dex, 2, 'release-warn-portrait', s.shiny),
+      h('div', null,
+        h('h2', null, `${name}还没有放进背包`),
+        h('p', { class: 'sub' }, `离开结算后，这一局的${name} Lv${s.level} 会被放生：这一局的等级、技能和道具都不会保留。`),
+      )),
+    h('p', { class: 'small muted' }, `放进背包的宝可梦可以在对战场和道馆里使用。放生的只是这一局的${name}，${LINES[s.line].name}本身还在，下次冒险照样能带它出发。`),
+    h('div', { class: 'row end' },
+      h('button', { class: 'btn ghost', 'data-back': '1', onclick: () => { sfx('click'); close(); } }, '再想想'),
+      h('button', { class: 'btn danger', onclick: () => { sfx('click'); close(); onLeave(); } }, '放生，直接离开'),
+      h('button', { class: 'btn gold', 'data-key': 'y', onclick: () => { close(); onStore(); } }, '放入背包再走'),
+    ),
+  ));
+  document.body.appendChild(overlay);
+  (overlay.querySelector('.btn.gold') as HTMLElement | null)?.focus();
 }
 
 export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: BoardEntry[], you: number, onContinue: () => void, label: string, profile?: Profile, onHome?: () => void, fled = false) {
   const won = victory && !fled;
   const state = { tab: 0, stored: false, items: 0, waves: 0, achs: 0 };
+  const canStore = !!(s?.build && profile && typeof validateBuild(s.build) !== 'string');
+  /** 离开结算（回真新镇、再来一局、返回房间）之前：还没放进背包就先提醒会被放生 */
+  const leave = (go: () => void, store: ((after?: () => void) => void) | null) => () => {
+    if (!store || state.stored || !s) { go(); return; }
+    sfx('click');
+    releaseWarn(s, () => store(go), go);
+  };
   const render = () => {
+    const st = canStore ? storeButton(profile!, s!, state) : null;
     const head = h('div', { class: 'r-head' },
       h('h2', { class: won ? 'gold' : '' }, won ? '通关！你是真正的宝可梦大师！' : fled ? '逃跑了' : '眼前一片漆黑……'),
       h('div', { class: 'row' },
-        s?.build && profile && typeof validateBuild(s.build) !== 'string' ? storeButton(profile, s, state) : null,
-        onHome ? iconBtn('home', '回到真新镇', onHome, { cls: 'ghost', attrs: { 'data-back': '1' }, text: '回到真新镇' }) : null,
-        h('button', { class: 'btn gold big', 'data-key': 'y', onclick: onContinue }, label),
+        st?.btn ?? null,
+        onHome ? iconBtn('home', '回到真新镇', leave(onHome, st?.store ?? null), { cls: 'ghost', attrs: { 'data-back': '1' }, text: '回到真新镇' }) : null,
+        h('button', { class: 'btn gold big', 'data-key': 'y', onclick: leave(onContinue, st?.store ?? null) }, label),
       ),
     );
     if (!s) {

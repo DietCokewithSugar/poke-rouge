@@ -1,5 +1,5 @@
 import { difficultyOf, type Difficulty, type DifficultyId } from '../difficulty';
-import { ENEMIES, ENEMY_INDEX } from '../enemies';
+import { ENEMIES, ENEMY_INDEX, EVOLVES } from '../enemies';
 import {
   BURN_PHYS, FIELDS, FIELD_CELL, FIELD_FORM, FIELD_FROM, FIELD_IDS, FIELD_MAX_FRAC, FIELD_MIN_FRAC, FIELD_SECOND_FROM, FIELD_TOTAL_FRAC, LAVA_BIG, LAVA_DPS, LAVA_LINGER,
   NO_MOVE_MOD, cellAt, encodeCells, fieldBurns, fieldCenter, fieldGrid, fieldSpeed, fieldTarget, growField, moveMod, pickFieldKind,
@@ -16,13 +16,13 @@ import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
 import { SHINY_STAT, shinyName, shinyRate } from '../shiny';
-import { SKILLS, skillLevelCd, type SkillDef } from '../skills';
+import { SKILLS, type SkillDef } from '../skills';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
 import { updateEnemy } from './ai';
 import { autopilot } from './autopilot';
 import { autoShop } from './autoshop';
-import { PLAYER_R, beamHit, enemyHurt, healMult, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
+import { PLAYER_R, beamHit, enemyHurt, healMult, healPlayer, hitEnemy, hurtPlayer, skillNums, updateSkills, type HitOpts, type SkillNums } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
 import {
   addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, refreshOffers, rerollCards,
@@ -110,6 +110,11 @@ export interface MeState {
   evo: { prompt: boolean; from: string; fromDex: number; to: string; toDex: number } | null;
   /** 正在生效的增幅种子与剩余秒数 */
   boosts: [BoostId, number][];
+  /**
+   * 技能现在的实际数值（键是「技能:等级」）：已经学会的技能，以及商店和升级卡上可以学 / 强化的技能。
+   * 能力、道具、等级一变就跟着变；不含脚下的场地（界面按脚下的场地自己修正，见 describe.ts 的 fieldNums）
+   */
+  nums: Record<string, SkillNums>;
 }
 
 export interface PublicState {
@@ -141,6 +146,8 @@ export class GameSim {
   private itemRng: Rng;
   /** 局部属性场地的种类、形状和位置也单独用一个随机数 */
   private fieldRng: Rng;
+  /** 地狱、噩梦里小怪要不要进化 */
+  private evoRng: Rng;
   /** 冒险里地图上会出现橙橙果和增幅种子（对战里没有） */
   protected mapItems = true;
   /** 冒险里地图上会出现局部属性场地（对战里没有） */
@@ -210,6 +217,7 @@ export class GameSim {
     this.shinyRng = new Rng(seed ^ 0x5a17c0de);
     this.itemRng = new Rng(seed ^ 0x3c6ef372);
     this.fieldRng = new Rng(seed ^ 0x1b873593);
+    this.evoRng = new Rng(seed ^ 0x27d4eb2f);
     this.diff = difficultyOf(difficulty);
     for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta, i));
     this.startPlayers = inits.length;
@@ -277,6 +285,9 @@ export class GameSim {
     return f && (forming || this.waveT >= f.activeAt) ? f.kind : null;
   }
 
+  /** 技能说明里的伤害换算（对战按自己的等级换算成对战伤害） */
+  readoutScale(_p: SimPlayer): number { return 1; }
+
   /** 玩家出招时脚下场地的修正；被熔岩灼伤时物理招式的伤害减半 */
   castMod(p: SimPlayer, s: SkillDef): Readonly<MoveMod> {
     const m = moveMod(this.fieldAt(p.x, p.y), s.type);
@@ -307,15 +318,9 @@ export class GameSim {
    * 长出一块新的场地：不和其他场地挨着，也不长在玩家脚下；出现后先闪烁 FIELD_FORM 秒才生效。
    * opening：波次开场的那一块（和上一波开场的换一种）
    */
-  private spawnField(opening: boolean, want?: FieldId) {
-    if (!this.mapFields) return;
-    const { cols, rows } = fieldGrid(this.w, this.h);
-    const total = cols * rows;
-    const used = this.fields.reduce((a, f) => a + f.cells.length, 0);
-    const max = Math.min(Math.floor(total * FIELD_MAX_FRAC), Math.floor(total * FIELD_TOTAL_FRAC) - used);
-    const min = Math.ceil(total * FIELD_MIN_FRAC);
-    if (max < min) return;
-    const blocked = new Uint8Array(total);
+  /** 新场地不能占的格子：已有的场地和它们周围一圈、宝可梦脚下 */
+  private fieldBlocked(cols: number, rows: number): Uint8Array {
+    const blocked = new Uint8Array(cols * rows);
     const block = (cx: number, cy: number) => { if (cx >= 0 && cy >= 0 && cx < cols && cy < rows) blocked[cy * cols + cx] = 1; };
     for (const f of this.fields) {
       for (const c of f.cells) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) block((c % cols) + dx, Math.floor(c / cols) + dy);
@@ -327,6 +332,32 @@ export class GameSim {
         for (let x = p.x - R; x <= p.x + R; x += FIELD_CELL / 2) if ((x - p.x) ** 2 + (y - p.y) ** 2 <= R * R) block(Math.floor(x / FIELD_CELL), Math.floor(y / FIELD_CELL));
       }
     }
+    return blocked;
+  }
+
+  /**
+   * 在 allow（格子坐标）允许的范围里长出一块指定的场地，大小约占地图的 frac，马上生效（道馆用）。
+   * 和随机出现的场地一样：连续的一整块，不和别的场地挨着，不长在宝可梦脚下。
+   */
+  protected growFieldIn(kind: FieldId, frac: number, allow: (gx: number, gy: number) => boolean): Field | null {
+    const { cols, rows } = fieldGrid(this.w, this.h);
+    const total = cols * rows;
+    const blocked = this.fieldBlocked(cols, rows);
+    for (let c = 0; c < total; c++) if (!allow(c % cols, Math.floor(c / cols))) blocked[c] = 1;
+    const max = Math.floor(total * FIELD_MAX_FRAC), min = Math.ceil(total * FIELD_MIN_FRAC);
+    const cells = growField(this.fieldRng, { cols, rows, blocked, target: Math.max(min, Math.min(max, Math.round(total * frac))), min, max });
+    return cells ? this.placeField(kind, cells) : null;
+  }
+
+  private spawnField(opening: boolean, want?: FieldId) {
+    if (!this.mapFields) return;
+    const { cols, rows } = fieldGrid(this.w, this.h);
+    const total = cols * rows;
+    const used = this.fields.reduce((a, f) => a + f.cells.length, 0);
+    const max = Math.min(Math.floor(total * FIELD_MAX_FRAC), Math.floor(total * FIELD_TOTAL_FRAC) - used);
+    const min = Math.ceil(total * FIELD_MIN_FRAC);
+    if (max < min) return;
+    const blocked = this.fieldBlocked(cols, rows);
     const exclude = this.fields.map((f) => f.kind);
     if (opening && this.lastField) exclude.push(this.lastField);
     const team = this.players.map((p) => formOf(p.line, p.stage).types);
@@ -366,14 +397,25 @@ export class GameSim {
     this.projs.push({ ...p, id: this.newId(), hit: new Set() });
   }
 
-  queueSpawn(id: string, x: number, y: number, delay = 1) {
+  queueSpawn(id: string, x: number, y: number, delay = 1, candy?: number) {
     x = Math.max(20, Math.min(this.w - 20, x));
     y = Math.max(26, Math.min(this.h - 20, y));
-    this.pending.push({ t: delay, id, x, y });
+    this.pending.push({ t: delay, id, x, y, candy });
     this.emit(['mark', Math.round(x), Math.round(y)]);
   }
 
-  spawnEnemy(id: string, x: number, y: number): Enemy {
+  /**
+   * 地狱、噩梦：普通小怪以进化形态出现（可能连进两阶）。
+   * 开局几波还没成长起来，进化的几率从低往高爬：第 4 波起进化一阶到满，第 8 波起再进化一阶到满
+   */
+  evolveSpawn(id: string): string {
+    const D = this.diff;
+    if (!D.evolve || !EVOLVES[id] || !this.evoRng.chance(D.evolve * Math.min(1, this.wave / 4))) return id;
+    const once = EVOLVES[id];
+    return EVOLVES[once] && this.evoRng.chance(D.evolve2 * Math.min(1, Math.max(0, this.wave - 2) / 6)) ? EVOLVES[once] : once;
+  }
+
+  spawnEnemy(id: string, x: number, y: number, candy?: number): Enemy {
     const def = ENEMIES[id];
     const n = this.players.length;
     const D = this.diff;
@@ -386,6 +428,7 @@ export class GameSim {
       ai: { state: 0, t: 0, cd: this.rng.range(0.6, 1.8), cd2: this.rng.range(1.5, 3), tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
       dir: Math.PI / 2, hidden: false, lastHit: -1, age: 0,
     };
+    if (candy !== undefined) e.candy = candy;
     if (this.forceShiny > 0 || this.shinyRng.chance(this.shinyRate())) {
       this.forceShiny = Math.max(0, this.forceShiny - 1);
       e.shiny = true;
@@ -434,13 +477,15 @@ export class GameSim {
       if (this.boss === e) this.boss = null;
     }
     if (how === 'seed') return;
-    // 难度增加的敌人不额外给糖果（每波收入不变，只增加危险）；香水带来的敌人照常给
-    const cm = candyMult(this.wave) / this.diff.count;
+    // 难度增加的敌人不额外给糖果（每波收入不变，只增加危险）；香水带来的敌人照常给。
+    // 地狱、噩梦另外提高一波的糖果总量；进化出来的小怪按进化前的糖果算
+    const cm = (candyMult(this.wave) / this.diff.count) * this.diff.candy;
+    const candy = e.candy ?? e.def.candy;
     if (how === 'self' && e.def.ai === 'bomber') {
-      this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)) * cm);
+      this.dropCandy(e.x, e.y, Math.max(1, Math.floor(candy / 2)) * cm);
       return;
     }
-    this.dropCandy(e.x, e.y, e.def.candy * cm * (e.shiny ? 3 : 1));
+    this.dropCandy(e.x, e.y, candy * cm * (e.shiny ? 3 : 1));
     const luck = 1 + Math.max(0, this.players.reduce((a, p) => a + p.d.luck, 0) / Math.max(1, this.players.length)) / 100;
     if (e.def.rank !== 'minion' || this.rng.chance(0.004 * luck)) this.dropPickup('ball', e.x + this.rng.range(-8, 8), e.y + this.rng.range(-8, 8), 1);
     if (e.def.id === 'chansey' || this.rng.chance(0.012 * luck)) this.dropItem('berry', e.x + this.rng.range(-6, 6), e.y + this.rng.range(-6, 6));
@@ -693,7 +738,7 @@ export class GameSim {
     if (!W.boss && !W.elites && this.wave >= 6 && this.rng.chance(D.extraElite)) {
       this.extraElites.push(this.wave < 12 ? 'beedrill' : this.rng.pick(['onix', 'gengar', 'beedrill']));
     }
-    if (W.boss && this.wave === TOTAL_WAVES && D.id === 'hard') this.extraElites.push('gengar', 'gengar');
+    if (W.boss) this.extraElites.push(...D.guards[this.wave === TOTAL_WAVES ? 1 : 0]);
     const n = this.players.length;
     this.players.forEach((p, i) => {
       p.down = false;
@@ -880,7 +925,7 @@ export class GameSim {
       s.t -= dt;
       if (s.t <= 0) {
         this.pending.splice(i, 1);
-        this.spawnEnemy(s.id, s.x, s.y);
+        this.spawnEnemy(s.id, s.x, s.y, s.candy);
       }
     }
     if (W.boss && !this.bossSpawned && this.waveT >= 2) {
@@ -920,13 +965,14 @@ export class GameSim {
     const maxAlive = Math.round((100 + 30 * (n - 1)) * Math.min(1.4, Math.max(1, this.diff.count * (1 + this.enemiesPct() / 200))));
     while (this.spawnAcc >= 1) {
       if (this.enemies.length + this.pending.length >= maxAlive) { this.spawnAcc = 0; break; }
-      const id = this.rng.weighted(W.pool);
+      const base = this.rng.weighted(W.pool);
+      const id = this.evolveSpawn(base);
       const big = ENEMIES[id].hp >= 40 || ENEMIES[id].ai === 'shooter';
       const g = Math.max(1, Math.min(Math.floor(this.spawnAcc), big ? this.rng.int(1, 2) : this.rng.int(1, 2 + Math.floor(this.wave / 4))));
       const { x, y } = this.spawnPoint(100);
       for (let i = 0; i < g; i++) {
         const a = this.rng.range(0, Math.PI * 2), r = i === 0 ? 0 : this.rng.range(10, 22);
-        this.queueSpawn(id, x + Math.cos(a) * r, y + Math.sin(a) * r);
+        this.queueSpawn(id, x + Math.cos(a) * r, y + Math.sin(a) * r, 1, id === base ? undefined : ENEMIES[base].candy);
       }
       this.spawnAcc -= g;
     }
@@ -1346,9 +1392,26 @@ export class GameSim {
 
   // ------------------------------------------------------------ 状态导出
 
+  /** 要在界面上说明的技能（已经学会的、商店和升级卡上能学 / 强化的）现在的实际数值，不含脚下的场地 */
+  private skillReadouts(p: SimPlayer): Record<string, SkillNums> {
+    const out: Record<string, SkillNums> = {};
+    const add = (id: string, lv: number) => {
+      const key = `${id}:${lv}`;
+      if (out[key]) return;
+      const n = skillNums(this, p, id, lv, false);
+      if (n) out[key] = n;
+    };
+    const next = (id: string) => (p.skills.find((s) => s.id === id)?.lv ?? 0) + 1;
+    for (const s of p.skills) add(s.id, s.lv);
+    for (const o of p.shop.offers) if (o?.kind === 'skill') add(o.id, next(o.id));
+    for (const c of p.cards ?? []) if (c.kind === 'skill') add(c.skill, next(c.skill));
+    return out;
+  }
+
   privateState(p: SimPlayer): MeState {
     const form = formOf(p.line, p.stage);
     const crate = p.cards ? null : p.crates[0] ?? null;
+    const nums = this.skillReadouts(p);
     return {
       id: p.id, line: p.line, stage: p.stage, dex: form.dex, form: form.name, level: p.level,
       xp: Math.floor(p.xp), xpNext: xpToNext(p.level), money: Math.floor(p.money),
@@ -1358,7 +1421,7 @@ export class GameSim {
       // 没有目标时技能每 0.1 秒重试一次，这种状态当作已经就绪，免得冷却图标一闪一闪
       skills: p.skills.map((s) => ({
         id: s.id, lv: s.lv, cd: s.cd <= 0.11 ? 0 : Math.round(s.cd * 10) / 10,
-        max: Math.round(SKILLS[s.id].cd * skillLevelCd(s.lv) * p.d.cdMult * this.castMod(p, SKILLS[s.id]).cd * 100) / 100,
+        max: Math.round((nums[`${s.id}:${s.lv}`]?.cd ?? SKILLS[s.id].cd) * this.castMod(p, SKILLS[s.id]).cd * 100) / 100,
       })),
       items: Object.entries(p.items).filter(([, n]) => n > 0),
       stats: {
@@ -1388,6 +1451,7 @@ export class GameSim {
         ? { prompt: p.evoPrompt, from: form.name, fromDex: form.dex, to: formOf(p.line, p.stage + 1).name, toDex: formOf(p.line, p.stage + 1).dex }
         : null,
       boosts: boostsOf(p),
+      nums,
     };
   }
 

@@ -1,5 +1,5 @@
-import { DIFFICULTIES, type DifficultyId } from './difficulty';
-import { GYMS, badgeKey } from './gyms';
+import { DIFFICULTIES, atLeast, type DifficultyId } from './difficulty';
+import { GYMS, badgeKey, masterKey } from './gyms';
 import { LINES, type LineId } from './pokemon';
 import { addTypeMods, type Mods, type TypeMods } from './stats';
 import type { SavedBuild } from './pvp/build';
@@ -42,7 +42,7 @@ export function metaCost(u: MetaUpgrade, lv: number): number {
 
 export interface MetaBonus { mods: Partial<Mods>; startMoney: number; typeMods: TypeMods }
 
-/** 局外加成：大木研究所的强化 + 道馆徽章（levels 里的 badge_<道馆> 键） */
+/** 局外加成：大木研究所的强化 + 道馆徽章（levels 里的 badge_<道馆> 键；大师徽章 badge2_<道馆> 再加一次） */
 export function metaBonus(levels: Record<string, number> | undefined): MetaBonus {
   const mods: Partial<Mods> = {};
   const add = (per: Partial<Mods>, n: number) => {
@@ -61,6 +61,9 @@ export function metaBonus(levels: Record<string, number> | undefined): MetaBonus
   const typeMods: TypeMods = {};
   for (const g of GYMS) {
     if (!levels?.[badgeKey(g.id)]) continue;
+    add(g.badge.mods, 1);
+    addTypeMods(typeMods, g.badge.typeMods);
+    if (!levels[masterKey(g.id)]) continue;
     add(g.badge.mods, 1);
     addTypeMods(typeMods, g.badge.typeMods);
   }
@@ -137,6 +140,8 @@ export interface LifetimeStats {
   owned: number;
   /** 拿到的道馆徽章数 */
   badges: number;
+  /** 拿到的大师徽章数 */
+  masters: number;
   /** 拥有的闪光宝可梦种类（进化线） */
   shinies: number;
 }
@@ -150,6 +155,8 @@ export interface GymOutcome {
   auto: boolean;
   /** 自己的宝可梦一只都没有退场 */
   flawless: boolean;
+  /** 打败的是大师难度的馆主 */
+  master?: boolean;
 }
 
 export interface AchievementDef {
@@ -192,7 +199,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'reach_wave_15', name: '月见山探险家', desc: '完成第 15 波', reward: 150, unlocks: ['omanyte', 'kabuto'], check: (r) => r.wavesCleared >= 15 },
   { id: 'victory', name: '宝可梦大师', desc: '击败梦幻，通关任意难度（解锁普通难度）', reward: 300, unlocks: ['dratini'], trainer: 'giovanni', unlocksDifficulty: 'normal', check: (r) => r.victory },
   { id: 'victory_normal', name: '道馆馆主', desc: '通关普通模式（解锁困难难度）', reward: 400, trainer: 'lance', unlocksDifficulty: 'hard', check: (r) => r.victory && r.difficulty !== 'easy' },
-  { id: 'victory_hard', name: '冠军之路', desc: '通关困难模式', reward: 600, unlocks: ['mewtwo'], check: (r) => r.victory && r.difficulty === 'hard' },
+  { id: 'victory_hard', name: '冠军之路', desc: '通关困难模式（解锁地狱难度）', reward: 600, unlocks: ['mewtwo'], unlocksDifficulty: 'hell', check: (r) => r.victory && atLeast(r.difficulty, 'hard') },
+  { id: 'victory_hell', name: '烈火中重生', desc: '通关地狱模式（解锁噩梦难度）', reward: 900, unlocksDifficulty: 'nightmare', check: (r) => r.victory && atLeast(r.difficulty, 'hell') },
+  { id: 'victory_nightmare', name: '从噩梦中醒来', desc: '通关噩梦模式', reward: 1500, check: (r) => r.victory && r.difficulty === 'nightmare' },
   { id: 'no_evolve_win', name: '坚持自我', desc: '用会进化的宝可梦不进化通关', reward: 150, check: (r) => r.victory && r.neverEvolved },
   { id: 'full_slots', name: '技能大师', desc: '技能栏全部填满', reward: 30, check: (r) => r.skillsFull },
   { id: 'foreign', name: '博采众长', desc: '学会一个不在自身技能表中的技能', reward: 30, check: (r) => r.foreignSkill },
@@ -223,6 +232,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'gym_underdog', name: '以弱胜强', desc: '用平均等级比馆主低 3 级以上的队伍击败道馆馆主', reward: 80, check: (_r, _s, g) => !!g?.underdog },
   { id: 'gym_auto', name: '斗蛐蛐大师', desc: '开着自动战斗击败道馆馆主', reward: 40, check: (_r, _s, g) => !!g?.auto },
   { id: 'gym_flawless', name: '一只都没少', desc: '自己的三只宝可梦都没有退场，击败道馆馆主', reward: 80, check: (_r, _s, g) => !!g?.flawless },
+  { id: 'master_1', name: '更上一层楼', desc: '击败大师难度的小刚，获得第一枚大师徽章', reward: 150, check: (_r, s) => s.masters >= 1 },
+  { id: 'master_4', name: '馆主们的劲敌', desc: '集齐 4 枚大师徽章', reward: 300, check: (_r, s) => s.masters >= 4 },
+  { id: 'master_8', name: '真正的冠军', desc: '集齐全部 8 枚大师徽章', reward: 800, check: (_r, s) => s.masters >= 8 },
   // 闪光宝可梦
   { id: 'shiny_1', name: '闪闪发光', desc: '得到第一只闪光宝可梦', reward: 60, check: (_r, s) => s.shinies >= 1 },
   { id: 'shiny_5', name: '闪光收藏家', desc: '拥有 5 种闪光宝可梦', reward: 150, check: (_r, s) => s.shinies >= 5 },

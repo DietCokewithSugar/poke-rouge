@@ -4,14 +4,17 @@
  * 这样所有技能形态（弹体、光束、连锁、区域……）都不需要为对战单独实现。
  */
 import type { EnemyDef } from '../enemies';
+import { FROST_SLOW, FROST_SLOW_DUR, fieldGrid } from '../fields';
 import { formOf } from '../pokemon';
 import { SKILLS } from '../skills';
 import { gameEffectiveness, type PType } from '../types';
-import { PLAYER_R, applyStatus, healMult, healPlayer, hurtPlayer, type HitOpts } from '../sim/combat';
+import { fieldScores, towards } from '../sim/autopilot';
+import { PLAYER_R, applyStatus, drainHeal, healMult, healPlayer, hurtPlayer, type HitOpts } from '../sim/combat';
 import type { Enemy, SimPlayer } from '../sim/entities';
 import { GameSim, REVIVE_RADIUS, type Command, type PublicState } from '../sim/game';
 import { createPlayerFromBuild } from '../sim/player';
 import type { SavedBuild } from './build';
+import type { GymFieldPlan } from './gym';
 
 export type PvpMode = '1v1' | '4v4';
 export const PVP_MODE_IDS: PvpMode[] = ['1v1', '4v4'];
@@ -51,6 +54,9 @@ export const PVP_BIOME = 4;
 
 /** owner：这只宝可梦属于哪位训练家（座位）；helper：训练家派出的第二、三只，由 AI 操作 */
 export interface PvpInit { id: number; name: string; team: number; build: SavedBuild; meta: Record<string, number>; trainer?: string; bot?: boolean; owner?: number; helper?: boolean }
+
+/** fields：开场就铺好的局部属性场地（道馆对战）；排位对战没有场地 */
+export interface PvpOpts { fields?: GymFieldPlan[] }
 
 export interface PvpPublic {
   mode: PvpMode;
@@ -112,7 +118,7 @@ export class PvpSim extends GameSim {
   protected override mapItems = false;
   protected override mapFields = false;
 
-  constructor(mode: PvpMode, inits: PvpInit[], seed: number) {
+  constructor(mode: PvpMode, inits: PvpInit[], seed: number, opts: PvpOpts = {}) {
     super([], seed, 'easy', false);
     this.mode = mode;
     this.def = PVP_MODES[mode];
@@ -147,8 +153,15 @@ export class PvpSim extends GameSim {
       if (p.bot) this.initBot(p);
     }
     this.place();
+    for (const f of opts.fields ?? []) this.gymField(f);
     this.syncProxies();
     this.emit(['msg', `${this.def.name} · 对战即将开始！`]);
+  }
+
+  /** 道馆的场地：主场长在馆主那一半，克制馆主的场地长在挑战者那一半，中间留一条空隙 */
+  private gymField(f: GymFieldPlan) {
+    const { cols } = fieldGrid(this.w, this.h);
+    this.growFieldIn(f.kind, f.size, (gx) => (f.side === 1 ? gx >= cols * 0.53 : gx < cols * 0.47));
   }
 
   private place() {
@@ -210,13 +223,20 @@ export class PvpSim extends GameSim {
       this.credit(p, t, dealt, o.dot ? '_dot' : o.skill?.id ?? '_other');
       if (!o.dot && p.d.lifesteal > 0 && this.rng.chance(p.d.lifesteal)) healPlayer(this, p, 1, true);
       if (!o.dot && p.d.stun > 0 && this.rng.chance(p.d.stun)) applyStatus(e, { kind: 'stun', chance: 1, dur: 0.5 }, dealt, p.id);
+      // 场地效果：繁茂草丛的命中回复、寒霜区域的命中减速
+      if (o.drain) drainHeal(this, p, dealt * o.drain);
     }
+    if (o.chill && dealt > 0) applyStatus(e, { kind: 'slow', chance: 1, dur: FROST_SLOW_DUR, amount: FROST_SLOW }, dealt, p?.id ?? -1);
     if (o.status && dealt > 0 && this.rng.chance(o.status.chance)) {
       const s = t.items.safety_goggles && o.status.kind !== 'burn' && o.status.kind !== 'poison' && o.status.kind !== 'leech'
         ? { ...o.status, dur: (o.status.dur ?? 2) * 0.5 } : o.status;
       applyStatus(e, s, dealt, p?.id ?? -1, o.heal);
     }
     return dealt;
+  }
+
+  override readoutScale(p: SimPlayer) {
+    return pvpDamageScale(p.level, this.mode);
   }
 
   overtime() {
@@ -502,6 +522,19 @@ export class PvpSim extends GameSim {
       m.wander += this.rng.range(-1, 1) * dt;
       vx += Math.cos(m.wander) * 0.3;
       vy += Math.sin(m.wander) * 0.3;
+    }
+    // 局部属性场地：站在对自己不利的场地里就往外走，附近有对自己有利的场地就往里靠（馆主守着自己的主场）
+    if (this.fields.length) {
+      const score = fieldScores(this, p);
+      const val = (x: number, y: number) => { const k = this.fieldAt(x, y); return k ? score.get(k) ?? 0 : 0; };
+      const here = val(p.x, p.y);
+      if (here < -0.5) {
+        const out = towards(this, p.x, p.y, (x, y) => val(x, y) >= -0.5, 160);
+        if (out) { vx += out.x * 0.9; vy += out.y * 0.9; }
+      } else if (here <= 0.5 && !lowHp) {
+        const to = towards(this, p.x, p.y, (x, y) => val(x, y) > 0.5, 140);
+        if (to) { vx += to.x * 0.5; vy += to.y * 0.5; }
+      }
     }
     // 躲避飞来的弹体与即将落下的打击
     for (const pr of this.projs) {

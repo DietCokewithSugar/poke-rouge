@@ -13,7 +13,11 @@ import { Animator } from '../gfx/sprites';
 import { trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
 import { clear, h, tip } from './dom';
-import { skillIcon, skillInfo, typeBadge } from './describe';
+import { fieldNums } from '../../shared/sim/combat';
+import { numsOf, skillIcon, skillInfo, typeBadge } from './describe';
+
+/** 冷却圈在两次更新之间最多自己往前转多少秒 */
+const CD_AHEAD = 0.35;
 
 const VERDICT: Record<FieldVerdict, string> = { good: '对你有利', bad: '对你不利', mixed: '有利有弊', none: '对你没影响' };
 
@@ -66,6 +70,10 @@ export class Hud {
   private myTeam = 0;
   private lastCount = -1;
   private autoBtn: HTMLButtonElement | null = null;
+  private paused = false;
+  /** 最新的私有状态与公共状态：技能说明按它们显示实际数值 */
+  private lastMe: MeState | null = null;
+  private lastPub: PublicState | null = null;
 
   /** onMenu：单人是暂停（pause），联机和对战是菜单（menu：设置、离开） */
   constructor(parent: HTMLElement, onMenu: (() => void) | null, kind: 'pause' | 'menu' = 'pause') {
@@ -113,13 +121,32 @@ export class Hud {
     this.cds = skills.map((s) => ({ cd: s.cd, max: Math.max(0.1, s.max), at: now }));
   }
 
+  /** 技能栏上技能的实际数值：服务器发来的不含场地，这里按现在站的场地补上 */
+  private liveNums(id: string, lv: number) {
+    const me = this.lastMe;
+    if (!me) return undefined;
+    const here = this.fieldHere();
+    const kind = here === null ? null : this.lastPub?.fields?.find((f) => f.id === here)?.kind ?? null;
+    return fieldNums(id, numsOf(me, id, lv), kind, formOf(me.line, me.stage).types);
+  }
+
+  /** 暂停时冷却圈停在原地（服务器也停了，不会再发新的冷却） */
+  setPaused(on: boolean) {
+    if (on === this.paused) return;
+    this.paused = on;
+    const now = performance.now();
+    // 暂停那一刻先把已经往前推的部分记下来，继续时从这里接着转
+    for (const c of this.cds) { c.cd = Math.max(0, c.cd - Math.min(CD_AHEAD, (now - c.at) / 1000)); c.at = now; }
+  }
+
   private tick = () => {
     this.raf = requestAnimationFrame(this.tick);
     const now = performance.now();
     this.cds.forEach((c, i) => {
       const cd = (this.skills.children[i] as HTMLElement | undefined)?.querySelector('.cd') as HTMLElement | null;
       if (!cd) return;
-      const left = Math.max(0, c.cd - (now - c.at) / 1000);
+      // 两次更新之间往前推，但最多推 CD_AHEAD 秒：暂停、卡顿时不会自己转完
+      const left = Math.max(0, c.cd - (this.paused ? 0 : Math.min(CD_AHEAD, (now - c.at) / 1000)));
       const p = `${Math.round(Math.min(1, left / c.max) * 100)}%`;
       if (cd.style.getPropertyValue('--p') !== p) cd.style.setProperty('--p', p);
     });
@@ -271,6 +298,8 @@ export class Hud {
   show(on: boolean) { this.root.classList.toggle('hidden', !on); }
 
   update(me: MeState | null, pub: PublicState | null, you: number, hpOverride?: { hp: number; maxHp: number }) {
+    if (me) this.lastMe = me;
+    if (pub) this.lastPub = pub;
     if (me) {
       if (me.dex !== this.lastDex) {
         this.lastDex = me.dex;
@@ -296,17 +325,17 @@ export class Hud {
           if (s) {
             cell.appendChild(skillIcon(s.id, s.lv));
             cell.appendChild(h('div', { class: 'cd' }));
-            tip(cell, () => skillInfo(s.id, s.lv, me.line));
+            tip(cell, () => skillInfo(s.id, s.lv, me.line, this.liveNums(s.id, s.lv)));
           }
           this.skills.appendChild(cell);
         }
       }
     }
+    if (pub) this.setFields(pub, me);
     if (pub?.pvp) {
       this.updatePvp(pub);
       this.downBox.classList.toggle('hidden', !(me?.down && pub.phase === 'wave' && this.pvpSeats.filter((s) => s.team === this.myTeam).length > 1));
     } else if (pub) {
-      this.setFields(pub, me);
       const D = DIFFICULTIES[pub.difficulty];
       set(this.wave, `${D.name} · 第 ${pub.wave} / ${pub.total} 波 · ${BIOMES[pub.biome]?.name ?? ''}`);
       this.hordeEl.classList.toggle('hidden', !(pub.horde && pub.phase === 'wave'));

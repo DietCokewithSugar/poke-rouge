@@ -23,7 +23,7 @@ import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
 import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
 import {
-  PARTY_BONUS_TIER, addOwned, applyRun, autoAssistUnlocked, buildMon, isUnlocked, loadProfile, monKey, notePvpBest, ownsMon, partnerOf, partyMax, pvpIdentity,
+  PARTY_BONUS_TIER, addOwned, applyRun, autoAssistUnlocked, buildMon, isUnlocked, loadProfile, masterCount, monKey, notePvpBest, ownsMon, partnerOf, partyMax, pvpIdentity,
   releaseFromParty, runMeta, saveProfile, unlockedLines, watchProfile, winGym, type Mon, type PartyMon, type Profile, type Settings,
 } from './save';
 import { Cloud } from './cloud';
@@ -39,8 +39,8 @@ import { PvpScreen, pvpResultsScreen } from './ui/pvp';
 import { badgeBonus, badgeCount, gymScreen } from './ui/gym';
 import { TOURS, talk, tour, tourActive } from './ui/guide';
 import { badgeCeremony, bigBanner, placeSign, setTransitions, transition, vsSplash, type VsSide } from './ui/fx';
-import { GUIDE, GYM_BY_ID, nextGym, type GymDef } from '../shared/gyms';
-import { gymTeam, isUnderdog, type GymStage } from '../shared/pvp/gym';
+import { GUIDE, GYM_BY_ID, masterBadgeName, nextGym, type GymDef } from '../shared/gyms';
+import { gymFields, gymFoe, gymMeta, gymTeam, isUnderdog, type GymStage } from '../shared/pvp/gym';
 import { TYPE_NAME } from '../shared/types';
 import { TownScene } from './town';
 
@@ -131,6 +131,8 @@ class App {
   private pingTimer = 0;
   /** 正在排队或进行中的对战 */
   private pvpMatch: PvpMatch | null = null;
+  /** 道馆界面上次选的是不是大师难度 */
+  private gymMaster = false;
   /** 邀请链接里的房间号：完成开场后自动加入 */
   private pendingRoom: string | null = null;
   /** 自己的宝可梦现在是不是由 AI 操作（以服务器状态为准） */
@@ -342,7 +344,8 @@ class App {
   /** 把冒险的最好成绩和徽章数报给服务器（排行榜用；还没有成绩时不报） */
   private reportProgress() {
     const ws = this.ws, p = this.profile;
-    const badges = badgeCount(p);
+    // 道馆榜：普通徽章和大师徽章加起来（最多 16 枚）
+    const badges = badgeCount(p) + masterCount(p);
     if (!ws?.connected || !p.setup || (!p.bestRun && !badges)) return;
     const id = pvpIdentity(p);
     if (p.bestRun) ws.send({ t: 'runReport', ...id, name: this.name(), run: p.bestRun });
@@ -826,19 +829,21 @@ class App {
     ], { npc: 'guide' });
   }
 
-  /** 道馆挑战：徽章盒、八个道馆与你的出战队伍 */
-  gymCenter(sel?: string) {
+  /** 道馆挑战：徽章盒、八个道馆与你的出战队伍；master：打开时选中大师难度（离开后记住上次选的） */
+  gymCenter(sel?: string, master = this.gymMaster) {
     this.where = 'place';
     this.pvpUi = null;
+    this.gymMaster = master;
     this.backdrop();
     this.screen.classList.remove('hidden');
     playMusic('town');
-    gymScreen(this.screen, this.profile, {
-      challenge: (g, team) => this.gymChallenge(g, team),
-      team: (g) => this.pvpCenter(1, g.id),
+    const actions = {
+      challenge: (g: GymDef, team: PartyMon[], m: boolean) => { this.gymMaster = m; this.gymChallenge(g, team, m ? 'master' : undefined); },
+      team: (g: GymDef) => this.pvpCenter(1, g.id),
       adventure: () => this.route(),
       back: () => this.backToTown(),
-    }, sel);
+    };
+    gymScreen(this.screen, this.profile, actions, sel, master);
     tour(this.profile, 'gym', TOURS.gym);
   }
 
@@ -846,7 +851,7 @@ class App {
   private gymChallenge(g: GymDef, team: PartyMon[], stage?: GymStage) {
     const p = this.profile;
     const st: GymStage = stage ?? (p.gymJunior[g.id] || p.badges[g.id] ? 'leader' : 'junior');
-    const T = g[st];
+    const T = gymFoe(g, st);
     const foes = gymTeam(g, st);
     this.where = 'place';
     this.backdrop();
@@ -856,7 +861,7 @@ class App {
       text: st === 'leader' && p.badges[g.id] ? g.leader.rematch : T.intro,
       extra: h('div', { class: 'talk-team' }, foes.map((b) => portraitSlot(formOf(b.line, b.stage).dex, 1, 'tiny')), h('span', { class: 'small muted' }, `Lv${T.level}`)),
       buttons: [
-        [st === 'leader' ? '挑战馆主！' : '迎战！', () => this.startGymBattle(g, team, st), 'gold'],
+        [st === 'master' ? '大师对决！' : st === 'leader' ? '挑战馆主！' : '迎战！', () => this.startGymBattle(g, team, st), 'gold'],
         ['再准备一下', () => this.gymCenter(g.id), 'ghost'],
       ],
     });
@@ -864,26 +869,27 @@ class App {
 
   private startGymBattle(g: GymDef, team: PartyMon[], stage: GymStage) {
     mobileFullscreen();
-    const T = g[stage];
+    const T = gymFoe(g, stage);
     void transition('battle', () => {
       if (this.pvpUi?.isQueued) this.ws?.send({ t: 'pvpCancel' });
       this.close();
       this.solo = false;
       this.pvpMatch = { mode: '1v1', uids: team.map((m) => m.uid), practice: true, seats: [], gym: { id: g.id, stage } };
       const t = new LocalPvpTransport('1v1', { name: this.name(), team: team.map((m) => m.build), meta: this.meta(), trainer: this.profile.trainer, auto: this.profile.pvpAuto },
-        [], { name: T.name, trainer: T.art, builds: gymTeam(g, stage), meta: g.meta });
+        [], { name: T.name, trainer: T.art, builds: gymTeam(g, stage), meta: gymMeta(g, stage), fields: gymFields(g, stage) });
       this.t = t;
       t.onMessage = (m) => this.onMessage(m);
     }, { hold: 300 });
   }
 
-  /** 道馆对战结束：输了可以再来；赢了道馆训练家接着挑战馆主；赢了馆主颁发徽章 */
+  /** 道馆对战结束：输了可以再来；赢了道馆训练家接着挑战馆主；赢了馆主颁发徽章（大师难度颁发大师徽章） */
   private endGym(g: GymDef, stage: GymStage, team: PartyMon[], res: PvpMatchResult, you: number, report: () => void) {
     const p = this.profile;
-    const T = g[stage];
+    const T = gymFoe(g, stage);
+    const master = stage === 'master';
     const me = res.players.find((x) => x.id === you);
     const won = !!me && res.winner === me.team;
-    const back = () => this.gymCenter(g.id);
+    const back = () => this.gymCenter(g.id, master);
     const who = { name: `${T.title} · ${T.name}`, art: T.art };
     const log = (p.gymLog[g.id] ??= { tries: 0, wins: 0 });
     log.tries++;
@@ -900,13 +906,14 @@ class App {
       return;
     }
     const mine = res.players.filter((x) => x.owner === me!.owner);
-    const reward = winGym(p, { gym: g.id, underdog: isUnderdog(team.map((m) => m.build), g), auto: me!.bot, flawless: mine.every((x) => x.alive) });
+    const reward = winGym(p, { gym: g.id, underdog: isUnderdog(team.map((m) => m.build), g, stage), auto: me!.bot, flawless: mine.every((x) => x.alive), master });
     this.townHud?.refresh();
     if (reward.badge) this.reportProgress();
     const ceremony = () => {
       if (!reward.badge) { back(); return; }
       void badgeCeremony({
-        icon: g.badge.icon, name: g.badge.name, color: g.badge.color, gym: g.name, bonus: badgeBonus(g), stardust: reward.stardust,
+        icon: g.badge.icon, name: master ? masterBadgeName(g) : g.badge.name, color: g.badge.color, gym: g.name, master,
+        bonus: master ? badgeBonus(g).map((s) => `再 ${s}`) : badgeBonus(g), stardust: reward.stardust,
         achievements: reward.newAchievements.map((a) => a.name),
       }).then(back);
     };
@@ -980,7 +987,7 @@ class App {
     const gym = match?.gym ? GYM_BY_ID[match.gym.id] : null;
     const report = () => pvpResultsScreen(this.screen, res, you, rating, match?.seats ?? [], true, {
       again: () => (gym && match?.gym ? this.gymChallenge(gym, team, match.gym.stage) : this.pvpCenter()),
-      back: () => (gym ? this.gymCenter(gym.id) : this.pvpCenter()),
+      back: () => (gym ? this.gymCenter(gym.id, match?.gym?.stage === 'master') : this.pvpCenter()),
       home: () => this.backToTown(),
     });
     void transition('fade', () => {
@@ -1140,7 +1147,7 @@ class App {
         }
         break;
       case 'cmdErr': toast(m.msg, 'error'); sfx('error'); break;
-      case 'paused': this.paused = m.on; this.renderPause(); break;
+      case 'paused': this.paused = m.on; this.hud?.setPaused(m.on); this.renderPause(); break;
       case 'end':
         // 回来时这局已经结束了：服务器补发的结算，结算完回真新镇
         if (this.rejoining) { this.rejoining = false; this.roomGone = true; if (this.t === this.ws) this.t = null; }
@@ -1276,9 +1283,10 @@ class App {
     const left: VsSide = { name: this.name(), sub: TRAINERS[this.profile.trainer]?.title, art: this.profile.trainer, mons: mons(allies) };
     let right: VsSide, title: string;
     if (gym && this.pvpMatch?.gym) {
-      const T = gym[this.pvpMatch.gym.stage];
+      const stage = this.pvpMatch.gym.stage;
+      const T = gymFoe(gym, stage);
       right = { name: T.name, sub: T.title, art: T.art, mons: mons(foes) };
-      title = `${gym.name} · ${this.pvpMatch.gym.stage === 'leader' ? '馆主战' : '道馆训练家'}`;
+      title = `${gym.name} · ${stage === 'master' ? '大师挑战' : stage === 'leader' ? '馆主战' : '道馆训练家'}`;
     } else {
       const names = [...new Set(foes.map((s) => s.name))];
       right = { name: names.length > 1 ? `${names[0]} 等 ${names.length} 人` : names[0] ?? '对手', sub: foes[0]?.bot ? 'AI 训练家' : '训练家', art: foes[0]?.trainer ?? 'gary', mons: mons(foes) };

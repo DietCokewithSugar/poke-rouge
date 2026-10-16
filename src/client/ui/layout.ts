@@ -1,7 +1,8 @@
 /**
  * 界面尺寸：所有卡片界面都按固定的 rem 尺寸设计（最大 60rem × 33.5rem），
- * 根字号按窗口大小计算，100% 时最大的界面正好占画面的 90%，「界面缩放」设置在此基础上等比缩小。
- * 界面不滚动、不随内容改变高度；放不下的列表用分页。
+ * 根字号按窗口大小计算，100% 时最大的界面正好占画面的 90%（触屏占 97%，手机横屏的高度很宝贵），
+ * 「界面缩放」设置在此基础上等比缩小。界面不滚动、不随内容改变高度；放不下的列表用分页。
+ * 手机横屏时战斗 HUD 和真新镇的浮层另外放大（见 style.css 最后的「手机横屏」）。
  */
 import { sfx } from '../audio';
 import { uiIcon } from '../gfx/uiicons';
@@ -14,8 +15,11 @@ export const UI_SCALES = [0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1];
 
 let scale = 1;
 
+const coarse = window.matchMedia('(pointer: coarse)');
+
 export function rootFontPx(s = scale) {
-  const fit = Math.min((window.innerWidth * 0.9) / PANEL_W, (window.innerHeight * 0.9) / PANEL_H);
+  const k = coarse.matches ? 0.97 : 0.9;
+  const fit = Math.min((window.innerWidth * k) / PANEL_W, (window.innerHeight * k) / PANEL_H);
   return Math.max(5, fit * Math.max(0.5, Math.min(1, s)));
 }
 
@@ -30,9 +34,10 @@ export function setUiScale(s: number) {
 
 window.addEventListener('resize', apply);
 window.visualViewport?.addEventListener('resize', apply);
+coarse.addEventListener?.('change', apply);
 
 export function defaultUiScale() {
-  return window.matchMedia('(pointer: coarse)').matches ? 1 : 0.9;
+  return coarse.matches ? 1 : 0.9;
 }
 
 /**
