@@ -153,7 +153,7 @@ function explode(sim: GameSim, e: Enemy) {
   if (b.cloud) {
     sim.zones.push({ id: sim.newId(), fx: 'e_cloud', owner: -1, skill: null, type: 'poison', x: e.x, y: e.y, r: b.radius * 0.9, life: 3.5, maxLife: 3.5, tick: 0.5, t: 0, dmg: dmg * 0.25 });
   }
-  sim.killEnemy(e, null, true);
+  sim.killEnemy(e, null, 'self');
 }
 
 function enemyStrike(sim: GameSim, x: number, y: number, r: number, delay: number, power: number, fx: string) {

@@ -3,7 +3,8 @@
  * 粒子是方块，冲击波是像素点组成的环，挥砍是分层的像素弧，光束是一段段像素块，
  * 再叠加 vfx.ts 里按属性上色的小图。透明度按 1 / 0.66 / 0.33 分级，避免显得像矢量图。
  */
-import { artGlow, hasArt, itemSprite } from './pickups';
+import { BLAST_RADIUS } from '../../shared/pickups';
+import { BLAST_KIND, artGlow, hasArt, itemSprite } from './pickups';
 import { PAL, drawShape, isDir, spins, vis, type MeleeExtra, type Pal, type Trail } from './vfx';
 
 const TAU = Math.PI * 2;
@@ -137,6 +138,11 @@ function drawMapItem(ctx: CanvasRenderingContext2D, kind: number, x: number, y: 
   const img = itemSprite(kind);
   x = Math.round(x); y = Math.round(y);
   const seed = x * 0.37 + y * 0.11;
+  if (ground && kind === BLAST_KIND) {
+    // 爆炸之种：地上用一圈虚线标出会被炸到的范围，方便把小怪引进来
+    ctx.globalAlpha = step(0.45 + 0.25 * Math.sin(t * 3 + seed)) * 0.5;
+    pxRing(ctx, x, y, BLAST_RADIUS, artGlow(kind), 1, 0.85, 7);
+  }
   if (ground) {
     ctx.globalAlpha = step(0.55 + 0.45 * Math.sin(t * 4.5 + seed));
     pxRing(ctx, x, y + 1, 8, artGlow(kind), 1, 0.45, 2);
@@ -471,6 +477,22 @@ export class FxLayer {
       case 'cloud':
         for (let i = 0; i < 5; i++) { const a = rnd(0, TAU); this.sp('cloud', v.pal, x + Math.cos(a) * r * 0.4, y + Math.sin(a) * r * 0.3 - 4, { vx: Math.cos(a) * 20, vy: -15, life: 0.7, fr: 4 }); }
         break;
+      case 'blast': {
+        // 爆炸之种：火焰向四周喷开，冒起黑烟
+        this.ring(x, y, r * 0.1, r * 0.7, C[4], 0.24, 2);
+        this.sp('impact', v.pal, x, y - 4, { life: 0.34, scale: 3, fr: 10, fade: false });
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * TAU + rnd(-0.15, 0.15);
+          this.sp('flame', 'fire', x + Math.cos(a) * r * 0.2, y + Math.sin(a) * r * 0.16 - 4, { vx: Math.cos(a) * r * 1.7, vy: Math.sin(a) * r * 1.3, life: 0.42, fr: 12, scale: 1.2 });
+        }
+        for (let i = 0; i < 7; i++) {
+          const a = rnd(0, TAU);
+          this.sp('cloud', 'dark', x + Math.cos(a) * r * 0.35, y + Math.sin(a) * r * 0.25 - 6, { vx: Math.cos(a) * 26, vy: -18, life: 0.9, fr: 4, scale: 1.4 });
+        }
+        this.burst(x, y - 4, [C[2], C[3], C[4], '#fff2a0'], 28, r * 2.6);
+        this.shake = Math.max(this.shake, 6);
+        break;
+      }
       case 'big':
         this.sp('impact', v.pal, x, y - 4, { life: 0.3, scale: 2.5, fr: 10, fade: false });
         for (let i = 0; i < 6; i++) { const a = rnd(0, TAU); this.sp('rock', v.pal, x, y - 4, { vx: Math.cos(a) * r * 2.5, vy: -rnd(70, 130), grav: 380, life: 0.5, spin: rnd(-8, 8) }); }

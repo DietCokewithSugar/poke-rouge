@@ -5,7 +5,7 @@ import { REVIVE_RADIUS, type Ev, type MeState, type PublicState } from '../../sh
 import { sfx } from '../audio';
 import { BOOSTS, PICKUP_KINDS, boostOfSeed, type BoostId } from '../../shared/pickups';
 import { FxLayer, drawPickup, drawProj, drawZone, pxCircle, pxRing, twinkle } from '../gfx/fx';
-import { artGlow, hasArt } from '../gfx/pickups';
+import { BLAST_KIND, artGlow, hasArt } from '../gfx/pickups';
 import { vis, type Trail } from '../gfx/vfx';
 import { shownAmount } from '../../shared/stats';
 import { TYPES } from '../../shared/types';
@@ -409,9 +409,9 @@ export class GameView {
     if (!this.settings.shake) this.fx.shake = 0;
   }
 
-  /** 踩到种子：头顶飘字说明效果；橙橙果只冒一点光（回复的绿色数字由 'heal' 事件显示） */
+  /** 踩到种子：头顶飘字说明效果；橙橙果只冒一点光（回复的绿色数字由 'heal' 事件显示）；爆炸之种的爆炸由 'boom' 事件画 */
   private pickedItem(kind: number, boost: BoostId | null, pid: number) {
-    if (!hasArt(kind)) return;
+    if (!hasArt(kind) || kind === BLAST_KIND) return;
     const pos = this.playerPos(pid);
     if (!pos) return;
     if (boost) {

@@ -1,12 +1,15 @@
 /**
  * 自动走位（冒险的 AI 辅助战斗）：躲开近身的敌人、弹幕与即将落下的攻击，保持在技能射程边缘绕圈，
- * 安全时去捡糖果和增幅种子、救倒下的队友，血少时去吃橙橙果，远离墙角。
+ * 安全时去捡糖果和增幅种子、救倒下的队友，血少时去吃橙橙果，被一群小怪围住时去踩爆炸之种，远离墙角。
  * 只负责走位：技能本来就是自动释放的，商店、升级与进化仍由玩家自己决定。
  */
-import { boostOfSeed } from '../pickups';
+import { BLAST_RADIUS, boostOfSeed } from '../pickups';
 import { SKILLS } from '../skills';
 import type { SimPlayer } from './entities';
-import { REVIVE_RADIUS, type GameSim } from './game';
+import { REVIVE_RADIUS, blastable, type GameSim } from './game';
+
+/** 爆炸范围里有这么多只普通小怪才去踩爆炸之种，不然绕开它，留到需要的时候 */
+export const AUTO_BLAST_CROWD = 10;
 
 function preferredRange(p: SimPlayer) {
   let r = 999;
@@ -25,11 +28,13 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
   const flee = Math.min(70, want + 12);
   let fx = 0, fy = 0;
   let nearest = Infinity, nx = 0, ny = 0;
+  let crowd = 0;
   for (const e of sim.enemies) {
     if (e.dead || e.hidden) continue;
     const dx = p.x - e.x, dy = p.y - e.y;
     const d = Math.hypot(dx, dy) || 1;
     if (d < nearest) { nearest = d; nx = dx / d; ny = dy / d; }
+    if (d < BLAST_RADIUS && blastable(e)) crowd++;
     const danger = e.def.rank === 'minion' ? 1 : 2.5;
     const r = e.def.rank === 'minion' ? flee : Math.max(flee, 46);
     if (d < r) { fx += (dx / d) * danger * (r - d) / r * 2.2; fy += (dy / d) * danger * (r - d) / r * 2.2; }
@@ -53,10 +58,19 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
     const d = Math.hypot(dx, dy) || 1;
     if (d < 50) { fx += (dx / d) * 1.8 * (50 - d) / 50; fy += (dy / d) * 1.8 * (50 - d) / 50; }
   }
+  const crowded = crowd >= AUTO_BLAST_CROWD;
   const safe = nearest > want + 40;
-  // 安全时的目标：倒下的队友 > 血少时的橙橙果 > 增幅种子 > 附近的糖果和道具球
+  // 目标：被围住时的爆炸之种 > 倒下的队友 > 血少时的橙橙果 > 增幅种子 > 附近的糖果和道具球
   let goal: { x: number; y: number; w: number } | null = null;
-  for (const q of sim.players) {
+  if (crowded) {
+    let bd = 240 ** 2;
+    for (const pk of sim.pickups) {
+      if (pk.kind !== 'seed_blast') continue;
+      const d = (pk.x - p.x) ** 2 + (pk.y - p.y) ** 2;
+      if (d < bd) { bd = d; goal = { x: pk.x, y: pk.y, w: 2.4 }; }
+    }
+  }
+  for (const q of goal ? [] : sim.players) {
     if (q === p || !q.down || !q.alive || !sim.isAlly(p, q)) continue;
     const d = Math.hypot(q.x - p.x, q.y - p.y);
     if (d > REVIVE_RADIUS * 0.5 && (safe || d < 90) && (!goal || d < Math.hypot(goal.x - p.x, goal.y - p.y))) goal = { x: q.x, y: q.y, w: 1.6 };
@@ -65,7 +79,7 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
     const low = p.hp < p.d.maxHp * 0.5;
     let bd = (safe ? 160 : 70) ** 2;
     for (const pk of sim.pickups) {
-      if (pk.kind === 'berry' && !low) continue;
+      if (pk.kind === 'seed_blast' || (pk.kind === 'berry' && !low)) continue;
       // 同一种增幅还剩很久时不急着去踩
       const b = boostOfSeed(pk.kind);
       if (b && p.boosts[b] > 2) continue;
@@ -82,6 +96,20 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
     if (nearest > want + Math.min(20, want * 0.3)) { fx -= nx * 0.6; fy -= ny * 0.6; }
     // 绕圈走
     fx += -ny * 0.5; fy += nx * 0.5;
+  }
+  if (!crowded) {
+    // 没被围住时绕开爆炸之种，留到需要的时候：离得近了往想走的那一侧让开
+    for (const pk of sim.pickups) {
+      if (pk.kind !== 'seed_blast') continue;
+      const dx = p.x - pk.x, dy = p.y - pk.y;
+      const d = Math.hypot(dx, dy) || 1;
+      if (d >= 44) continue;
+      const ux = dx / d, uy = dy / d;
+      const side = -uy * fx + ux * fy >= 0 ? 1 : -1;
+      const k = Math.min(1, (44 - d) / 22);
+      fx += (ux * 2.4 - uy * side * 1.6) * k;
+      fy += (uy * 2.4 + ux * side * 1.6) * k;
+    }
   }
   const wall = 80;
   if (p.x < wall) fx += ((wall - p.x) / wall) * 3;

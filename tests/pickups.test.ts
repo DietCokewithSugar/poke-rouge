@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { PeerSync } from '../src/shared/netsync';
 import {
-  BOOST_CRIT, BOOST_DODGE, BOOST_DUR, BOOST_SPEED, MAX_BERRIES, MAX_SEEDS, PICKUP_KINDS, berryHeal, isSeed, pickupCode, type PickupKind,
+  BLAST_CROWD, BLAST_RADIUS, BOOST_CRIT, BOOST_DODGE, BOOST_DUR, BOOST_SPEED, MAX_BERRIES, MAX_BLASTS, MAX_SEEDS, PICKUP_KINDS, berryHeal, blastSeedCount, isSeed, pickupCode,
+  type PickupKind,
 } from '../src/shared/pickups';
 import { buildOf } from '../src/shared/pvp/build';
 import { PvpSim, type PvpInit } from '../src/shared/pvp/sim';
@@ -116,14 +117,14 @@ test('增幅种子：遵守闪避与移速上限，倒下或波次结束时清�
 });
 
 test('地图道具：drop 事件区分种类，私有状态和增量消息都带上增幅', () => {
-  assert.deepEqual(PICKUP_KINDS.map(pickupCode), [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(PICKUP_KINDS.map(pickupCode), [0, 1, 2, 3, 4, 5, 6]);
   const sim = new GameSim([{ id: 1, name: 'A', line: 'charmander', meta: {} }], 6);
   const p = sim.players[0];
   sim.flushEvents();
-  const kinds: PickupKind[] = ['berry', 'seed_crit', 'seed_dodge', 'seed_speed'];
+  const kinds: PickupKind[] = ['berry', 'seed_crit', 'seed_dodge', 'seed_speed', 'seed_blast'];
   for (const k of kinds) sim.placeItem(k, 100, 100);
   const drops = sim.flushEvents().filter((e) => e[0] === 'drop');
-  assert.deepEqual(drops.map((e) => e[2]), [1, 3, 4, 5]);
+  assert.deepEqual(drops.map((e) => e[2]), [1, 3, 4, 5, 6]);
 
   const sync = new PeerSync();
   assert.equal(JSON.parse(sync.privateMsg(sim, p)!).t, 'me');
@@ -178,7 +179,7 @@ test('AI 辅助战斗和离开的玩家也会去踩种子、血少时去吃橙�
   assert.ok(!sim.pickups.some((k) => k.kind === 'berry'));
 });
 
-test('对战：不会出现橙橙果和种子，也放不了', () => {
+test('对战：不会出现橙橙果、种子和爆炸之种，也放不了', () => {
   const build = buildOf(new GameSim([{ id: 1, name: 'x', line: 'charmander', meta: {} }], 1).players[0]);
   const inits: PvpInit[] = [
     { id: 1, name: 'A', team: 0, build, meta: {}, bot: true },
@@ -187,10 +188,145 @@ test('对战：不会出现橙橙果和种子，也放不了', () => {
   const sim = new PvpSim('1v1', inits, 21);
   assert.equal(sim.placeItem('berry', 100, 100), null);
   assert.equal(sim.placeItem('seed_crit', 100, 100), null);
+  assert.equal(sim.placeItem('seed_blast', 100, 100), null);
+  const blast = pickupCode('seed_blast');
   for (let i = 0; i < 30 * 60 && sim.phase !== 'over'; i++) {
     sim.step(DT);
-    for (const e of sim.flushEvents()) assert.ok(!(e[0] === 'drop' && MAP_ITEMS.has(e[2] as number)), `对战里出现了地图道具：${JSON.stringify(e)}`);
-    assert.ok(!sim.pickups.some((k) => k.kind === 'berry' || isSeed(k.kind)));
+    for (const e of sim.flushEvents()) assert.ok(!(e[0] === 'drop' && (MAP_ITEMS.has(e[2] as number) || e[2] === blast)), `对战里出现了地图道具：${JSON.stringify(e)}`);
+    assert.ok(!sim.pickups.some((k) => k.kind === 'berry' || isSeed(k.kind) || k.kind === 'seed_blast'));
     for (const p of sim.players) assert.deepEqual(boostsOf(p), []);
   }
+});
+
+/** 直接跳到第 wave 波开始（中间的波次一下就结束，商店也直接跳过） */
+function toWave(sim: GameSim, wave: number) {
+  while (sim.wave < wave) {
+    sim.waveT = sim.waveDur;
+    sim.step(DT);
+    for (const p of sim.players) p.ready = true;
+    sim.step(DT);
+  }
+  sim.flushEvents();
+}
+
+test('爆炸之种：炸飞范围内的普通小怪，什么都不掉、不给经验；首领、精英、闪光、乱入和宝藏宝可梦不吃这个伤害', () => {
+  const sim = new GameSim([{ id: 1, name: 'A', line: 'squirtle', meta: {} }], 31);
+  const p = sim.players[0];
+  p.invuln = 9;
+  for (const s of p.skills) s.cd = 99;
+  const at = (id: string, dx: number, dy: number) => sim.spawnEnemy(id, p.x + dx, p.y + dy);
+  const minions = [at('rattata', 40, 0), at('zubat', -60, 30), at('geodude', 0, 90), at('voltorb', 70, -60)];
+  const far = at('rattata', BLAST_RADIUS + 60, 0);
+  const special = [at('beedrill', 30, 30), at('snorlax', -40, -40), at('w19', 50, -20), at('meowth', -30, 60)];
+  sim.forceShiny = 1;
+  special.push(at('pidgey', 20, 50));
+  const hp = special.map((e) => e.hp);
+  const before = { xp: p.xp, level: p.level, money: p.money, kills: p.stats.kills, minions: p.stats.rankKills.minion };
+  sim.placeItem('seed_blast', p.x, p.y + 4);
+  sim.flushEvents();
+  sim.step(DT);
+  const evs = sim.flushEvents();
+  assert.ok(minions.every((e) => e.dead), '范围内的普通小怪全部炸飞');
+  assert.ok(!far.dead, '范围外的不受影响');
+  special.forEach((e, i) => assert.ok(!e.dead && e.hp === hp[i], `${e.def.name}${e.shiny ? '（闪光）' : ''}不吃爆炸伤害`));
+  assert.ok(evs.some((e) => e[0] === 'boom' && e[3] === BLAST_RADIUS && e[4] === 'seed_blast'), '画面上有爆炸');
+  assert.ok(evs.some((e) => e[0] === 'txt' && String(e[3]).includes('炸飞了 4 只')));
+  assert.ok(!evs.some((e) => e[0] === 'drop'), `炸飞的小怪什么都不掉：${JSON.stringify(evs.filter((e) => e[0] === 'drop'))}`);
+  assert.ok(!evs.some((e) => e[0] === 'recruit'));
+  assert.equal(p.stats.kills, before.kills + 4, '算作击败数');
+  assert.equal(p.stats.rankKills.minion, before.minions + 4);
+  for (let i = 0; i < 30; i++) { p.invuln = 9; for (const s of p.skills) s.cd = 99; sim.step(DT); }
+  assert.equal(p.xp, before.xp, '不给经验');
+  assert.equal(p.level, before.level);
+  assert.equal(p.money, before.money, '也不给金钱');
+  const e = at('rattata', 10, 0);
+  sim.flushEvents();
+  sim.killEnemy(e, p);
+  assert.ok(sim.flushEvents().some((x) => x[0] === 'drop' && x[2] === pickupCode('candy')), '平时打倒照样掉糖果');
+});
+
+test('爆炸之种：第 5 波起每波都会出现，场上最多 2 颗，波次结束时消失', () => {
+  assert.equal(blastSeedCount(4, 1, false), 0);
+  assert.equal(blastSeedCount(5, 1, false), 1);
+  assert.equal(blastSeedCount(11, 1, false), 2);
+  assert.equal(blastSeedCount(11, 3, true), 4, '群聚波和三人以上联机各多 1 颗');
+  const sim = new GameSim([{ id: 1, name: 'A', line: 'bulbasaur', meta: {} }], 12);
+  const code = pickupCode('seed_blast');
+  const per = new Map<number, number>();
+  while (sim.wave <= 7 && sim.phase !== 'over' && sim.phase !== 'won') {
+    if (sim.phase === 'inter') {
+      assert.ok(!sim.pickups.some((k) => k.kind === 'seed_blast'), '波次结束时消失');
+      for (const p of sim.players) p.ready = true;
+    } else {
+      for (const p of sim.players) { p.invuln = 9; botMove(sim, p, DT); }
+    }
+    sim.step(DT);
+    for (const e of sim.flushEvents()) if (e[0] === 'drop' && e[2] === code) per.set(sim.wave, (per.get(sim.wave) ?? 0) + 1);
+    assert.ok(sim.pickups.filter((k) => k.kind === 'seed_blast').length <= MAX_BLASTS);
+  }
+  for (let w = 1; w < 5; w++) assert.equal(per.get(w) ?? 0, 0, `第 ${w} 波还没有爆炸之种`);
+  for (let w = 5; w <= 7; w++) assert.ok((per.get(w) ?? 0) >= 1, `第 ${w} 波：${per.get(w) ?? 0} 颗`);
+});
+
+test('爆炸之种：被一大群小怪围住时提前出现，位置在背对小怪的一边', () => {
+  const sim = new GameSim([{ id: 1, name: 'A', line: 'squirtle', meta: {} }], 13);
+  toWave(sim, 5);
+  const p = sim.players[0];
+  sim.enemies = [];
+  sim.pending = [];
+  for (let i = 0; i < BLAST_CROWD + 2; i++) {
+    const e = sim.spawnEnemy('metapod', p.x - 40 - (i % 4) * 12, p.y - 30 + Math.floor(i / 4) * 14);
+    e.speed = 0;
+  }
+  const code = pickupCode('seed_blast');
+  let drop: Ev | undefined;
+  let hint = false;
+  for (let i = 0; i < 30 && !drop; i++) {
+    p.invuln = 9;
+    for (const s of p.skills) s.cd = 99;
+    sim.step(DT);
+    const evs = sim.flushEvents();
+    drop = evs.find((e) => e[0] === 'drop' && e[2] === code);
+    hint ||= evs.some((e) => e[0] === 'msg' && String(e[1]).includes('爆炸之种出现了'));
+  }
+  assert.ok(drop, '被围住后马上出现');
+  assert.ok(sim.waveT < sim.waveDur * 0.25, '比计划的时间早');
+  assert.ok(hint, '第一次出现时提示用法');
+  const dx = (drop[3] as number) - p.x, dy = (drop[4] as number) - p.y;
+  assert.ok(dx > 0, `出现在背对小怪的一边：(${dx}, ${dy})`);
+  const d = Math.hypot(dx, dy);
+  assert.ok(d >= 60 && d <= 115, `离玩家不远不近：${d}`);
+});
+
+test('AI 辅助战斗：没被围住时绕开爆炸之种，被一群小怪围住时去踩', () => {
+  const a = new GameSim([{ id: 1, name: 'A', line: 'squirtle', meta: {} }], 14);
+  const p = a.players[0];
+  a.setAuto(p.id, true);
+  const blast = a.placeItem('seed_blast', p.x + 40, p.y)!;
+  a.placeItem('candy', p.x + 110, p.y);
+  calm(a, 3);
+  assert.ok(!a.pickups.some((k) => k.kind === 'candy'), '绕过去捡到了糖果');
+  assert.ok(a.pickups.includes(blast), '爆炸之种留在地上');
+
+  const b = new GameSim([{ id: 1, name: 'A', line: 'squirtle', meta: {} }], 15);
+  const q = b.players[0];
+  b.setAuto(q.id, true);
+  b.enemies = [];
+  b.pending = [];
+  const ring = Array.from({ length: 14 }, (_, i) => {
+    const ang = (i / 14) * Math.PI * 2;
+    const e = b.spawnEnemy('metapod', q.x + Math.cos(ang) * 60, q.y + Math.sin(ang) * 60);
+    e.speed = 0;
+    return e;
+  });
+  const seed = b.placeItem('seed_blast', q.x - 50, q.y + 20)!;
+  let picked = false;
+  for (let i = 0; i < 60 && !picked; i++) {
+    q.invuln = 9;
+    for (const s of q.skills) s.cd = 99;
+    b.step(DT);
+    picked = b.flushEvents().some((e) => e[0] === 'pick' && e[1] === seed.id);
+  }
+  assert.ok(picked, '被围住时去踩爆炸之种');
+  assert.ok(ring.filter((e) => e.dead).length >= 8, `炸飞了 ${ring.filter((e) => e.dead).length} 只`);
 });

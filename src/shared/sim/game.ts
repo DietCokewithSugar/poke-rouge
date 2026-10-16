@@ -3,8 +3,8 @@ import { ENEMIES, ENEMY_INDEX } from '../enemies';
 import { ITEMS } from '../items';
 import type { RunSummary } from '../meta';
 import {
-  BOOSTS, BOOST_DUR, BOOST_IDS, MAX_BERRIES, MAX_SEEDS, SEED_DROP_ELITE, SEED_DROP_MINION, berryHeal, boostOfSeed, isSeed, pickupCode,
-  type BoostId, type PickupKind,
+  BLAST_CROWD, BLAST_CROWD_R, BLAST_NAME, BLAST_RADIUS, BOOSTS, BOOST_DUR, BOOST_IDS, MAX_BERRIES, MAX_BLASTS, MAX_SEEDS, SEED_DROP_ELITE, SEED_DROP_MINION,
+  berryHeal, blastSeedCount, boostOfSeed, isSeed, pickupCode, type BoostId, type PickupKind,
 } from '../pickups';
 import { LINES, LINE_IDS, LINE_OF_DEX, formOf, isFinal, type LineId } from '../pokemon';
 import { buildOf } from '../pvp/build';
@@ -48,6 +48,16 @@ export interface PlayerInit {
 
 /** 击败后崇拜你的基础几率：乱入的野生宝可梦最高，普通小怪很低，首领不会崇拜 */
 export const RECRUIT_BASE = { wild: 1 / 30, treasure: 1 / 25, minion: 1 / 1200, elite: 1 / 150 };
+
+/** 爆炸之种只炸普通小怪：首领、精英、闪光宝可梦、乱入的野生宝可梦和宝藏宝可梦都不受影响 */
+export function blastable(e: Enemy): boolean {
+  return !e.dead && !e.hidden && !e.pvp && !e.shiny && e.def.rank === 'minion' && !e.def.wild && e.def.ai !== 'flee';
+}
+
+/** hit：被打倒；self：自爆（不会崇拜，糖果减半）；seed：被爆炸之种炸飞（不会崇拜，什么都不掉） */
+export type KillHow = 'hit' | 'self' | 'seed';
+
+type ItemSlot = 'berry' | 'seed' | 'blast';
 
 export type Command =
   | { t: 'level'; i: number; slot?: number }
@@ -125,7 +135,11 @@ export class GameSim {
   /** 冒险里地图上会出现橙橙果和增幅种子（对战里没有） */
   protected mapItems = true;
   /** 本波场上刷出地图道具的时间表：[出现时间, 种类]，种子的种类出现时再定 */
-  private itemPlan: [number, 'berry' | 'seed'][] = [];
+  private itemPlan: [number, ItemSlot][] = [];
+  /** 下一次检查有没有人被小怪围住（波次时间） */
+  private crowdAt = 0;
+  /** 这一局已经提示过爆炸之种的用法 */
+  private blastHinted = false;
   /** 调试：接下来出现的 N 只宝可梦一定是闪光的 */
   forceShiny = 0;
   time = 0;
@@ -277,11 +291,12 @@ export class GameSim {
     return shinyRate(bonus);
   }
 
-  killEnemy(e: Enemy, killer: SimPlayer | null, silent = false) {
+  killEnemy(e: Enemy, killer: SimPlayer | null, how: KillHow = 'hit') {
     if (e.dead) return;
     e.dead = true;
     e.hp = 0;
     this.emit(['die', e.id, Math.round(e.x), Math.round(e.y), e.kind]);
+    const silent = how !== 'hit';
     const credit = killer ?? this.players.find((p) => p.id === e.lastHit) ?? null;
     if (credit) {
       credit.stats.kills++;
@@ -300,9 +315,10 @@ export class GameSim {
       this.emit(['msg', `${e.def.name}被打倒了！`]);
       if (this.boss === e) this.boss = null;
     }
+    if (how === 'seed') return;
     // 难度增加的敌人不额外给糖果（每波收入不变，只增加危险）；香水带来的敌人照常给
     const cm = candyMult(this.wave) / this.diff.count;
-    if (silent && e.def.ai === 'bomber') {
+    if (how === 'self' && e.def.ai === 'bomber') {
       this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)) * cm);
       return;
     }
@@ -413,13 +429,19 @@ export class GameSim {
   }
 
   /** 橙橙果和种子：场上已经很多时不再出现 */
-  private dropItem(kind: PickupKind, x: number, y: number) {
-    if (!this.mapItems) return;
+  private dropItem(kind: PickupKind, x: number, y: number): Pickup | null {
+    if (!this.mapItems) return null;
     const seed = isSeed(kind);
     let n = 0;
     for (const pk of this.pickups) if (seed ? isSeed(pk.kind) : pk.kind === kind) n++;
-    if (n >= (seed ? MAX_SEEDS : MAX_BERRIES)) return;
-    this.dropPickup(kind, x, y, 1);
+    if (n >= (seed ? MAX_SEEDS : kind === 'seed_blast' ? MAX_BLASTS : MAX_BERRIES)) return null;
+    return this.dropPickup(kind, x, y, 1);
+  }
+
+  private dropBlast(x: number, y: number) {
+    if (!this.dropItem('seed_blast', x, y) || this.blastHinted) return;
+    this.blastHinted = true;
+    this.emit(['msg', `${BLAST_NAME}出现了！踩上去炸飞身边的小怪（炸飞的不给经验）`]);
   }
 
   /** 随机一种种子，优先挑场上还没有的 */
@@ -431,16 +453,19 @@ export class GameSim {
 
   /**
    * 每波在场上刷出的地图道具：橙橙果、种子各 1~2 个，首领波和群聚波各多 1 个，三人以上联机再各多 1 个，
-   * 在波次的 12%~88% 之间陆续出现
+   * 在波次的 12%~88% 之间陆续出现。爆炸之种（第 5 波起）在 25%~90% 之间出现：越到后面身后的小怪越多
    */
-  private planItems(big: boolean): [number, 'berry' | 'seed'][] {
+  private planItems(big: boolean): [number, ItemSlot][] {
     if (!this.mapItems) return [];
     const extra = (big ? 1 : 0) + Math.floor((this.players.length - 1) / 2);
     const list: ('berry' | 'seed')[] = [];
     for (let i = this.itemRng.int(1, 2) + extra; i > 0; i--) list.push('berry');
     for (let i = this.itemRng.int(1, 2) + extra; i > 0; i--) list.push('seed');
     this.itemRng.shuffle(list);
-    return list.map((k, i) => [this.waveDur * (0.12 + (0.76 * (i + this.itemRng.next())) / list.length), k]);
+    const plan: [number, ItemSlot][] = list.map((k, i) => [this.waveDur * (0.12 + (0.76 * (i + this.itemRng.next())) / list.length), k]);
+    const blasts = blastSeedCount(this.wave, this.players.length, this.horde);
+    for (let i = 0; i < blasts; i++) plan.push([this.waveDur * (0.25 + (0.65 * (i + this.itemRng.next())) / blasts), 'blast']);
+    return plan.sort((a, b) => a[0] - b[0]);
   }
 
   private updateItems() {
@@ -453,8 +478,43 @@ export class GameSim {
       const a = this.itemRng.range(0, Math.PI * 2), d = this.itemRng.range(70, 180);
       const x = Math.max(36, Math.min(this.w - 36, p.x + Math.cos(a) * d));
       const y = Math.max(40, Math.min(this.h - 36, p.y + Math.sin(a) * d));
-      this.dropItem(k === 'berry' ? 'berry' : this.pickSeed(), x, y);
+      if (k === 'blast') this.dropBlast(x, y);
+      else this.dropItem(k === 'berry' ? 'berry' : this.pickSeed(), x, y);
     }
+    this.blastWhenCrowded();
+  }
+
+  /** 被一大群小怪围住、附近又没有爆炸之种时，这一波剩下的爆炸之种提前一颗，出现在背对小怪的方向上 */
+  private blastWhenCrowded() {
+    if (this.waveT < this.crowdAt) return;
+    this.crowdAt = this.waveT + 0.5;
+    const next = this.itemPlan.findIndex(([, k]) => k === 'blast');
+    if (next < 0) return;
+    for (const p of this.activePlayers()) {
+      let n = 0, cx = 0, cy = 0;
+      for (const e of this.enemies) {
+        if (!blastable(e) || (e.x - p.x) ** 2 + (e.y - p.y) ** 2 > BLAST_CROWD_R ** 2) continue;
+        n++; cx += e.x; cy += e.y;
+      }
+      if (n < BLAST_CROWD) continue;
+      if (this.pickups.some((pk) => pk.kind === 'seed_blast' && (pk.x - p.x) ** 2 + (pk.y - p.y) ** 2 < 260 ** 2)) continue;
+      this.itemPlan.splice(next, 1);
+      const a = Math.atan2(p.y - cy / n, p.x - cx / n) + this.itemRng.range(-0.6, 0.6), d = this.itemRng.range(70, 110);
+      this.dropBlast(Math.max(36, Math.min(this.w - 36, p.x + Math.cos(a) * d)), Math.max(40, Math.min(this.h - 36, p.y + Math.sin(a) * d)));
+      return;
+    }
+  }
+
+  /** 踩到爆炸之种：半径内的普通小怪全部炸飞，什么都不掉 */
+  private detonate(p: SimPlayer, x: number, y: number) {
+    this.emit(['boom', Math.round(x), Math.round(y), BLAST_RADIUS, 'seed_blast']);
+    let n = 0;
+    for (const e of this.enemies) {
+      if (!blastable(e) || (e.x - x) ** 2 + (e.y - y) ** 2 > (BLAST_RADIUS + e.r) ** 2) continue;
+      this.killEnemy(e, p, 'seed');
+      n++;
+    }
+    this.emit(['txt', Math.round(x), Math.round(y) - 34, n ? `${BLAST_NAME}！炸飞了 ${n} 只` : `${BLAST_NAME}！`, '#ffb070']);
   }
 
   /** 踩到种子：这一种增幅刷新为 5 秒（不叠加数值） */
@@ -540,6 +600,7 @@ export class GameSim {
       this.dirty.add(p.id);
     });
     this.itemPlan = this.planItems(!!W.boss || this.horde);
+    this.crowdAt = 0;
     this.intruders = this.pickIntruders();
     this.emit(['wave', this.wave, this.waveDur, W.biome]);
     if (this.intruders.length) this.emit(['wild', this.intruders.map(([, id]) => ENEMIES[id].dex)]);
@@ -627,6 +688,8 @@ export class GameSim {
     } else if (pk.kind === 'ball') {
       p.crates.push(rollCrateItem(this, p));
       this.emit(['txt', Math.round(p.x), Math.round(p.y) - 26, '获得道具球！', '#ffd23f']);
+    } else if (pk.kind === 'seed_blast') {
+      this.detonate(p, pk.x, pk.y);
     } else {
       const b = boostOfSeed(pk.kind);
       if (b) this.boost(p, b);
@@ -1272,9 +1335,9 @@ export class GameSim {
     return this.mapItems ? this.dropPickup(kind, x, y, 1) : null;
   }
 
-  /** 调试：在玩家身边放一颗橙橙果和每种种子各一颗 */
+  /** 调试：在玩家身边放一颗橙橙果、每种种子各一颗和一颗爆炸之种 */
   debugItems(p: SimPlayer) {
-    const kinds: PickupKind[] = ['berry', ...BOOST_IDS.map((id) => BOOSTS[id].seed)];
+    const kinds: PickupKind[] = ['berry', ...BOOST_IDS.map((id) => BOOSTS[id].seed), 'seed_blast'];
     kinds.forEach((k, i) => {
       const a = -Math.PI / 2 + (i / kinds.length) * Math.PI * 2;
       this.placeItem(k, p.x + Math.cos(a) * 34, p.y + Math.sin(a) * 26);

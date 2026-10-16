@@ -399,7 +399,7 @@ export interface Vis {
   nova?: string;
   /** 定点打击：落下的东西 / 爆炸的样子 */
   fall?: string;
-  boom?: 'fire' | 'impact' | 'bolt' | 'rings' | 'splash' | 'rocks' | 'leaves' | 'column' | 'cloud' | 'big';
+  boom?: 'fire' | 'impact' | 'bolt' | 'rings' | 'splash' | 'rocks' | 'leaves' | 'column' | 'cloud' | 'big' | 'blast';
   /** 持续区域里飘着的小图 */
   zone?: string;
 }
@@ -430,7 +430,7 @@ const V: Record<string, Partial<Vis>> = {
   e_gust: { pal: 'flying', proj: 'wind' }, e_rock: { pal: 'rock', proj: 'rock', boom: 'rocks' },
   e_bubble: { pal: 'water', proj: 'bubble' }, e_star: { pal: 'fairy', proj: 'star', trail: 'glitter' },
   e_ring: { pal: 'normal', proj: 'ring' }, e_blast: { pal: 'electric', boom: 'impact' }, e_cloud: { pal: 'poison', boom: 'cloud' },
-  e_slam: { pal: 'ground', boom: 'rocks' }, e_vanish: { pal: 'ghost', boom: 'cloud' },
+  e_slam: { pal: 'ground', boom: 'rocks' }, e_vanish: { pal: 'ghost', boom: 'cloud' }, seed_blast: { pal: 'hyper', boom: 'blast' },
   e_fire: { pal: 'fire', proj: 'fire', trail: 'ember' }, e_ice: { pal: 'ice', proj: 'shard' }, e_leaf: { pal: 'grass', proj: 'leaf' },
   e_mud: { pal: 'ground', proj: 'blob', trail: 'dirt' }, e_dragon: { pal: 'dragon', proj: 'orb', trail: 'spark' }, e_dark: { pal: 'dark', proj: 'crescent' },
   // 初代 151 只补充的招式
