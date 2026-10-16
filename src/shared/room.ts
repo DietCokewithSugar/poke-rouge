@@ -230,6 +230,12 @@ export class Room {
       case 'leave':
         this.leave(id);
         return;
+      case 'forfeit':
+        // 只有单人的「放弃本局」算逃跑。联机离开是暂时的，AI 会继续，可以回来
+        if (!this.solo || !this.sim || this.sim.phase === 'over' || this.sim.phase === 'won') return;
+        this.sim.forfeit();
+        this.endGame(true);
+        return;
       case 'difficulty':
         if (this.sim || id !== this.hostId || !DIFFICULTY_IDS.includes(msg.id)) return;
         this.difficulty = msg.id;
@@ -389,7 +395,8 @@ export class Room {
     sim.dirty.clear();
   }
 
-  private endGame() {
+  /** fled：单人中途放弃。结算按已经打完的波次，胜利标记一律关掉 */
+  private endGame(fled = false) {
     const sim = this.sim!;
     const board = sim.players.map((p) => ({
       id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, shiny: p.shiny || undefined, level: p.level,
@@ -397,7 +404,9 @@ export class Room {
     }));
     const end = (id: number) => {
       const p = sim.players.find((q) => q.id === id);
-      return JSON.stringify({ t: 'end', victory: sim.phase === 'won', summary: p ? sim.summary(p) : null, board } satisfies S2C);
+      const summary = p ? sim.summary(p) : null;
+      if (fled && summary) summary.victory = false;
+      return JSON.stringify({ t: 'end', victory: fled ? false : sim.phase === 'won', fled: fled || undefined, summary, board } satisfies S2C);
     };
     for (const [id, m] of this.members) {
       const p = sim.players.find((q) => q.id === id);

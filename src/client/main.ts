@@ -1145,7 +1145,7 @@ class App {
         // 回来时这局已经结束了：服务器补发的结算，结算完回真新镇
         if (this.rejoining) { this.rejoining = false; this.roomGone = true; if (this.t === this.ws) this.t = null; }
         if (!this.solo) this.setSession(null);
-        this.endGame(m.victory, m.summary, m.board);
+        this.endGame(m.victory, m.summary, m.board, m.fled === true);
         break;
       case 'pong':
         if (this.t !== this.ws) break;
@@ -1343,10 +1343,9 @@ class App {
     this.send({ t: 'pause', on });
   }
 
-  /** 单人暂停菜单的「放弃本局」：波次中和升级、商店阶段都走这里 */
+  /** 单人暂停菜单的「放弃本局」：波次中和升级、商店阶段都走这里，先进「逃跑了」结算 */
   private abandonRun() {
-    this.close();
-    this.backToTown();
+    this.forfeitSolo();
   }
 
   private renderPause() {
@@ -1365,16 +1364,40 @@ class App {
     }
   }
 
-  /** 一局冒险结束：画面中央先显示「恭喜通关」或「全员倒下了」，再淡出到结算 */
-  private async endGame(victory: boolean, summary: import('../shared/meta').RunSummary | null, board: BoardEntry[]) {
+  /** 单人暂停菜单里放弃这一局：先结算（逃跑），不要直接回镇。联机的离开不走这里 */
+  private forfeitSolo() {
+    if (!this.solo || this.where !== 'game' || this.ending) return;
+    this.paused = false;
+    clear(this.screen);
+    this.screen.classList.add('hidden');
+    setInputEnabled(false);
+    this.send({ t: 'forfeit' });
+  }
+
+  /** 一局冒险结束：画面中央先显示「恭喜通关」「全员倒下了」或「逃跑了」，再淡出到结算 */
+  private async endGame(victory: boolean, summary: import('../shared/meta').RunSummary | null, board: BoardEntry[], fled = false) {
     if (this.ending) return;
     this.ending = true;
+    // 逃跑绝不记成通关，哪怕结算数据里误带了胜利
+    if (fled && summary) summary = { ...summary, victory: false };
+    const won = victory && !fled;
+    if (this.paused) {
+      this.paused = false;
+      clear(this.screen);
+      this.screen.classList.add('hidden');
+    }
     const reward = summary ? applyRun(this.profile, summary) : null;
     this.reportProgress();
     setInputEnabled(false);
-    sfx(victory ? 'clear' : 'down');
+    if (won) sfx('clear');
+    else if (!fled) sfx('down');
     const waves = summary?.wavesCleared ?? this.pub?.wave ?? 0;
-    await bigBanner(victory ? '恭喜通关！' : '全员倒下了……', victory ? '你们是真正的宝可梦大师！' : `坚持到了第 ${waves + 1} 波`, victory ? 'win' : 'lose');
+    const banner = fled
+      ? { title: '逃跑了', sub: waves > 0 ? `完成了 ${waves} 波` : '还没打完第一波', tone: 'draw' as const }
+      : won
+        ? { title: '恭喜通关！', sub: '你们是真正的宝可梦大师！', tone: 'win' as const }
+        : { title: '全员倒下了……', sub: `坚持到了第 ${waves + 1} 波`, tone: 'lose' as const };
+    await bigBanner(banner.title, banner.sub, banner.tone);
     void transition('fade', () => {
       this.ending = false;
       // 新成就直接在结算界面里列出，不再弹提示挡住统计
@@ -1387,11 +1410,11 @@ class App {
       const mon = partnerOf(this.profile), diff = this.pendingDifficulty;
       const gone = this.roomGone;
       this.roomGone = false;
-      resultsScreen(this.screen, victory, summary, reward, board, this.you, () => {
+      resultsScreen(this.screen, won, summary, reward, board, this.you, () => {
         if (this.solo) void transition('battle', () => { this.close(); this.startSolo(mon, diff); }, { hold: 300 });
         else if (gone) this.backToTown();
         else this.showLobby();
-      }, this.solo ? '再来一局' : gone ? '回到真新镇' : '返回房间', this.profile, gone ? undefined : () => { this.close(); this.backToTown(); });
+      }, this.solo ? '再来一局' : gone ? '回到真新镇' : '返回房间', this.profile, gone ? undefined : () => { this.close(); this.backToTown(); }, fled);
       // 第一次结算：提醒把宝可梦放进背包（之后可以挑战道馆、对战）
       if (summary?.build) window.setTimeout(() => tour(this.profile, 'results', TOURS.results), 500);
     });

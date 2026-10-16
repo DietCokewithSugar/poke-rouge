@@ -41,14 +41,15 @@ function section(title: string, ...children: (Node | null)[]) {
   return h('div', { class: 'r-section' }, h('h3', null, title), ...children);
 }
 
-/** 20 格的波次进度条：完成的点亮，首领波标金色 */
-function waveStrip(s: RunSummary) {
+/** 20 格的波次进度条：完成的点亮，首领波标金色。逃跑停住的那一格不标成倒下 */
+function waveStrip(s: RunSummary, fled = false) {
   return h('div', { class: 'r-strip' }, Array.from({ length: TOTAL_WAVES }, (_, i) => {
     const w = i + 1;
     const boss = !!WAVES[i].boss;
-    const cls = w <= s.wavesCleared ? 'done' : w === s.wavesCleared + 1 && !s.victory ? 'fail' : '';
+    const cls = w <= s.wavesCleared ? 'done' : w === s.wavesCleared + 1 && !s.victory ? (fled ? 'flee' : 'fail') : '';
     const el = h('div', { class: `r-cell ${cls} ${boss ? 'boss' : ''}` }, boss ? '★' : '');
-    tip(el, () => `第 ${w} 波${boss ? `（首领：${ENEMIES[WAVES[i].boss!].name}）` : ''}${cls === 'done' ? ' · 已完成' : cls === 'fail' ? ' · 在这一波倒下' : ''}`);
+    const mark = cls === 'done' ? ' · 已完成' : cls === 'fail' ? ' · 在这一波倒下' : cls === 'flee' ? ' · 在这一波逃跑了' : '';
+    tip(el, () => `第 ${w} 波${boss ? `（首领：${ENEMIES[WAVES[i].boss!].name}）` : ''}${mark}`);
     return el;
   }));
 }
@@ -166,11 +167,12 @@ function storeButton(p: Profile, s: RunSummary, state: { stored: boolean }) {
   return btn;
 }
 
-export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: BoardEntry[], you: number, onContinue: () => void, label: string, profile?: Profile, onHome?: () => void) {
+export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary | null, reward: RunReward | null, board: BoardEntry[], you: number, onContinue: () => void, label: string, profile?: Profile, onHome?: () => void, fled = false) {
+  const won = victory && !fled;
   const state = { tab: 0, stored: false, items: 0, waves: 0, achs: 0 };
   const render = () => {
     const head = h('div', { class: 'r-head' },
-      h('h2', { class: victory ? 'gold' : '' }, victory ? '通关！你是真正的宝可梦大师！' : '眼前一片漆黑……'),
+      h('h2', { class: won ? 'gold' : '' }, won ? '通关！你是真正的宝可梦大师！' : fled ? '逃跑了' : '眼前一片漆黑……'),
       h('div', { class: 'row' },
         s?.build && profile && typeof validateBuild(s.build) !== 'string' ? storeButton(profile, s, state) : null,
         onHome ? iconBtn('home', '回到真新镇', onHome, { cls: 'ghost', attrs: { 'data-back': '1' }, text: '回到真新镇' }) : null,
@@ -200,7 +202,7 @@ export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary
     );
     const tiles = h('div', { class: 'r-tiles' },
       tile('游戏时长', fmtTime(d.time)),
-      tile('完成波次', `${s.wavesCleared} / ${TOTAL_WAVES}`, victory ? '通关' : `倒在第 ${s.wavesCleared + 1} 波`, victory ? '#ffd23f' : undefined),
+      tile('完成波次', `${s.wavesCleared} / ${TOTAL_WAVES}`, won ? '通关' : fled ? `在第 ${Math.min(TOTAL_WAVES, s.wavesCleared + 1)} 波逃跑` : `倒在第 ${s.wavesCleared + 1} 波`, won ? '#ffd23f' : undefined),
       tile('击败', kills, `小怪 ${d.kills.minion} · 精英 ${d.kills.elite} · 首领 ${d.kills.boss}`),
       tile('造成伤害', fmtNum(s.damage), `暴击 ${d.crits} · 拔群 ${s.superEff}`),
       tile('承受伤害', fmtNum(d.damageTaken), `闪避 ${d.dodges} 次`),
@@ -246,7 +248,7 @@ export function resultsScreen(root: HTMLElement, victory: boolean, s: RunSummary
     const names = ['概览', '技能与道具', boardEl ? '击败与队伍' : '击败与波次'];
     const content = state.tab === 0
       ? h('div', { class: 'r-grid' },
-        h('div', { class: 'r-col' }, hero, tiles, section('波次进度', waveStrip(s))),
+        h('div', { class: 'r-col' }, hero, tiles, section('波次进度', waveStrip(s, fled))),
         h('div', { class: 'r-col' }, rewards, section('每波击败数', waveChart(s))))
       : state.tab === 1
         ? h('div', { class: 'r-grid' },
