@@ -369,6 +369,7 @@ button.card:hover { transform: translateY(-0.1875rem); background: rgba(255, 255
 .r-cell.done.boss { background: var(--gold); color: #5a3a00; }
 .r-cell.boss { border: 1px solid var(--gold); }
 .r-cell.fail { background: var(--red); color: #fff; }
+.r-cell.flee { background: var(--muted); color: var(--shadow); }
 .r-chart { display: flex; align-items: flex-end; gap: 0.1875rem; height: 7rem; padding-top: 0.75rem; }
 .r-bar-wrap { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; }
 .r-bar { width: 100%; background: linear-gradient(180deg, #78c8f8, #3878d8); border-radius: 0.1875rem 0.1875rem 0 0; }
