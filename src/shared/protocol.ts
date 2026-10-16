@@ -63,6 +63,8 @@ export type C2S =
   | { t: 'ready'; on: boolean }
   | { t: 'start' }
   | { t: 'leave' }
+  /** 单人冒险放弃这一局，按逃跑结算。联机的「离开房间」不是放弃，服务器会忽略 */
+  | { t: 'forfeit' }
   | { t: 'pause'; on: boolean }
   | { t: 'difficulty'; id: DifficultyId }
   | { t: 'visibility'; public: boolean }
@@ -109,7 +111,8 @@ export type S2C =
   /** 波次进行中只发变化频繁的字段（HP、经验、金钱、冷却……），其它没变就不重发整份状态 */
   | { t: 'md'; s: MeDyn }
   | { t: 'paused'; on: boolean }
-  | { t: 'end'; victory: boolean; summary: RunSummary | null; board: BoardEntry[] }
+  /** fled：单人中途放弃（逃跑），不是通关，也不是全员倒下 */
+  | { t: 'end'; victory: boolean; fled?: boolean; summary: RunSummary | null; board: BoardEntry[] }
   | { t: 'pong'; at: number }
   | { t: 'cmdErr'; msg: string }
   | { t: 'pvpQueued'; mode: PvpMode; wait: number; range: number; searching: number; botIn: number }
