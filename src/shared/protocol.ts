@@ -45,8 +45,8 @@ export interface RoomInfo {
 
 export interface ServerStats { online: number; playing: number; rooms: number; pvpQueue?: number; pvpPlaying?: number }
 
-/** boosts：正在生效的增幅种子与剩余秒数 */
-export interface MeDyn { hp: number; maxHp: number; xp: number; money: number; down: boolean; speed: number; cds: number[]; boosts: [BoostId, number][] }
+/** cdm：每个技能完整的冷却时间（站进、走出场地时会变）；boosts：正在生效的增幅种子与剩余秒数 */
+export interface MeDyn { hp: number; maxHp: number; xp: number; money: number; down: boolean; speed: number; cds: number[]; cdm: number[]; boosts: [BoostId, number][] }
 
 /** 开局时的玩家列表 */
 export interface StartPlayer { id: number; name: string; trainer: string; line: LineId; shiny?: boolean }

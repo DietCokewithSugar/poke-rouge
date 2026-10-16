@@ -5,6 +5,7 @@ import {
   LAVA_DPS, LAVA_LINGER, NO_MOVE_MOD, cellAt, components, decodeCells, fieldBurns, fieldGrid, fieldSpeed, fieldTarget, fieldVerdict, growField, moveMod,
   type FieldId,
 } from '../src/shared/fields';
+import { PeerSync } from '../src/shared/netsync';
 import { PROTOCOL_VERSION, type S2C } from '../src/shared/protocol';
 import { buildOf } from '../src/shared/pvp/build';
 import { PvpSim } from '../src/shared/pvp/sim';
@@ -559,4 +560,17 @@ test('AI 辅助战斗：血少时离开正在灼伤自己的熔岩；身边安�
   c.sim.setAuto(c.p.id, true);
   run(c.sim, 3, [], () => { c.p.invuln = 9; });
   assert.equal(c.sim.fieldAt(c.p.x, c.p.y), 'lava', '小火龙走进了熔岩池');
+});
+
+test('技能栏的冷却按脚下的场地算；站进、走出场地时只发增量消息', () => {
+  const { sim, p } = setup('bulbasaur', null);
+  p.skills = [{ id: 'vine_whip', lv: 1, cd: 0.5 }];
+  const sync = new PeerSync();
+  assert.equal(JSON.parse(sync.privateMsg(sim, p)!).t, 'me');
+  const base = sim.privateState(p).skills[0].max;
+  sim.placeField('smog', square(p.x, p.y));
+  assert.ok(near(sim.privateState(p).skills[0].max, base * 2, 0.011), '毒雾里藤鞭的冷却翻倍');
+  const msg = JSON.parse(sync.privateMsg(sim, p)!);
+  assert.equal(msg.t, 'md', '只发变化的字段，不重发整份状态');
+  assert.ok(near(msg.s.cdm[0], base * 2, 0.011));
 });

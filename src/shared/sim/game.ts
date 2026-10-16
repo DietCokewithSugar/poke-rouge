@@ -149,6 +149,10 @@ export class GameSim {
   fields: Field[] = [];
   /** 每个格子属于哪块场地：fields 的下标 + 1，0 表示不在场地里 */
   private fieldMap = new Uint8Array(0);
+  private fieldCols = 0;
+  private fieldRows = 0;
+  /** 已经宣布过生效的场地 */
+  private fieldOn = new Set<number>();
   /** 本波中途再出现一块场地的时间（波次时间），-1 表示不会再出现 */
   private fieldNext = -1;
   /** 上一波开场的场地：下一波开场换一种 */
@@ -265,7 +269,7 @@ export class GameSim {
 
   // ------------------------------------------------------------ 局部属性场地
 
-  /** (x, y) 所在的、已经生效的场地；forming：还在闪烁预告的也算（AI 提前躲开） */
+  /** (x, y) 所在的、已经生效的场地；forming：还在闪烁预告的也算 */
   fieldAt(x: number, y: number, forming = false): FieldId | null {
     if (!this.fields.length) return null;
     const i = this.fieldMap[cellAt(this.fieldCols, this.fieldRows, x, y)] ?? 0;
@@ -290,9 +294,6 @@ export class GameSim {
   enemyFieldSpeed(e: Enemy): number {
     return this.fields.length ? fieldSpeed(this.fieldAt(e.x, e.y), e.def.types) : 1;
   }
-
-  private fieldCols = 0;
-  private fieldRows = 0;
 
   private rebuildFieldMap() {
     const { cols, rows } = fieldGrid(this.w, this.h);
@@ -346,9 +347,6 @@ export class GameSim {
     this.fieldOn.clear();
     this.rebuildFieldMap();
   }
-
-  /** 已经宣布过生效的场地 */
-  private fieldOn = new Set<number>();
 
   private updateFields() {
     if (this.fieldNext >= 0 && this.waveT >= this.fieldNext) {
@@ -1356,9 +1354,12 @@ export class GameSim {
       xp: Math.floor(p.xp), xpNext: xpToNext(p.level), money: Math.floor(p.money),
       hp: Math.ceil(p.hp), maxHp: p.d.maxHp, speed: this.baseMoveSpeed(p), down: p.down, shiny: p.shiny,
       slots: p.slots,
-      // max 是实际的冷却时间（技能等级与技能急速都算进去），界面按它画冷却进度
+      // max 是实际的冷却时间（技能等级、技能急速和脚下的场地都算进去），界面按它画冷却进度
       // 没有目标时技能每 0.1 秒重试一次，这种状态当作已经就绪，免得冷却图标一闪一闪
-      skills: p.skills.map((s) => ({ id: s.id, lv: s.lv, cd: s.cd <= 0.11 ? 0 : Math.round(s.cd * 10) / 10, max: Math.round(SKILLS[s.id].cd * skillLevelCd(s.lv) * p.d.cdMult * 100) / 100 })),
+      skills: p.skills.map((s) => ({
+        id: s.id, lv: s.lv, cd: s.cd <= 0.11 ? 0 : Math.round(s.cd * 10) / 10,
+        max: Math.round(SKILLS[s.id].cd * skillLevelCd(s.lv) * p.d.cdMult * this.castMod(p, SKILLS[s.id]).cd * 100) / 100,
+      })),
       items: Object.entries(p.items).filter(([, n]) => n > 0),
       stats: {
         maxHp: p.d.maxHp, atk: Math.round(p.d.atk), spa: Math.round(p.d.spa), def: Math.round(p.d.def), spd: Math.round(p.d.spd), spe: Math.round(p.d.spe),
