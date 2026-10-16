@@ -8,8 +8,9 @@ import type { SavedBuild } from './pvp/build';
 import type { PvpMatchResult, PvpMode } from './pvp/sim';
 import type { RankKind, RankRow, RunRecord } from './ranks';
 import { formOf } from './pokemon';
+import { terrainMove } from './terrain';
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 export const MAX_PLAYERS = 4;
 
 // ---------------------------------------------------------------- 对战
@@ -70,7 +71,8 @@ export type C2S =
   | { t: 'visibility'; public: boolean }
   | { t: 'browse'; on: boolean }
   | { t: 'stats' }
-  | { t: 'debug'; cmd: 'down' | 'downAll' | 'endWave' | 'xp' | 'shiny' | 'items' }
+  /** kind：terrain 指令要换成的场地种类（不填就换下一种） */
+  | { t: 'debug'; cmd: 'down' | 'downAll' | 'endWave' | 'xp' | 'shiny' | 'items' | 'terrain'; kind?: string }
   /** k：客户端收到的最新快照编号（顺便确认收到，服务器据此估计网络排队） */
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number; k?: number }
   | { t: 'ack'; k: number }
@@ -126,7 +128,8 @@ export type S2C =
 
 export const PHASES = ['wave', 'inter', 'over', 'won'] as const;
 
-export interface SnapPlayer { id: number; x: number; y: number; hp: number; maxHp: number; flags: number; dex: number; dir: number; revive: number; shield: number }
+/** tst：局部属性场地的状态（1 灼伤，2 寒霜减速，4 被场地减速） */
+export interface SnapPlayer { id: number; x: number; y: number; hp: number; maxHp: number; flags: number; dex: number; dir: number; revive: number; shield: number; tst: number }
 export interface SnapEnemy { id: number; kind: number; x: number; y: number; hp: number; flags: number; dir: number }
 export interface SnapProj { id: number; fx: number; x: number; y: number; ang: number; r: number; enemy: boolean }
 export interface SnapZone { id: number; fx: number; x: number; y: number; r: number; life: number }
@@ -150,7 +153,8 @@ export function encodeSnapshot(sim: GameSim, tick: number, box?: ViewBox | null)
   const pAll = box ? sim.projs.filter((p) => inBox(box, p.x, p.y, 8)) : sim.projs;
   const prs = pAll.length > 700 ? pAll.slice(-700) : pAll;
   const zs = box ? sim.zones.filter((z) => inBox(box, z.x, z.y, z.r)) : sim.zones;
-  const size = 1 + 4 + 1 + 1 + 2 + 2 + 2 + ps.length * 15 + es.length * 10 + prs.length * 10 + zs.length * 9;
+  const size = 1 + 4 + 1 + 1 + 2 + 2 + 2 + ps.length * 16 + es.length * 10 + prs.length * 10 + zs.length * 9;
+  const T = sim.terrain;
   const buf = new ArrayBuffer(size);
   const v = new DataView(buf);
   let o = 0;
@@ -182,16 +186,22 @@ export function encodeSnapshot(sim: GameSim, tick: number, box?: ViewBox | null)
     v.setUint8(o, angToByte(p.dir)); o += 1;
     v.setUint8(o, Math.min(255, Math.round(p.revive * 255))); o += 1;
     v.setUint16(o, Math.min(65535, Math.round(p.shield)), true); o += 2;
+    let ts = 0;
+    if (p.tburn > 0) ts |= 1;
+    if (p.chillT > 0) ts |= 2;
+    if (T && terrainMove(T, p.x, p.y, p.tmask) < 1) ts |= 4;
+    v.setUint8(o, ts); o += 1;
   }
   for (const e of es) {
     let f = 0;
     const st = e.st;
     if (e.hidden) f |= 1;
-    if (st.burn > 0) f |= 2;
+    // 熔岩池的灼伤和状态灼伤一样显示；寒霜减速、场地减速和状态减速一样显示
+    if (st.burn > 0 || st.tburn > 0) f |= 2;
     if (st.poison > 0 || st.leech > 0) f |= 4;
     if (st.para > 0) f |= 8;
     if (st.freeze > 0 || st.stun > 0) f |= 16;
-    if (st.slow > 0) f |= 32;
+    if (st.slow > 0 || st.chill > 0 || (T && terrainMove(T, e.x, e.y, e.tmask) < 1)) f |= 32;
     if ((e.def.ai === 'charge' || e.def.ai === 'elite_beedrill' || e.def.ai === 'bomber') && e.ai.state === 1) f |= 64;
     if (e.def.ai === 'boss_snorlax' && e.ai.state === 3) f |= 128;
     v.setUint16(o, e.id, true); o += 2;
@@ -244,8 +254,9 @@ export function decodeSnapshot(buf: ArrayBuffer): Snapshot {
       dir: byteToAng(v.getUint8(o + 11)),
       revive: v.getUint8(o + 12) / 255,
       shield: v.getUint16(o + 13, true),
+      tst: v.getUint8(o + 15),
     });
-    o += 15;
+    o += 16;
   }
   const enemies: SnapEnemy[] = [];
   for (let i = 0; i < ne; i++) {

@@ -1,6 +1,7 @@
 import { LINES, formOf, isLine, type LineId } from './pokemon';
 import { DIFFICULTY_IDS, type DifficultyId } from './difficulty';
 import { pickupCode } from './pickups';
+import { terrainEvent } from './terrain';
 import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type JoinIdentity, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
 import { trainerOf } from './trainers';
 import { PeerSync, cullEvents, type Conn } from './netsync';
@@ -163,16 +164,16 @@ export class Room {
     return '这局冒险已经结束了';
   }
 
-  /** 回到对局：重新发开局信息和现在的状态（地上的掉落物、场上的闪光宝可梦） */
+  /** 回到对局：重新发开局信息和现在的状态（这一波的场地、地上的掉落物、场上的闪光宝可梦） */
   private resync(id: number, m: Member) {
     this.send(m.conn, { t: 'joined', code: this.code, you: id, solo: this.solo, token: m.token });
     const sim = this.sim;
     if (!sim) { this.sendLobby(); return; }
     this.send(m.conn, { t: 'start', w: sim.w, h: sim.h, players: this.startPlayers() });
-    const ev: Ev[] = [];
+    const ev: Ev[] = [terrainEvent(sim.terrain)];
     for (const pk of sim.pickups) ev.push(['drop', pk.id, pickupCode(pk.kind), Math.round(pk.x), Math.round(pk.y), Math.round(pk.value * 10) / 10]);
     for (const e of sim.enemies) if (e.shiny && !e.dead) ev.push(['shiny', e.id, e.kind, Math.round(e.x), Math.round(e.y)]);
-    if (ev.length) this.send(m.conn, { t: 'ev', e: ev });
+    this.send(m.conn, { t: 'ev', e: ev });
     this.send(m.conn, { t: 'st', s: sim.publicState() });
     if (this.paused) this.send(m.conn, { t: 'paused', on: true });
     sim.dirty.add(id);
@@ -255,6 +256,7 @@ export class Room {
         else if (msg.cmd === 'xp') sim.debugXp(p, 400);
         else if (msg.cmd === 'shiny') sim.forceShiny += 3;
         else if (msg.cmd === 'items') sim.debugItems(p);
+        else if (msg.cmd === 'terrain') sim.debugTerrain(typeof msg.kind === 'string' ? msg.kind : undefined);
         return;
       }
       case 'pause':
