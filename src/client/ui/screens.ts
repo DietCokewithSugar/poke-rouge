@@ -6,6 +6,7 @@ import { SHINY_STAT, shinyName, shinyOdds } from '../../shared/shiny';
 import { SKILLS } from '../../shared/skills';
 import { TRAINERS, trainerOf } from '../../shared/trainers';
 import { TYPE_NAME } from '../../shared/types';
+import { BURN_LINGER, TERRAINS, TERRAIN_IDS, type TerrainId } from '../../shared/terrain';
 import { sfx } from '../audio';
 import { iconImg } from '../gfx/icons';
 import { Animator } from '../gfx/sprites';
@@ -527,6 +528,37 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
   poll();
 }
 
+/** 说明页「场地」：每种场地一行，有利 / 不利写得尽量短（完整规则在战斗中悬停 / 点按场地牌子查看） */
+const TERRAIN_BRIEF: Record<TerrainId, [string, string]> = {
+  lava: ['招式伤害 +25%', '其他属性站进去会灼伤'],
+  miasma: ['招式范围翻倍', '草/电招式冷却翻倍'],
+  rain: ['招式冷却 −20%', '飞行系移动 −25%'],
+  thicket: ['命中回复伤害的 5%', '其他属性移动 −20%'],
+  crystal: ['能量圈内招式伤害 +25%', '恶/幽灵招式伤害 −20%'],
+  updraft: ['招式范围 +50%', '岩石/地面招式冷却 +35%'],
+  clearing: ['暴击率 +15%', '电/幽灵招式伤害 −20%'],
+  frost: ['命中使目标减速 20%', '火系招式冷却 +35%'],
+};
+
+function terrainTab() {
+  return h('div', { class: 'credit-list terrain-tab' },
+    h('p', null, '冒险第 2 波起，每波地图上会出现一块局部属性场地（连成一整块，最大不超过地图的 1/3）。站在里面施放获益属性的招式更强，但每种场地都有不利效果。敌人也遵守同样的规则：把敌人引进对它不利的场地同样有用。'),
+    h('table', { class: 'terrain-table' },
+      h('tr', null, h('th', null, '场地'), h('th', null, '获益属性'), h('th', null, '有利'), h('th', null, '不利')),
+      TERRAIN_IDS.map((id) => {
+        const D = TERRAINS[id];
+        return h('tr', null,
+          h('td', { style: `color: ${D.color}` }, D.name),
+          h('td', null, D.types.map((t) => TYPE_NAME[t]).join('/')),
+          h('td', { class: 'good' }, TERRAIN_BRIEF[id][0]),
+          h('td', { class: 'bad' }, TERRAIN_BRIEF[id][1]));
+      }),
+    ),
+    h('p', { class: 'small' }, `招式加成看施放时站没站在场地里；减速、灼伤看现在的位置，豁免看宝可梦自身的属性。灼伤每秒掉 2% 最大 HP（最多烧到剩 1 HP）、物理伤害 −50%，离开后还会持续 ${BURN_LINGER} 秒。繁茂草丛每秒最多回复 2% 最大 HP，寒霜区域的减速持续 2 秒，重复命中刷新时间。`),
+    h('p', { class: 'small' }, '战斗中技能栏上方的小牌子会显示场地对你的好坏，把鼠标移上去（手机上点一下）能看完整规则。'),
+  );
+}
+
 const CREDIT_TABS: [string, () => Node][] = [
   ['玩法', () => h('ul', { class: 'credit-list' },
     h('li', null, '在真新镇里走动：1 号道路出发冒险，宝可梦中心联机，道馆挑战馆主，对战场与其他训练家对战，研究所做研究、看图鉴和成就，我的家换训练家与伙伴。不知道做什么时看左上角的「目标」。'),
@@ -538,6 +570,7 @@ const CREDIT_TABS: [string, () => Node][] = [
     h('li', null, '等级够了以后，波次结束时会询问是否进化，可以取消；伊布要在商店里买进化石。每波结束后进入商店：买道具、学招式，买错了可以撤销上一次购买。'),
     h('li', null, '账号：用邮箱或 Google 登录后，进度存到云端，换设备还能继续。'),
   )],
+  ['场地', terrainTab],
   ['模式', () => h('ul', { class: 'credit-list' },
     h('li', null, '难度分简单 / 普通 / 困难：通关上一档才能解锁下一档。'),
     h('li', null, '训练家各有加成：小智更容易让宝可梦崇拜、小霞擅长水系、火箭队赚得多还专门盯着闪光宝可梦，但宝可梦不太信任他们……其他训练家靠成就或星之沙解锁。'),
