@@ -35,13 +35,13 @@ export function isUnderdog(team: SavedBuild[], g: GymDef, who: GymStage = 'leade
 
 /**
  * 道馆对战里的一块场地：side 长在哪一队的那一半（0 挑战者，1 馆主），size 占竞技场的比例。
- * 道馆训练家只有主场；大师难度的主场更大。
+ * 道馆训练家只有主场；大师难度的主场更大，克制馆主的场地也更大（不然主场的优势太大）。
  */
 export interface GymFieldPlan { kind: FieldId; side: 0 | 1; size: number }
 
 export function gymFields(g: GymDef, who: GymStage): GymFieldPlan[] {
   const [home, counter] = g.fields;
   if (who === 'junior') return [{ kind: home, side: 1, size: 0.15 }];
-  if (who === 'master') return [{ kind: home, side: 1, size: 0.26 }, { kind: counter, side: 0, size: 0.12 }];
-  return [{ kind: home, side: 1, size: 0.2 }, { kind: counter, side: 0, size: 0.14 }];
+  if (who === 'master') return [{ kind: home, side: 1, size: 0.22 }, { kind: counter, side: 0, size: 0.18 }];
+  return [{ kind: home, side: 1, size: 0.18 }, { kind: counter, side: 0, size: 0.16 }];
 }
