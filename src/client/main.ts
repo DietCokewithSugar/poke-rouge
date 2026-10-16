@@ -1134,7 +1134,7 @@ class App {
       case 'md':
         if (this.me) {
           const d = m.s;
-          Object.assign(this.me, { hp: d.hp, maxHp: d.maxHp, xp: d.xp, money: d.money, down: d.down, speed: d.speed });
+          Object.assign(this.me, { hp: d.hp, maxHp: d.maxHp, xp: d.xp, money: d.money, down: d.down, speed: d.speed, boosts: d.boosts ?? [] });
           this.me.skills.forEach((sk, i) => { sk.cd = d.cds[i] ?? sk.cd; });
           this.onMe(this.me);
         }

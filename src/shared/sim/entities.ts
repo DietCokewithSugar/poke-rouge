@@ -1,4 +1,5 @@
 import type { EnemyDef } from '../enemies';
+import type { BoostId, PickupKind } from '../pickups';
 import type { LineId } from '../pokemon';
 import type { SkillDef, StatusKind } from '../skills';
 import type { Derived, Mods, TypeMods } from '../stats';
@@ -85,6 +86,8 @@ export interface SimPlayer {
   shieldT: number;
   buffT: number;
   buff: { haste: number; spe: number };
+  /** 地图上的增幅种子：每种还剩几秒 */
+  boosts: Record<BoostId, number>;
   slowT: number;
   slowAmt: number;
   regenAcc: number;
@@ -215,7 +218,7 @@ export interface Strike {
 
 export interface Pickup {
   id: number;
-  kind: 'candy' | 'berry' | 'ball';
+  kind: PickupKind;
   x: number; y: number;
   value: number;
 }

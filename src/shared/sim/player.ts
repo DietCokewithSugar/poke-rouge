@@ -2,7 +2,8 @@ import { ITEMS, ITEM_IDS, type ItemDef } from '../items';
 import { metaBonus } from '../meta';
 import { LINES, awakenings, formOf, isFinal, isNative, maxStageByLevel, type LineId } from '../pokemon';
 import { SKILLS, SKILL_IDS, SKILL_MAX_LV } from '../skills';
-import { addMods, addTypeMods, derive, emptyMods, type Mods, type TypeMods } from '../stats';
+import { BOOST_CRIT, BOOST_DODGE, BOOST_SPEED } from '../pickups';
+import { MOVE_SPEED_MAX, addMods, addTypeMods, derive, emptyMods, type Mods, type TypeMods } from '../stats';
 import { trainerOf } from '../trainers';
 import { priceMult } from '../waves';
 import type { SavedBuild } from '../pvp/build';
@@ -37,7 +38,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     typeMods: {},
     d: derive(formOf(line, 0).base, emptyMods()),
     slots: formOf(line, 0).slots,
-    invuln: 1.5, shield: 0, shieldT: 0, buffT: 0, buff: { haste: 0, spe: 0 },
+    invuln: 1.5, shield: 0, shieldT: 0, buffT: 0, buff: { haste: 0, spe: 0 }, boosts: { crit: 0, dodge: 0, speed: 0 },
     slowT: 0, slowAmt: 0, regenAcc: 0, lsWindow: 0, lsCount: 0, sashUsed: false, sturdyUsed: false,
     levelQueue: [], cards: null, cardRerolls: 0, crates: [], evoPrompt: false,
     shop: { offers: [], locked: [false, false, false, false], rerolls: 0, freeRerolls: 0 },
@@ -97,9 +98,12 @@ export function recompute(p: SimPlayer) {
     m.maxHp += aw * 8;
   }
   if (p.buffT > 0) { m.haste += p.buff.haste; m.spePct += p.buff.spe; }
+  if (p.boosts.crit > 0) m.crit += BOOST_CRIT;
+  if (p.boosts.dodge > 0) m.dodge += BOOST_DODGE;
   m.maxHp += p.level - 1;
   const prevMax = p.d.maxHp;
   p.d = derive(form.base, m, p.shiny);
+  if (p.boosts.speed > 0) p.d.moveSpeed = Math.max(p.d.moveSpeed, Math.min(MOVE_SPEED_MAX, p.d.moveSpeed * (1 + BOOST_SPEED)));
   p.typeMods = tm;
   p.slots = Math.max(1, form.slots + m.slots + (L.awakenSlot && aw >= L.awakenSlot ? 1 : 0));
   if (p.d.maxHp > prevMax && p.alive && !p.down) p.hp = Math.min(p.d.maxHp, p.hp + (p.d.maxHp - prevMax));
