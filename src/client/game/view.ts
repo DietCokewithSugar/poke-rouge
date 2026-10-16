@@ -909,7 +909,7 @@ export class GameView {
     if (f & 4 && Math.random() < 0.2) this.fx.px(jx(), y - 4, '#d995f2', { vy: -25, life: 0.5, size: 2 });
     if (f & 8 && Math.random() < 0.12) this.fx.sp('spark', 'electric', jx(), y - 6 - Math.random() * 12 * v.scale, { life: 0.15, fr: 20 });
     if (f & 16) { ctx.globalAlpha = 0.33; pxCircle(ctx, x, y - 8 * v.scale, 7 * v.scale, '#bff3ff'); ctx.globalAlpha = 1; }
-    if (f & 32 && Math.random() < 0.18) this.iceBit(x, y, 8 * v.scale, 10 * v.scale);
+    if (f & 32 && Math.random() < 0.22) this.iceBit(x, y, 8 * v.scale, 10 * v.scale);
     if (f & 64) {
       ctx.fillStyle = '#f83838';
       ctx.fillRect(Math.round(x) - 1, Math.round(top) - 6, 2, 5);
@@ -979,7 +979,7 @@ export class GameView {
     }
     // 局部属性场地：灼伤冒火星，减速冒蓝色的冰晶
     if (p.tst & 1 && Math.random() < 0.3) this.fx.px(x + (Math.random() - 0.5) * 12, y - 4 - Math.random() * 12, Math.random() < 0.5 ? '#ff6a1f' : '#ffb22e', { vy: -38, life: 0.4 });
-    if (p.tst & 6 && Math.random() < (p.tst & 2 ? 0.3 : 0.2)) this.iceBit(x, y, 9, 12);
+    if (p.tst & 6 && Math.random() < (p.tst & 2 ? 0.35 : 0.28)) this.iceBit(x, y, 9, 12);
     // 名字与血条
     const name = this.names.get(p.id) ?? '';
     ctx.font = '10px FusionPixel, monospace';
