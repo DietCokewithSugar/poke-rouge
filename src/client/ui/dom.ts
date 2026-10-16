@@ -95,7 +95,8 @@ export function tip(el: HTMLElement, content: () => Node | string) {
     showTip(el, content, e.clientX, e.clientY);
   });
   el.addEventListener('mousemove', (e) => { if (tipOwner === el && canHover()) placeAt(e.clientX, e.clientY); });
-  el.addEventListener('mouseleave', () => { if (tipOwner === el) hideTip(); });
+  // 触屏点按后浏览器会留一个假的鼠标位置，界面一刷新就可能补发 mouseleave：触屏只靠点别处收起
+  el.addEventListener('mouseleave', () => { if (tipOwner === el && canHover()) hideTip(); });
   el.addEventListener('pointerup', (e) => {
     if (e.pointerType === 'mouse' || canHover()) return;
     if (tipOwner === el && tipEl && !tipEl.classList.contains('hidden')) { hideTip(); return; }
