@@ -1,3 +1,4 @@
+import { FIELDS, FIELD_IDS, fieldTypesText } from '../../shared/fields';
 import { ACHIEVEMENTS, META_UPGRADES, metaCost } from '../../shared/meta';
 import { LINES, STONE_NAME, type LineId } from '../../shared/pokemon';
 import { DIFFICULTIES, DIFFICULTY_IDS, type DifficultyId } from '../../shared/difficulty';
@@ -530,13 +531,20 @@ export function settingsScreen(root: HTMLElement, p: Profile, onChange: () => vo
 const CREDIT_TABS: [string, () => Node][] = [
   ['玩法', () => h('ul', { class: 'credit-list' },
     h('li', null, '在真新镇里走动：1 号道路出发冒险，宝可梦中心联机，道馆挑战馆主，对战场与其他训练家对战，研究所做研究、看图鉴和成就，我的家换训练家与伙伴。不知道做什么时看左上角的「目标」。'),
-    h('li', null, '波次 30~60 秒，撑到倒计时结束就过关，第 10、20 波是 90 秒的首领波；技能自动瞄准释放。'),
-    h('li', null, '地图上还会出现橙橙果（受伤时踩到回复少量 HP，满血不捡）和暴击之种、闪避之种、加速之种（踩到后 5 秒内对应能力提升，左上角显示倒计时）。第 5 波起还有爆炸之种：踩到后炸飞身边的普通小怪（首领和精英不受影响），炸飞的小怪不给经验，可以留到被一大群追着的时候再踩。'),
+    h('li', null, '波次 30~60 秒，撑到倒计时结束就过关，第 10、20 波是 90 秒的首领波；技能自动瞄准释放。地图上的道具和局部属性场地见「地图」。'),
     h('li', null, '物理技能吃「物攻」（偏近身），特殊技能吃「特攻」（偏远程）；接触伤害由「物防」减免，弹幕与爆炸由「特防」减免。属性克制只多/少 10%，本系技能 1.5 倍。'),
     h('li', null, '冒险中会有野生宝可梦乱入。击败野生宝可梦时它有几率崇拜你，成为新的伙伴（整条进化线都能用）。研究所的「友情缎带」、精灵球类道具和小智都能提高崇拜几率。'),
     h('li', null, `闪光宝可梦：出现时有 ${shinyOdds(0)} 的几率是闪光（异色）的，六项能力各高 1%，打倒它 100% 得到（首领也一样），和普通的分开培养。「闪光研究」、火箭队和闪耀护符能提高几率，最高 ${SHINY_MAX_ODDS}。`),
     h('li', null, '等级够了以后，波次结束时会询问是否进化，可以取消；伊布要在商店里买进化石。每波结束后进入商店：买道具、学招式，买错了可以撤销上一次购买。'),
     h('li', null, '账号：用邮箱或 Google 登录后，进度存到云端，换设备还能继续。'),
+  )],
+  ['地图', () => h('ul', { class: 'credit-list' },
+    h('li', null, '地图道具：橙橙果回复少量 HP；暴击 / 闪避 / 加速之种 5 秒增幅；第 5 波起的爆炸之种炸飞身边的普通小怪（首领和精英不受影响，炸飞的不给经验），可以留到被一大群追着时再踩。'),
+    h('li', null, '局部属性场地：第 2 波起随机出现（第 6 波起中途再来一块），闪烁 2 秒后生效。招式看属性和出招时站的场地，灼伤、减速看宝可梦自己的属性，野生宝可梦也一样：'),
+    ...FIELD_IDS.map((id) => {
+      const F = FIELDS[id];
+      return h('li', { class: 'credit-field' }, h('b', { style: `color:${F.color}` }, F.name), `（${fieldTypesText(F)}）▲ ${F.short[0]} ▼ ${F.short[1]}`);
+    }),
   )],
   ['模式', () => h('ul', { class: 'credit-list' },
     h('li', null, '难度分简单 / 普通 / 困难：通关上一档才能解锁下一档。'),
