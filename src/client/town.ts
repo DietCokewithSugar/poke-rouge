@@ -160,6 +160,12 @@ export class TownScene {
     window.removeEventListener('keydown', this.onKey);
   }
 
+  /** 回到镇上时重新报一次脚下的互动点：站着没动的话 update() 不会再报 */
+  syncSpot() {
+    this.spot = spotAt(this.me.x, this.me.y);
+    this.hooks.spot(this.spot);
+  }
+
   /** 互动：走到门口按 A / 空格 / 回车 */
   interact() {
     if (this.active && this.spot) this.hooks.enter(this.spot.id);

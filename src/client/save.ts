@@ -6,6 +6,8 @@ import { buildPower, validateBuild, type SavedBuild } from '../shared/pvp/build'
 import { TIERS } from '../shared/pvp/rating';
 import { betterRun, cleanRun, type RunRecord } from '../shared/ranks';
 import type { PvpMode } from '../shared/pvp/sim';
+import type { GameSim } from '../shared/sim/game';
+import { createPlayerFromBuild } from '../shared/sim/player';
 import { TRAINERS, TRAINER_IDS } from '../shared/trainers';
 import { defaultUiScale } from './ui/layout';
 
@@ -143,6 +145,16 @@ export function defaultSettings(): Settings {
 /** 徽章：和研究所强化一起发给服务器（badge_<道馆> = 1） */
 export function badgeMeta(p: Profile): Record<string, number> {
   return Object.fromEntries(Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).map((id) => [badgeKey(id), 1]));
+}
+
+/** 开局时带上的局外加成：研究所强化 + 道馆徽章（冒险、对战、道馆都发这一份，服务器端同样计算） */
+export function runMeta(p: Profile): Record<string, number> {
+  return { ...p.upgrades, ...badgeMeta(p) };
+}
+
+/** 背包里的构筑开局时的数值：研究所强化、徽章和训练家的加成都算上，和对战里一样 */
+export function partyStats(p: Profile, b: SavedBuild) {
+  return createPlayerFromBuild({ w: 0, h: 0 } as unknown as GameSim, 0, '', b, runMeta(p), p.trainer);
 }
 
 /** 冒险的 AI 辅助战斗：通关过一次才能用 */

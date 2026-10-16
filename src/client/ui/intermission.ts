@@ -39,21 +39,37 @@ export class Intermission {
   private askEvo = false;
   private invPage = 0;
   private statPage = 0;
+  /** 窗口缩放、字体加载完以后，重新算预告一行放得下几只 */
+  private resize = new ResizeObserver(() => this.fitPreview());
 
-  constructor(parent: HTMLElement, private send: (c: Command) => void) {
+  /** menu：右上角的暂停 / 菜单按钮。商店盖住了战斗 HUD，这里放一个同样位置的按钮 */
+  constructor(parent: HTMLElement, private send: (c: Command) => void, menu?: { kind: 'pause' | 'menu'; open: () => void }) {
     this.root.append(this.main, this.side, this.modal);
+    if (menu) {
+      const label = menu.kind === 'pause' ? '暂停（设置、放弃本局）' : '菜单（设置、离开）';
+      this.root.appendChild(h('button', { class: 'btn small icon hud-pause inter-menu', 'data-key': 'start', title: label, 'aria-label': label, onclick: () => menu.open() }, uiIcon(menu.kind, 2)));
+    }
     parent.appendChild(this.root);
     window.addEventListener('keydown', this.onKey);
+    this.resize.observe(this.main);
+    void document.fonts?.ready.then(() => this.fitPreview());
   }
 
   destroy() {
     this.root.remove();
+    this.resize.disconnect();
     window.removeEventListener('keydown', this.onKey);
   }
 
   private onKey = (e: KeyboardEvent) => {
-    if ((e.key === 'z' || e.key === 'Z') && !(e.target instanceof HTMLInputElement)) this.undo();
+    if ((e.key === 'z' || e.key === 'Z') && !(e.target instanceof HTMLInputElement) && !this.covered()) this.undo();
   };
+
+  /** 暂停菜单、设置盖在商店上面时，商店的快捷键不生效 */
+  private covered() {
+    const s = document.getElementById('screen');
+    return !!s && !s.classList.contains('hidden') && s.childElementCount > 0;
+  }
 
   show(on: boolean) {
     this.root.classList.toggle('hidden', !on);
@@ -95,6 +111,7 @@ export class Intermission {
     else this.renderShop(me, stage);
     if (!evoNow) this.main.append(this.inventory(me), this.actions(me));
     this.renderSide(me);
+    this.fitPreview();
   }
 
   // ---------------------------------------------------------------- 进化
@@ -338,25 +355,49 @@ export class Intermission {
     );
   }
 
-  /** 下一波预告：出现的宝可梦与精英/首领，方便提前准备属性克制。 */
+  /** 下一波预告：出现的宝可梦与精英/首领，方便提前准备属性克制。放不下的收进「+N」，点开看完整名单 */
   private preview() {
     const next = (this.pub?.wave ?? 0) + 1;
     const W = WAVES[next - 1];
     if (!W || next > TOTAL_WAVES) return h('div');
+    const list: [string, string?][] = [
+      ...(W.boss ? [[W.boss, '首领'] as [string, string]] : []),
+      ...[...new Set(W.elites ?? [])].map((id): [string, string] => [id, '精英']),
+      ...Object.keys(W.pool).map((id): [string] => [id]),
+    ];
+    const biome = BIOMES[W.biome].name;
     const mon = (id: string, tag?: string) => {
       const e = ENEMIES[id];
       const el = h('div', { class: `preview-mon ${tag ? 'special' : ''}` }, Animator.portrait(e.dex, 1), tag ? h('i', null, tag) : null);
       tip(el, () => h('div', { class: 'info' }, h('b', null, e.name, tag ? `（${tag}）` : ''), h('div', null, ...e.types.map(typeBadge))));
       return el;
     };
+    const more = h('div', { class: 'preview-mon preview-more hidden', tabindex: 0, 'data-pad': '1', 'aria-label': '查看下一波的全部宝可梦' });
+    tip(more, () => h('div', { class: 'info preview-all' },
+      h('b', null, `第 ${next} 波 · ${waveDuration(next)} 秒 · ${biome}`),
+      ...list.map(([id, tag]) => h('div', { class: 'preview-all-row' }, h('span', { class: tag ? 'neg' : '' }, ENEMIES[id].name, tag ? `（${tag}）` : ''), ...ENEMIES[id].types.map(typeBadge))),
+    ));
     return h('div', { class: 'preview' },
-      h('div', { class: 'preview-label' }, `下一波 · 第 ${next} 波 · ${waveDuration(next)} 秒`, h('span', { class: 'muted' }, ` · ${BIOMES[W.biome].name}`)),
-      h('div', { class: 'preview-row' },
-        W.boss ? mon(W.boss, '首领') : null,
-        ...[...new Set(W.elites ?? [])].map((id) => mon(id, '精英')),
-        ...Object.keys(W.pool).map((id) => mon(id)),
-      ),
+      h('div', { class: 'preview-label', title: `第 ${next} 波 · ${waveDuration(next)} 秒 · ${biome}` }, `下一波 · ${waveDuration(next)} 秒`, h('span', { class: 'muted' }, ` · ${biome}`)),
+      h('div', { class: 'preview-row' }, ...list.map(([id, tag]) => mon(id, tag)), more),
     );
+  }
+
+  /** 预告一行放不下时，只留下放得下的头像，最后一格显示「+N」（出发按钮始终完整显示） */
+  private fitPreview() {
+    const row = this.main.querySelector<HTMLElement>('.preview-row');
+    const more = row?.querySelector<HTMLElement>('.preview-more');
+    if (!row || !more) return;
+    const mons = [...row.querySelectorAll<HTMLElement>('.preview-mon:not(.preview-more)')];
+    for (const m of mons) m.classList.remove('hidden');
+    more.classList.add('hidden');
+    const width = row.clientWidth;
+    if (!width || row.scrollWidth <= width + 1 || !mons.length) return;
+    const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+    const shown = Math.max(0, Math.floor((width + gap) / (mons[0].offsetWidth + gap)) - 1);
+    mons.forEach((m, i) => m.classList.toggle('hidden', i >= shown));
+    more.textContent = `+${mons.length - shown}`;
+    more.classList.remove('hidden');
   }
 
   private renderTeam(box: HTMLElement) {
