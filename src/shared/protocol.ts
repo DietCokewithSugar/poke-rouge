@@ -1,5 +1,6 @@
 import { FX_INDEX } from './skills';
 import type { DifficultyId } from './difficulty';
+import type { BoostId } from './pickups';
 import type { LineId } from './pokemon';
 import type { RunSummary } from './meta';
 import type { Command, Ev, GameSim, MeState, PublicState } from './sim/game';
@@ -8,7 +9,7 @@ import type { PvpMatchResult, PvpMode } from './pvp/sim';
 import type { RankKind, RankRow, RunRecord } from './ranks';
 import { formOf } from './pokemon';
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 export const MAX_PLAYERS = 4;
 
 // ---------------------------------------------------------------- 对战
@@ -44,7 +45,8 @@ export interface RoomInfo {
 
 export interface ServerStats { online: number; playing: number; rooms: number; pvpQueue?: number; pvpPlaying?: number }
 
-export interface MeDyn { hp: number; maxHp: number; xp: number; money: number; down: boolean; speed: number; cds: number[] }
+/** boosts：正在生效的增幅种子与剩余秒数 */
+export interface MeDyn { hp: number; maxHp: number; xp: number; money: number; down: boolean; speed: number; cds: number[]; boosts: [BoostId, number][] }
 
 /** 开局时的玩家列表 */
 export interface StartPlayer { id: number; name: string; trainer: string; line: LineId; shiny?: boolean }
@@ -70,7 +72,7 @@ export type C2S =
   | { t: 'visibility'; public: boolean }
   | { t: 'browse'; on: boolean }
   | { t: 'stats' }
-  | { t: 'debug'; cmd: 'down' | 'downAll' | 'endWave' | 'xp' | 'shiny' }
+  | { t: 'debug'; cmd: 'down' | 'downAll' | 'endWave' | 'xp' | 'shiny' | 'items' }
   /** k：客户端收到的最新快照编号（顺便确认收到，服务器据此估计网络排队） */
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number; k?: number }
   | { t: 'ack'; k: number }
@@ -168,7 +170,7 @@ export function encodeSnapshot(sim: GameSim, tick: number, box?: ViewBox | null)
     if (p.invuln > 0) f |= 2;
     if (p.shield > 0) f |= 4;
     if (p.moving) f |= 8;
-    if (p.buffT > 0) f |= 16;
+    if (p.buffT > 0 || p.boosts.crit > 0 || p.boosts.dodge > 0 || p.boosts.speed > 0) f |= 16;
     if (p.slowT > 0) f |= 32;
     // 由服务器操作走位（AI）：客户端跟随服务器位置，不再上报
     if (p.bot) f |= 64;

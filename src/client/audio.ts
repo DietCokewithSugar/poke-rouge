@@ -65,7 +65,7 @@ function noise(dur: number, gain: number, at = 0, hp = 800, out?: GainNode | nul
   s.stop(t + dur + 0.02);
 }
 
-export type Sfx = 'hit' | 'crit' | 'kill' | 'pickup' | 'level' | 'evolve' | 'buy' | 'error' | 'click' | 'wave' | 'clear' | 'hurt' | 'boss' | 'down' | 'revive' | 'heal' | 'boom' | 'ball' | 'achieve' | 'shiny';
+export type Sfx = 'hit' | 'crit' | 'kill' | 'pickup' | 'level' | 'evolve' | 'buy' | 'error' | 'click' | 'wave' | 'clear' | 'hurt' | 'boss' | 'down' | 'revive' | 'heal' | 'boom' | 'ball' | 'achieve' | 'shiny' | 'boost';
 
 export function sfx(name: Sfx) {
   if (!ctx || ctx.state !== 'running') return;
@@ -92,6 +92,7 @@ export function sfx(name: Sfx) {
     case 'heal': [76, 79, 84].forEach((n, i) => tone(midi(n), 0.08, 'triangle', 0.12, i * 0.05)); break;
     case 'boom': noise(0.3, 0.18, 0, 200); tone(90, 0.25, 'triangle', 0.25, 0, 0.5); break;
     case 'ball': tone(midi(88), 0.05, 'square', 0.08); tone(midi(95), 0.08, 'square', 0.08, 0.05); break;
+    case 'boost': [74, 79, 83, 86].forEach((n, i) => tone(midi(n), 0.07, 'square', 0.09, i * 0.04)); break;
     case 'achieve': [79, 84, 88, 91].forEach((n, i) => tone(midi(n), 0.15, 'square', 0.1, i * 0.08)); break;
     // 闪光宝可梦出现时的「叮铃」：几个很高的音快速错落响起
     case 'shiny': [2093, 2637, 3136, 2349, 3520, 4186].forEach((f, i) => tone(f, 0.28, 'triangle', 0.13, i * 0.07)); break;

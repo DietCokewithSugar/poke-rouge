@@ -3,6 +3,7 @@
  * 粒子是方块，冲击波是像素点组成的环，挥砍是分层的像素弧，光束是一段段像素块，
  * 再叠加 vfx.ts 里按属性上色的小图。透明度按 1 / 0.66 / 0.33 分级，避免显得像矢量图。
  */
+import { artGlow, hasArt, itemSprite } from './pickups';
 import { PAL, drawShape, isDir, spins, vis, type MeleeExtra, type Pal, type Trail } from './vfx';
 
 const TAU = Math.PI * 2;
@@ -110,7 +111,9 @@ export function drawZone(ctx: CanvasRenderingContext2D, fx: string, x: number, y
 
 // ---------------------------------------------------------------- 掉落物
 
-export function drawPickup(ctx: CanvasRenderingContext2D, kind: number, x: number, y: number, value: number, t: number) {
+/** ground：还在地上（橙橙果和种子脚下有一圈呼吸的光，时不时闪一下，免得被敌人和特效淹没）；飞向玩家时为 false */
+export function drawPickup(ctx: CanvasRenderingContext2D, kind: number, x: number, y: number, value: number, t: number, ground = true) {
+  if (hasArt(kind)) { drawMapItem(ctx, kind, x, y, t, ground); return; }
   const bob = Math.round(Math.sin(t * 4 + x) * 1);
   x = Math.round(x); y = Math.round(y) + bob;
   if (kind === 0) {
@@ -120,10 +123,6 @@ export function drawPickup(ctx: CanvasRenderingContext2D, kind: number, x: numbe
     rect(ctx, x - 4, y - 1, 2, 2, col);
     rect(ctx, x + 3, y - 1, 2, 2, col);
     rect(ctx, x - 2, y + 2, 5, 1, 'rgba(0,0,0,.25)');
-  } else if (kind === 1) {
-    pxCircle(ctx, x, y - 1, 3, '#3868d8');
-    rect(ctx, x - 1, y - 2, 1, 1, '#a8c8f8');
-    rect(ctx, x, y - 5, 1, 2, '#307830');
   } else {
     pxCircle(ctx, x, y - 2, 4, '#202020');
     pxCircle(ctx, x, y - 2, 3, '#f8f8f8');
@@ -132,6 +131,23 @@ export function drawPickup(ctx: CanvasRenderingContext2D, kind: number, x: numbe
     rect(ctx, x - 1, y - 3, 2, 2, '#f8f8f8');
     if (Math.floor(t * 3) % 2) rect(ctx, x - 2, y - 5, 1, 1, '#ffffff');
   }
+}
+
+function drawMapItem(ctx: CanvasRenderingContext2D, kind: number, x: number, y: number, t: number, ground: boolean) {
+  const img = itemSprite(kind);
+  x = Math.round(x); y = Math.round(y);
+  const seed = x * 0.37 + y * 0.11;
+  if (ground) {
+    ctx.globalAlpha = step(0.55 + 0.45 * Math.sin(t * 4.5 + seed));
+    pxRing(ctx, x, y + 1, 8, artGlow(kind), 1, 0.45, 2);
+    ctx.globalAlpha = 1;
+    rect(ctx, x - 3, y, 7, 2, 'rgba(0,0,0,.3)');
+  }
+  const bob = ground ? Math.round(Math.sin(t * 3.2 + seed) * 1.5) : 0;
+  const top = y - img.height - 1 + bob;
+  ctx.drawImage(img, x - (img.width >> 1), top);
+  const ph = (t * 0.7 + seed) % 1.6;
+  if (ground && ph < 1) twinkle(ctx, x + 3, top + 2, ph);
 }
 
 // ---------------------------------------------------------------- 特效层

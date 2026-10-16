@@ -3,7 +3,9 @@ import { decodeSnapshot, type PvpSeatInfo, type SnapEnemy, type SnapPlayer, type
 import { FX_KINDS, SKILLS } from '../../shared/skills';
 import { REVIVE_RADIUS, type Ev, type MeState, type PublicState } from '../../shared/sim/game';
 import { sfx } from '../audio';
+import { BOOSTS, PICKUP_KINDS, boostOfSeed, type BoostId } from '../../shared/pickups';
 import { FxLayer, drawPickup, drawProj, drawZone, pxCircle, pxRing, twinkle } from '../gfx/fx';
+import { artGlow, hasArt } from '../gfx/pickups';
 import { vis, type Trail } from '../gfx/vfx';
 import { shownAmount } from '../../shared/stats';
 import { TYPES } from '../../shared/types';
@@ -86,6 +88,8 @@ export class GameView {
   private hurtFlash = 0;
   private superEffAt = 0;
   private trailT = new Map<number, number>();
+  /** 每位玩家最近一次踩到种子的时间和第几行提示：连着踩到时往上错开，不叠在一起 */
+  private boostTxt = new Map<number, { at: number; row: number }>();
   private lastSnapPhase = 0;
   private ringR = 0;
   settings: Settings;
@@ -293,18 +297,27 @@ export class GameView {
         }
         break;
       }
-      case 'drop': this.pickups.set(n(1), { kind: n(2), x: n(3), y: n(4), value: n(5) }); break;
+      case 'drop':
+        this.pickups.set(n(1), { kind: n(2), x: n(3), y: n(4), value: n(5) });
+        if (hasArt(n(2))) this.fx.twinkle(n(3), n(4) - 8, 0.6);
+        break;
       case 'pick': {
         const pk = this.pickups.get(n(1));
         if (pk) {
           this.flyers.push({ x: pk.x, y: pk.y, kind: pk.kind, value: pk.value, pid: n(2), t: 0 });
           this.pickups.delete(n(1));
-          if (n(2) === this.you) sfx(pk.kind === 2 ? 'ball' : 'pickup');
+          const boost = boostOfSeed(PICKUP_KINDS[pk.kind]);
+          this.pickedItem(pk.kind, boost, n(2));
+          if (n(2) === this.you) sfx(pk.kind === 2 ? 'ball' : boost ? 'boost' : 'pickup');
         }
         break;
       }
       case 'clrp':
-        for (const [, pk] of this.pickups) this.flyers.push({ ...pk, pid: this.nearestPid(pk.x, pk.y), t: 0 });
+        // 糖果和道具球飞向最近的玩家；橙橙果和种子留到下一波也没用，原地消失
+        for (const [, pk] of this.pickups) {
+          if (hasArt(pk.kind)) this.fx.burst(pk.x, pk.y - 5, [artGlow(pk.kind), '#ffffff'], 6, 35);
+          else this.flyers.push({ ...pk, pid: this.nearestPid(pk.x, pk.y), t: 0 });
+        }
         this.pickups.clear();
         break;
       case 'lvl':
@@ -394,6 +407,24 @@ export class GameView {
     void owner;
     this.fx.skill(FX_PATTERN.get(fx), fx, x, y, ang, a, b);
     if (!this.settings.shake) this.fx.shake = 0;
+  }
+
+  /** 踩到种子：头顶飘字说明效果；橙橙果只冒一点光（回复的绿色数字由 'heal' 事件显示） */
+  private pickedItem(kind: number, boost: BoostId | null, pid: number) {
+    if (!hasArt(kind)) return;
+    const pos = this.playerPos(pid);
+    if (!pos) return;
+    if (boost) {
+      const B = BOOSTS[boost];
+      const now = performance.now(), last = this.boostTxt.get(pid);
+      const row = last && now - last.at < 900 ? (last.row + 1) % 3 : 0;
+      this.boostTxt.set(pid, { at: now, row });
+      this.fx.text(pos.x, pos.y - 38 - row * 14, B.text, B.color, 12, 1.3);
+      this.fx.burst(pos.x, pos.y - 8, [B.color, '#ffffff'], 14, 70);
+      this.fx.ring(pos.x, pos.y, 4, 18, B.color, 0.4, 1, 0.5);
+    } else {
+      this.fx.burst(pos.x, pos.y - 8, ['#78f878', artGlow(kind)], 10, 50);
+    }
   }
 
   private isShiny(id: number, kind: number) {
@@ -647,7 +678,7 @@ export class GameView {
       const pos = this.playerPos(fl.pid);
       if (pos) {
         const k = Math.min(1, fl.t / 0.25);
-        drawPickup(ctx, fl.kind, fl.x + (pos.x - fl.x) * k, fl.y + (pos.y - 8 - fl.y) * k, fl.value, t);
+        drawPickup(ctx, fl.kind, fl.x + (pos.x - fl.x) * k, fl.y + (pos.y - 8 - fl.y) * k, fl.value, t, false);
       }
     }
     this.flyers = this.flyers.filter((f) => f.t < 0.25);
@@ -822,7 +853,12 @@ export class GameView {
       pxRing(ctx, x, y - 9, 12, '#eaf7ff', 1, 1, 7);
       ctx.globalAlpha = 1;
     }
-    if (p.flags & 16 && Math.random() < 0.3) this.fx.px(x + (Math.random() - 0.5) * 12, y - 2, '#fff36a', { vy: -40, life: 0.35 });
+    if (p.flags & 16 && Math.random() < 0.3) {
+      // 自己身上的增幅种子：按种子的颜色冒光点
+      const bs = mine ? this.me?.boosts : undefined;
+      const col = bs?.length ? BOOSTS[bs[Math.floor(Math.random() * bs.length)][0]].color : '#fff36a';
+      this.fx.px(x + (Math.random() - 0.5) * 12, y - 2, col, { vy: -40, life: 0.35 });
+    }
     // 名字与血条
     const name = this.names.get(p.id) ?? '';
     ctx.font = '10px FusionPixel, monospace';
