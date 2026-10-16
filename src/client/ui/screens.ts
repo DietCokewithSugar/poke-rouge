@@ -2,7 +2,7 @@ import { ACHIEVEMENTS, META_UPGRADES, metaCost } from '../../shared/meta';
 import { LINES, STONE_NAME, type LineId } from '../../shared/pokemon';
 import { DIFFICULTIES, DIFFICULTY_IDS, type DifficultyId } from '../../shared/difficulty';
 import type { LobbyPlayer, RoomInfo, ServerStats } from '../../shared/protocol';
-import { SHINY_STAT, shinyName, shinyOdds } from '../../shared/shiny';
+import { SHINY_MAX_ODDS, SHINY_STAT, shinyName, shinyOdds } from '../../shared/shiny';
 import { SKILLS } from '../../shared/skills';
 import { TRAINERS, trainerOf } from '../../shared/trainers';
 import { TYPE_NAME } from '../../shared/types';
@@ -354,8 +354,8 @@ export function labGrid(p: Profile, rerender: () => void) {
       if (u.per.shiny) {
         tip(el, () => h('div', { class: 'info' },
           h('b', null, '闪光宝可梦'),
-          h('div', { class: 'small' }, '每只野生宝可梦出现时有 1/1000 的几率是闪光的。'),
-          h('div', { class: 'small' }, '研究所每级 +60%，训练家火箭队 +100%，冒险中的道具闪耀护符 +50%；加在一起最高 1/200，联机时按队伍里最高的算。'),
+          h('div', { class: 'small' }, `每只野生宝可梦出现时有 ${shinyOdds(0)} 的几率是闪光的。`),
+          h('div', { class: 'small' }, `研究所每级 +60%，训练家火箭队 +100%，冒险中的道具闪耀护符 +50%；加在一起最高 ${SHINY_MAX_ODDS}，联机时按队伍里最高的算。`),
           h('div', { class: 'small gold' }, '打倒闪光宝可梦 100% 得到它（首领也一样）。闪光的和普通的是两只宝可梦，六项能力各高 1%。'),
         ));
       }
@@ -534,7 +534,7 @@ const CREDIT_TABS: [string, () => Node][] = [
     h('li', null, '地图上还会出现橙橙果（受伤时踩到回复少量 HP，满血不捡）和暴击之种、闪避之种、加速之种（踩到后 5 秒内对应能力提升，左上角显示倒计时）。'),
     h('li', null, '物理技能吃「物攻」（偏近身），特殊技能吃「特攻」（偏远程）；接触伤害由「物防」减免，弹幕与爆炸由「特防」减免。属性克制只多/少 10%，本系技能 1.5 倍。'),
     h('li', null, '冒险中会有野生宝可梦乱入。击败野生宝可梦时它有几率崇拜你，成为新的伙伴（整条进化线都能用）。研究所的「友情缎带」、精灵球类道具和小智都能提高崇拜几率。'),
-    h('li', null, '闪光宝可梦：出现时有 1/1000 的几率是闪光（异色）的，六项能力各高 1%，打倒它 100% 得到（首领也一样），和普通的分开培养。「闪光研究」、火箭队和闪耀护符能提高几率，最高 1/200。'),
+    h('li', null, `闪光宝可梦：出现时有 ${shinyOdds(0)} 的几率是闪光（异色）的，六项能力各高 1%，打倒它 100% 得到（首领也一样），和普通的分开培养。「闪光研究」、火箭队和闪耀护符能提高几率，最高 ${SHINY_MAX_ODDS}。`),
     h('li', null, '等级够了以后，波次结束时会询问是否进化，可以取消；伊布要在商店里买进化石。每波结束后进入商店：买道具、学招式，买错了可以撤销上一次购买。'),
     h('li', null, '账号：用邮箱或 Google 登录后，进度存到云端，换设备还能继续。'),
   )],

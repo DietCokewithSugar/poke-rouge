@@ -7,7 +7,7 @@ import { ACHIEVEMENTS, ACHIEVEMENT_BY_ID, unlockHint } from '../src/shared/meta'
 import { LINES, LINE_IDS, LINE_OF_DEX, STARTERS, isFinal, maxStage } from '../src/shared/pokemon';
 import { validateBuild } from '../src/shared/pvp/build';
 import { FX_KINDS, SKILLS } from '../src/shared/skills';
-import { GameSim } from '../src/shared/sim/game';
+import { GameSim, RECRUIT_BASE } from '../src/shared/sim/game';
 import { giveItem } from '../src/shared/sim/player';
 import { TRAINERS, TRAINER_LIST } from '../src/shared/trainers';
 
@@ -51,6 +51,22 @@ test('击败乱入的野生宝可梦有几率崇拜你：解锁整条进化线�
   assert.deepEqual(sim.summary(p).recruits, ['pikachu']);
   sim.killEnemy(sim.spawnEnemy('mew', 100, 100), p);
   assert.ok(!sim.flushEvents().some((e) => e[0] === 'recruit'), '首领不会崇拜');
+});
+
+test('崇拜几率：乱入的 1/30、宝藏 1/25、精英 1/150、普通小怪 1/1200，再乘以稀有度与崇拜加成', () => {
+  assert.deepEqual(RECRUIT_BASE, { wild: 1 / 30, treasure: 1 / 25, minion: 1 / 1200, elite: 1 / 150 });
+  const sim = new GameSim([{ id: 1, name: 'a', line: 'charmander', meta: {}, owned: ['charmander'] }], 17);
+  const p = sim.players[0];
+  const N = 30000;
+  let n = 0;
+  for (let i = 0; i < N; i++) {
+    sim.killEnemy(sim.spawnEnemy('w19', 100, 100), p);
+    if (p.owned.delete('rattata')) n++;
+    if (sim.enemies.length > 300) sim.enemies = [];
+    sim.flushEvents();
+  }
+  const want = N * RECRUIT_BASE.wild * LINES.rattata.unlock.recruit * p.d.recruitMult;
+  assert.ok(Math.abs(n - want) < want * 0.2, `乱入的小拉达：${n} 次崇拜，期望约 ${Math.round(want)}`);
 });
 
 test('联机：击败者已经有了，就让给附近还没有的队友', () => {

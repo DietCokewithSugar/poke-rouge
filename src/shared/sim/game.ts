@@ -47,7 +47,7 @@ export interface PlayerInit {
 }
 
 /** 击败后崇拜你的基础几率：乱入的野生宝可梦最高，普通小怪很低，首领不会崇拜 */
-export const RECRUIT_BASE = { wild: 0.1, treasure: 0.12, minion: 0.0025, elite: 0.02 };
+export const RECRUIT_BASE = { wild: 1 / 30, treasure: 1 / 25, minion: 1 / 1200, elite: 1 / 150 };
 
 export type Command =
   | { t: 'level'; i: number; slot?: number }
