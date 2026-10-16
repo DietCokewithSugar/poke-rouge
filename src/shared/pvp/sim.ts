@@ -8,7 +8,7 @@ import { formOf } from '../pokemon';
 import { SKILLS } from '../skills';
 import { gameEffectiveness, type PType } from '../types';
 import { PLAYER_R, applyStatus, healMult, healPlayer, hurtPlayer, type HitOpts } from '../sim/combat';
-import type { Enemy, SimPlayer } from '../sim/entities';
+import { freshStatus, type Enemy, type SimPlayer } from '../sim/entities';
 import { GameSim, REVIVE_RADIUS, type Command, type PublicState } from '../sim/game';
 import { createPlayerFromBuild } from '../sim/player';
 import type { SavedBuild } from './build';
@@ -85,8 +85,6 @@ export interface PvpMatchResult {
 
 interface BotMem { strafe: number; flipT: number; pref: number; wander: number }
 
-const ccFree = { burn: 0, burnDps: 0, burnSrc: -1, poison: 0, poisonDps: 0, poisonSrc: -1, leech: 0, leechDps: 0, leechSrc: -1, leechHeal: 0, para: 0, slow: 0, slowAmt: 0, freeze: 0, stun: 0, dotAcc: 0 };
-
 export class PvpSim extends GameSim {
   readonly mode: PvpMode;
   readonly def: PvpModeDef;
@@ -110,6 +108,8 @@ export class PvpSim extends GameSim {
   private hpBudget = new Map<number, number>();
   private owners = new Map<number, { owner: number; helper: boolean }>();
   protected override mapItems = false;
+  /** 对战和道馆里没有局部属性场地（GameSim.rollTerrain 看这个开关，以后要开启改这里即可） */
+  protected override terrainOn = false;
 
   constructor(mode: PvpMode, inits: PvpInit[], seed: number) {
     super([], seed, 'easy', false);
@@ -138,7 +138,7 @@ export class PvpSim extends GameSim {
       const def: EnemyDef = { id: 'pvp', dex: form.dex, name: p.name, types: form.types, hp: 1, dmg: 0, speed: 0, r: PLAYER_R + 1, ai: 'chase', rank: 'elite', candy: 0, knockResist: 1 };
       const e: Enemy = {
         id: this.newId(), def, kind: 0, x: p.x, y: p.y, vx: 0, vy: 0, hp: p.hp, maxHp: p.d.maxHp, dmg: 0, speed: 0, r: def.r,
-        st: { ...ccFree }, ai: { state: 0, t: 0, cd: 0, cd2: 0, tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
+        st: freshStatus(), ai: { state: 0, t: 0, cd: 0, cd2: 0, tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
         dir: 0, hidden: false, lastHit: -1, age: 0, pvp: p,
       };
       this.proxies.set(p.id, e);
@@ -265,7 +265,7 @@ export class PvpSim extends GameSim {
     const k = last && this.matchT - last.t < 8 ? this.byId.get(last.id) : undefined;
     if (k && k.team !== p.team) k.stats.kos++;
     const e = this.proxies.get(p.id);
-    if (e) Object.assign(e.st, ccFree);
+    if (e) Object.assign(e.st, freshStatus());
     this.feed.push([Math.round(this.matchT * 10) / 10, k?.id ?? -1, p.id]);
     this.emit(['ko', k?.id ?? -1, p.id]);
   }

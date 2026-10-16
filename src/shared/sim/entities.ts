@@ -90,6 +90,13 @@ export interface SimPlayer {
   boosts: Record<BoostId, number>;
   slowT: number;
   slowAmt: number;
+  /** 局部属性场地：自身属性的位掩码（随进化更新）、灼伤剩余时间与掉血计时、寒霜减速剩余时间、草丛回复这一秒的起点与回复量 */
+  tmask: number;
+  tburn: number;
+  tburnAcc: number;
+  chillT: number;
+  leechAt: number;
+  leechAmt: number;
   regenAcc: number;
   lsWindow: number;
   lsCount: number;
@@ -141,6 +148,19 @@ export interface StatusState {
   freeze: number;
   stun: number;
   dotAcc: number;
+  /** 局部属性场地：灼伤、寒霜减速、草丛回复（和 SimPlayer 上的同名字段一样） */
+  tburn: number;
+  tburnAcc: number;
+  chill: number;
+  leechAt: number;
+  leechAmt: number;
+}
+
+export function freshStatus(): StatusState {
+  return {
+    burn: 0, burnDps: 0, burnSrc: -1, poison: 0, poisonDps: 0, poisonSrc: -1, leech: 0, leechDps: 0, leechSrc: -1, leechHeal: 0,
+    para: 0, slow: 0, slowAmt: 0, freeze: 0, stun: 0, dotAcc: 0, tburn: 0, tburnAcc: 0, chill: 0, leechAt: -1, leechAmt: 0,
+  };
 }
 
 export interface Enemy {
@@ -187,6 +207,9 @@ export interface Proj {
   crit: number;
   knock: number;
   status?: SkillDef['status'];
+  /** 施放时的场地效果（TF_*）；敌人的弹幕记下是谁发的（草丛回复要回到它身上） */
+  tf?: number;
+  src?: Enemy;
 }
 
 export interface Zone {
@@ -199,6 +222,8 @@ export interface Zone {
   life: number; maxLife: number;
   tick: number; t: number;
   dmg: number;
+  tf?: number;
+  src?: Enemy;
 }
 
 export interface Strike {
@@ -214,6 +239,8 @@ export interface Strike {
   cat: 'phys' | 'spec';
   /** 直线形（延迟光束）；r 为宽度 */
   line?: { ang: number; len: number };
+  tf?: number;
+  src?: Enemy;
 }
 
 export interface Pickup {

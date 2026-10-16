@@ -3,6 +3,7 @@ import { metaBonus } from '../meta';
 import { LINES, awakenings, formOf, isFinal, isNative, maxStageByLevel, type LineId } from '../pokemon';
 import { SKILLS, SKILL_IDS, SKILL_MAX_LV } from '../skills';
 import { BOOST_CRIT, BOOST_DODGE, BOOST_SPEED } from '../pickups';
+import { typeMask } from '../terrain';
 import { MOVE_SPEED_MAX, addMods, addTypeMods, derive, emptyMods, type Mods, type TypeMods } from '../stats';
 import { trainerOf } from '../trainers';
 import { priceMult } from '../waves';
@@ -39,7 +40,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     d: derive(formOf(line, 0).base, emptyMods()),
     slots: formOf(line, 0).slots,
     invuln: 1.5, shield: 0, shieldT: 0, buffT: 0, buff: { haste: 0, spe: 0 }, boosts: { crit: 0, dodge: 0, speed: 0 },
-    slowT: 0, slowAmt: 0, regenAcc: 0, lsWindow: 0, lsCount: 0, sashUsed: false, sturdyUsed: false,
+    slowT: 0, slowAmt: 0, tmask: 0, tburn: 0, tburnAcc: 0, chillT: 0, leechAt: -1, leechAmt: 0, regenAcc: 0, lsWindow: 0, lsCount: 0, sashUsed: false, sturdyUsed: false,
     levelQueue: [], cards: null, cardRerolls: 0, crates: [], evoPrompt: false,
     shop: { offers: [], locked: [false, false, false, false], rerolls: 0, freeRerolls: 0 },
     undo: null,
@@ -73,6 +74,7 @@ export function createPlayerFromBuild(sim: GameSim, id: number, name: string, b:
 export function recompute(p: SimPlayer) {
   const L = LINES[p.line];
   const form = formOf(p.line, p.stage);
+  p.tmask = typeMask(form.types);
   const m: Mods = emptyMods();
   if (!(L.flags.modsStage0Only && p.stage > 0)) addMods(m, L.mods);
   addMods(m, p.metaMods);

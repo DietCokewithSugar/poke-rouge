@@ -12,13 +12,17 @@ import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
 import { SHINY_STAT, shinyName, shinyRate } from '../shiny';
 import { SKILLS, skillLevelCd } from '../skills';
+import {
+  BURN_LINGER, BURN_PCT, CHILL_AMT, TERRAIN_FROM_WAVE, TERRAIN_IDS, TERRAIN_SPAWN_CLEAR,
+  burnStep, genTerrain, pickTerrain, terrainBurns, terrainEvent, terrainMove, type Terrain, type TerrainId,
+} from '../terrain';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
 import { updateEnemy } from './ai';
 import { autopilot } from './autopilot';
 import { autoShop } from './autoshop';
 import { PLAYER_R, beamHit, healMult, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
-import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
+import { freshStatus, type Enemy, type LevelCard, type PendingSpawn, type Pickup, type Proj, type ShopOffer, type SimPlayer, type Strike, type Zone } from './entities';
 import {
   addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, refreshOffers, rerollCards,
   rerollCost, resolveCrate, rollCrateItem, rollShop, shopBuy, shopLock, shopReroll, undoBuy, xpToNext,
@@ -126,6 +130,13 @@ export class GameSim {
   protected mapItems = true;
   /** 本波场上刷出地图道具的时间表：[出现时间, 种类]，种子的种类出现时再定 */
   private itemPlan: [number, 'berry' | 'seed'][] = [];
+  /** 本波的局部属性场地（冒险第 2 波起每波一块，波次之间没有） */
+  terrain: Terrain | null = null;
+  /** 冒险里会出现局部属性场地（对战、道馆里没有） */
+  protected terrainOn = true;
+  /** 场地也单独用一个随机数 */
+  private terrainRng: Rng;
+  private lastTerrain: TerrainId | null = null;
   /** 调试：接下来出现的 N 只宝可梦一定是闪光的 */
   forceShiny = 0;
   time = 0;
@@ -170,6 +181,7 @@ export class GameSim {
     this.rng = new Rng(seed);
     this.shinyRng = new Rng(seed ^ 0x5a17c0de);
     this.itemRng = new Rng(seed ^ 0x3c6ef372);
+    this.terrainRng = new Rng(seed ^ 0x7e1a2b4d);
     this.diff = difficultyOf(difficulty);
     for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta, i));
     this.startPlayers = inits.length;
@@ -248,7 +260,7 @@ export class GameSim {
     const e: Enemy = {
       id: this.newId(), def, kind: ENEMY_INDEX[id], x, y, vx: 0, vy: 0, hp, maxHp: hp,
       dmg: def.dmg * enemyDmgMult(this.wave) * D.dmg, speed: def.speed * (1 + Math.min(0.25, this.wave * 0.012)) * D.speed, r: def.r,
-      st: { burn: 0, burnDps: 0, burnSrc: -1, poison: 0, poisonDps: 0, poisonSrc: -1, leech: 0, leechDps: 0, leechSrc: -1, leechHeal: 0, para: 0, slow: 0, slowAmt: 0, freeze: 0, stun: 0, dotAcc: 0 },
+      st: freshStatus(),
       ai: { state: 0, t: 0, cd: this.rng.range(0.6, 1.8), cd2: this.rng.range(1.5, 3), tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
       dir: Math.PI / 2, hidden: false, lastHit: -1, age: 0,
     };
@@ -525,6 +537,8 @@ export class GameSim {
       p.buffT = 0;
       this.clearBoosts(p);
       p.slowT = 0;
+      p.tburn = 0;
+      p.chillT = 0;
       p.sashUsed = false;
       p.sturdyUsed = false;
       p.ready = false;
@@ -539,10 +553,24 @@ export class GameSim {
     });
     this.itemPlan = this.planItems(!!W.boss || this.horde);
     this.intruders = this.pickIntruders();
+    this.terrain = this.rollTerrain(W.biome);
     this.emit(['wave', this.wave, this.waveDur, W.biome]);
+    this.emit(terrainEvent(this.terrain));
     if (this.intruders.length) this.emit(['wild', this.intruders.map(([, id]) => ENEMIES[id].dex)]);
     if (this.horde) this.emit(['msg', '群聚出现了！野生宝可梦成群结队地来了！']);
   }
+
+  /**
+   * 局部属性场地：第 2 波起每波一块（首领波也有），按地区挑种类、不和上一波重复；
+   * 出生点（地图中央）周围留空，玩家开局不会站在场地里。
+   */
+  private rollTerrain(biome: number, kind?: TerrainId): Terrain | null {
+    if (!this.terrainOn || this.wave < TERRAIN_FROM_WAVE) return null;
+    const k = kind ?? pickTerrain(this.terrainRng, biome, this.lastTerrain);
+    this.lastTerrain = k;
+    return genTerrain(this.terrainRng, k, { w: this.w, h: this.h, clearX: this.w / 2, clearY: this.h / 2, clearR: TERRAIN_SPAWN_CLEAR });
+  }
+
 
   /** 记录每位玩家这一波的数据（结算界面的柱状图） */
   private logWave() {
@@ -568,6 +596,9 @@ export class GameSim {
     this.strikes = [];
     this.pending = [];
     this.boss = null;
+    this.terrain = null;
+    this.emit(terrainEvent(null));
+    for (const p of this.players) { p.tburn = 0; p.chillT = 0; }
     // 场上剩余的糖果和道具球自动归最近的玩家；橙橙果和种子留到下一波也没用，直接消失
     this.itemPlan = [];
     for (const pk of this.pickups) {
@@ -776,11 +807,15 @@ export class GameSim {
           for (const q of helpers) q.stats.revives++;
         }
       } else p.revive = Math.max(0, p.revive - dt * (helpers.length ? 0.5 : 0.15));
+      p.tburn = 0;
+      p.chillT = 0;
       return;
     }
     if (p.invuln > 0) p.invuln -= dt;
     if (p.shieldT > 0) { p.shieldT -= dt; if (p.shieldT <= 0) p.shield = 0; }
     if (p.slowT > 0) p.slowT -= dt;
+    if (p.chillT > 0) { p.chillT -= dt; if (p.chillT <= 0) this.dirty.add(p.id); }
+    this.playerBurn(p, dt);
     if (p.buffT > 0) { p.buffT -= dt; if (p.buffT <= 0) this.recompute(p); }
     let boostEnded = false;
     for (const id of BOOST_IDS) {
@@ -804,8 +839,39 @@ export class GameSim {
     updateSkills(this, p, dt);
   }
 
+  /** 不算场地减速的移动速度（发给客户端，客户端按自己的位置再乘上场地的倍率） */
+  baseSpeed(p: SimPlayer) {
+    return p.d.moveSpeed * (p.slowT > 0 ? 1 - p.slowAmt : 1) * (p.chillT > 0 ? 1 - CHILL_AMT : 1);
+  }
+
   moveSpeed(p: SimPlayer) {
-    return p.d.moveSpeed * (p.slowT > 0 ? 1 - p.slowAmt : 1);
+    return this.terrain ? this.baseSpeed(p) * terrainMove(this.terrain, p.x, p.y, p.tmask) : this.baseSpeed(p);
+  }
+
+  /**
+   * 熔岩池的灼伤：站在里面一直灼伤，离开后还会持续一会儿；不吃防御、不会被闪避、不触发受击无敌，
+   * 最多烧到剩 1 HP。返回这一刻掉的血（0 表示没掉）。
+   */
+  private terrainBurnTick(s: { tburn: number; tburnAcc: number }, burning: boolean, maxHp: number, hp: number, pct: number, dt: number): number {
+    if (burning) {
+      if (s.tburn <= 0) s.tburnAcc = 0;
+      s.tburn = BURN_LINGER;
+    } else if (s.tburn > 0) s.tburn -= dt;
+    if (s.tburn <= 0) return 0;
+    s.tburnAcc += dt;
+    const step = burnStep(maxHp, pct);
+    if (s.tburnAcc < step.every) return 0;
+    s.tburnAcc -= step.every;
+    return Math.max(0, Math.min(step.dmg, Math.ceil(hp) - 1));
+  }
+
+  private playerBurn(p: SimPlayer, dt: number) {
+    if (!this.terrain && p.tburn <= 0) return;
+    const dmg = this.terrainBurnTick(p, terrainBurns(this.terrain, p.x, p.y, p.tmask), p.d.maxHp, p.hp, BURN_PCT.player, dt);
+    if (dmg <= 0) return;
+    p.hp -= dmg;
+    p.stats.taken += dmg;
+    this.emit(['ph', p.id, dmg, 4]);
   }
 
   private updateEnemies(dt: number) {
@@ -921,7 +987,7 @@ export class GameSim {
           pr.hit.add(e.id);
           const dirx = pr.orbit ? e.x - (owner?.x ?? pr.x) : pr.vx;
           const diry = pr.orbit ? e.y - (owner?.y ?? pr.y) : pr.vy;
-          hitEnemy(this, e, owner ?? null, pr.dmg, pr.type, { crit: pr.crit, status: pr.status, knock: pr.knock, kx: dirx, ky: diry, heal: pr.skill?.heal, skill: pr.skill });
+          hitEnemy(this, e, owner ?? null, pr.dmg, pr.type, { crit: pr.crit, status: pr.status, knock: pr.knock, kx: dirx, ky: diry, heal: pr.skill?.heal, skill: pr.skill, tf: pr.tf });
           if (!pr.orbit) {
             if (pr.pierce <= 0) { alive = false; break; }
             pr.pierce--;
@@ -969,7 +1035,7 @@ export class GameSim {
           for (const e of this.targetsFor(z.owner)) {
             if (e.dead || e.hidden) continue;
             if ((e.x - z.x) ** 2 + (e.y - z.y) ** 2 <= (z.r + e.r) ** 2) {
-              hitEnemy(this, e, owner, z.dmg, z.type, { status: z.skill?.status, skill: z.skill });
+              hitEnemy(this, e, owner, z.dmg, z.type, { status: z.skill?.status, skill: z.skill, tf: z.tf });
             }
           }
         } else {
@@ -1002,7 +1068,7 @@ export class GameSim {
       }
       const owner = this.players.find((p) => p.id === s.owner) ?? null;
       if (s.line && s.skill) {
-        beamHit(this, owner, s.skill, s.x, s.y, s.line.ang, s.line.len, s.r, s.dmg);
+        beamHit(this, owner, s.skill, s.x, s.y, s.line.ang, s.line.len, s.r, s.dmg, s.tf);
         this.emit(['fx', s.fx, Math.round(s.x), Math.round(s.y), Math.round(s.line.ang * 100) / 100, Math.round(s.line.len), s.r, s.owner]);
         continue;
       }
@@ -1010,7 +1076,7 @@ export class GameSim {
       for (const e of this.targetsFor(s.owner).slice()) {
         if (e.dead || e.hidden) continue;
         if (Math.hypot(e.x - s.x, e.y - s.y) <= s.r + e.r) {
-          hitEnemy(this, e, owner, s.dmg, s.type, { crit: s.skill?.crit, status: s.skill?.status, knock: s.skill?.knock, kx: e.x - s.x, ky: e.y - s.y, skill: s.skill });
+          hitEnemy(this, e, owner, s.dmg, s.type, { crit: s.skill?.crit, status: s.skill?.status, knock: s.skill?.knock, kx: e.x - s.x, ky: e.y - s.y, skill: s.skill, tf: s.tf });
         }
       }
     }
@@ -1132,7 +1198,7 @@ export class GameSim {
     return {
       id: p.id, line: p.line, stage: p.stage, dex: form.dex, form: form.name, level: p.level,
       xp: Math.floor(p.xp), xpNext: xpToNext(p.level), money: Math.floor(p.money),
-      hp: Math.ceil(p.hp), maxHp: p.d.maxHp, speed: this.moveSpeed(p), down: p.down, shiny: p.shiny,
+      hp: Math.ceil(p.hp), maxHp: p.d.maxHp, speed: this.baseSpeed(p), down: p.down, shiny: p.shiny,
       slots: p.slots,
       // max 是实际的冷却时间（技能等级与技能急速都算进去），界面按它画冷却进度
       // 没有目标时技能每 0.1 秒重试一次，这种状态当作已经就绪，免得冷却图标一闪一闪
@@ -1145,7 +1211,7 @@ export class GameSim {
         luck: Math.round(p.d.luck), harvest: Math.round(p.d.harvest), xp: Math.round((p.d.xpMult - 1) * 100), money: Math.round((p.d.moneyMult - 1) * 100),
         dmg: Math.round((p.d.dmgMult - 1) * 100), dmgMinion: Math.round((p.d.minionMult - 1) * 100), dmgBoss: Math.round((p.d.bossMult - 1) * 100),
         thorns: Math.round(p.d.thorns), pickup: Math.round(p.d.pickupRadius), physTaken: Math.round(p.d.physTaken * 100), specTaken: Math.round(p.d.specTaken * 100),
-        moveSpeed: Math.round(this.moveSpeed(p)),
+        moveSpeed: Math.round(this.baseSpeed(p)),
         enemies: Math.round(p.d.enemies),
         recruit: Math.round((p.d.recruitMult - 1) * 100),
         // 全队的闪光几率（1/N 的 N）
@@ -1257,6 +1323,17 @@ export class GameSim {
   /** 调试与测试：在指定位置放一个地图道具（不受场上数量限制；对战里没有地图道具） */
   placeItem(kind: PickupKind, x: number, y: number): Pickup | null {
     return this.mapItems ? this.dropPickup(kind, x, y, 1) : null;
+  }
+
+  /** 调试与测试：把这一波的场地换成指定种类（不指定就换成下一种），重新生成并发给客户端 */
+  debugTerrain(kind?: string): Terrain | null {
+    if (!this.terrainOn || this.phase !== 'wave') return null;
+    const ids: readonly string[] = TERRAIN_IDS;
+    const k = (ids.includes(kind ?? '') ? kind : TERRAIN_IDS[(ids.indexOf(this.terrain?.kind ?? 'frost') + 1) % TERRAIN_IDS.length]) as TerrainId;
+    this.terrain = genTerrain(this.terrainRng, k, { w: this.w, h: this.h, clearX: this.w / 2, clearY: this.h / 2, clearR: TERRAIN_SPAWN_CLEAR });
+    this.lastTerrain = k;
+    this.emit(terrainEvent(this.terrain));
+    return this.terrain;
   }
 
   /** 调试：在玩家身边放一颗橙橙果和每种种子各一颗 */
