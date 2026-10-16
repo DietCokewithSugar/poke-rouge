@@ -545,3 +545,24 @@ test('对战里没有局部属性场地', () => {
   }
   assert.deepEqual(sim.publicState().fields, []);
 });
+
+test('AI 辅助战斗：站进不利的场地会马上找出口，有利的场地尽量待在里面', () => {
+  const { sim, p } = setup('squirtle', 'lava');
+  sim.setAuto(p.id, true);
+  run(sim, 2.5, [], () => { p.invuln = 9; });
+  assert.equal(sim.fieldAt(p.x, p.y), null, '杰尼龟走出了熔岩池');
+  const c = setup('charmander', 'lava');
+  c.sim.setAuto(c.p.id, true);
+  const foes = [tough(c.sim.spawnEnemy('rattata', c.p.x + 150, c.p.y), 30), tough(c.sim.spawnEnemy('rattata', c.p.x - 150, c.p.y + 30), 30)];
+  let t = 0;
+  run(c.sim, 6, foes, () => { c.p.invuln = 9; if (c.sim.fieldAt(c.p.x, c.p.y)) t++; });
+  assert.ok(t / 180 > 0.6, `小火龙待在熔岩池里的时间 ${Math.round((t / 180) * 100)}%`);
+  // 旁边就是对自己不利的场地：绕着走，不踩进去
+  const d = setup('pidgey', null);
+  d.sim.placeField('rain', square(d.p.x + 90, d.p.y, 3));
+  d.sim.setAuto(d.p.id, true);
+  d.sim.placeItem('candy', d.p.x + 220, d.p.y);
+  let wet = 0;
+  run(d.sim, 4, [], () => { d.p.invuln = 9; if (d.sim.fieldAt(d.p.x, d.p.y)) wet++; });
+  assert.ok(wet < 10, `波波绕开了阵雨：在雨里 ${wet} 帧`);
+});

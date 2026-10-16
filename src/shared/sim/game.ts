@@ -265,12 +265,12 @@ export class GameSim {
 
   // ------------------------------------------------------------ 局部属性场地
 
-  /** (x, y) 所在的、已经生效的场地 */
-  fieldAt(x: number, y: number): FieldId | null {
+  /** (x, y) 所在的、已经生效的场地；forming：还在闪烁预告的也算（AI 提前躲开） */
+  fieldAt(x: number, y: number, forming = false): FieldId | null {
     if (!this.fields.length) return null;
     const i = this.fieldMap[cellAt(this.fieldCols, this.fieldRows, x, y)] ?? 0;
     const f = i ? this.fields[i - 1] : null;
-    return f && this.waveT >= f.activeAt ? f.kind : null;
+    return f && (forming || this.waveT >= f.activeAt) ? f.kind : null;
   }
 
   /** 玩家出招时脚下场地的修正；被熔岩灼伤时物理招式的伤害减半 */

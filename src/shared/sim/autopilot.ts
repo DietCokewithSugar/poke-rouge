@@ -1,15 +1,40 @@
 /**
  * 自动走位（冒险的 AI 辅助战斗）：躲开近身的敌人、弹幕与即将落下的攻击，保持在技能射程边缘绕圈，
  * 安全时去捡糖果和增幅种子、救倒下的队友，血少时去吃橙橙果，被一群小怪围住时去踩爆炸之种，远离墙角。
+ * 局部属性场地：不利的场地绕着走、站进去了就找最近的出口，有利的场地尽量待在里面。
  * 只负责走位：技能本来就是自动释放的，商店、升级与进化仍由玩家自己决定。
  */
+import { fieldVerdict, type FieldId } from '../fields';
 import { BLAST_RADIUS, boostOfSeed } from '../pickups';
+import { formOf } from '../pokemon';
 import { SKILLS } from '../skills';
 import type { SimPlayer } from './entities';
 import { REVIVE_RADIUS, blastable, type GameSim } from './game';
 
 /** 爆炸范围里有这么多只普通小怪才去踩爆炸之种，不然绕开它，留到需要的时候 */
 export const AUTO_BLAST_CROWD = 10;
+
+/** 场上每种场地对这只宝可梦的好坏（> 0 有利，< 0 不利） */
+function fieldScores(sim: GameSim, p: SimPlayer): Map<FieldId, number> {
+  const types = formOf(p.line, p.stage).types;
+  const moves = p.skills.map((s) => SKILLS[s.id]).filter(Boolean).map((d) => ({ type: d.type, damaging: d.cat !== 'status', phys: d.cat === 'phys' }));
+  const out = new Map<FieldId, number>();
+  for (const f of sim.fields) if (!out.has(f.kind)) out.set(f.kind, fieldVerdict(f.kind, types, moves).score);
+  return out;
+}
+
+/** 从 (x, y) 出发，往哪个方向走最快能到满足 ok 的地方（max 像素以内，找不到时为 null） */
+function towards(sim: GameSim, x: number, y: number, ok: (x: number, y: number) => boolean, max = 320) {
+  for (let d = 24; d <= max; d += 24) {
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const tx = x + Math.cos(a) * d, ty = y + Math.sin(a) * d;
+      if (tx < 16 || ty < 20 || tx > sim.w - 16 || ty > sim.h - 16) continue;
+      if (ok(tx, ty)) return { x: Math.cos(a), y: Math.sin(a) };
+    }
+  }
+  return null;
+}
 
 function preferredRange(p: SimPlayer) {
   let r = 999;
@@ -60,6 +85,28 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
   }
   const crowded = crowd >= AUTO_BLAST_CROWD;
   const safe = nearest > want + 40;
+  if (sim.fields.length) {
+    const score = fieldScores(sim, p);
+    const val = (x: number, y: number) => { const k = sim.fieldAt(x, y, true); return k ? score.get(k) ?? 0 : 0; };
+    const here = val(p.x, p.y);
+    if (here < -0.5) {
+      // 站在对自己不利的场地里：往最近的出口走
+      const out = towards(sim, p.x, p.y, (x, y) => val(x, y) >= -0.5);
+      if (out) { const w = 1.4 + Math.min(1.5, -here / 2); fx += out.x * w; fy += out.y * w; }
+    } else {
+      // 不一脚踩进不利的场地；站在有利的场地里就尽量别走出去
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2, ux = Math.cos(a), uy = Math.sin(a);
+        const v = val(p.x + ux * 30, p.y + uy * 30);
+        if (v < -0.5) { fx -= ux * 1.1; fy -= uy * 1.1; }
+        else if (here > 0.5 && v <= 0.5) { fx -= ux * 0.45; fy -= uy * 0.45; }
+      }
+      if (here <= 0.5 && safe) {
+        const to = towards(sim, p.x, p.y, (x, y) => val(x, y) > 0.5, 200);
+        if (to) { fx += to.x * 0.7; fy += to.y * 0.7; }
+      }
+    }
+  }
   // 目标：被围住时的爆炸之种 > 倒下的队友 > 血少时的橙橙果 > 增幅种子 > 附近的糖果和道具球
   let goal: { x: number; y: number; w: number } | null = null;
   if (crowded) {
