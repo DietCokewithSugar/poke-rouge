@@ -140,8 +140,10 @@ function drawMapItem(ctx: CanvasRenderingContext2D, kind: number, x: number, y: 
   const seed = x * 0.37 + y * 0.11;
   if (ground && kind === BLAST_KIND) {
     // 爆炸之种：地上用一圈虚线标出会被炸到的范围，方便把小怪引进来
-    ctx.globalAlpha = step(0.45 + 0.25 * Math.sin(t * 3 + seed)) * 0.5;
-    pxRing(ctx, x, y, BLAST_RADIUS, artGlow(kind), 1, 0.85, 7);
+    ctx.globalAlpha = 0.09;
+    pxCircle(ctx, x, y, BLAST_RADIUS, artGlow(kind));
+    ctx.globalAlpha = 0.45 + 0.25 * step(0.5 + 0.5 * Math.sin(t * 3 + seed));
+    pxRing(ctx, x, y, BLAST_RADIUS, artGlow(kind), 1, 1, 4);
   }
   if (ground) {
     ctx.globalAlpha = step(0.55 + 0.45 * Math.sin(t * 4.5 + seed));

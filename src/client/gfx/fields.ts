@@ -96,7 +96,7 @@ const LOOKS: Record<FieldId, Look> = {
   updraft: {
     edge: ['#a8e4ff', 'rgba(240,252,255,.5)'],
     tile(px, x, y, r) {
-      px(x, y, 'rgba(180,230,255,.16)', T, T);
+      px(x, y, 'rgba(170,225,255,.24)', T, T);
       if (r.chance(0.45)) {
         const a = r.int(0, 8), b = r.int(3, 14), c = 'rgba(240,252,255,.55)';
         px(x + a, y + b, c, 4, 1); px(x + a + 4, y + b - 1, c, 2, 1); px(x + a + 6, y + b - 2, c, 1, 1);

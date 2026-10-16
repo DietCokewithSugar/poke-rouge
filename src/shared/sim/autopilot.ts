@@ -1,7 +1,7 @@
 /**
  * 自动走位（冒险的 AI 辅助战斗）：躲开近身的敌人、弹幕与即将落下的攻击，保持在技能射程边缘绕圈，
  * 安全时去捡糖果和增幅种子、救倒下的队友，血少时去吃橙橙果，被一群小怪围住时去踩爆炸之种，远离墙角。
- * 局部属性场地：不利的场地绕着走、站进去了就找最近的出口，有利的场地尽量待在里面。
+ * 局部属性场地：安全时往对自己有利的场地靠；血少时离开正在灼伤自己的熔岩。
  * 只负责走位：技能本来就是自动释放的，商店、升级与进化仍由玩家自己决定。
  */
 import { fieldVerdict, type FieldId } from '../fields';
@@ -89,22 +89,14 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
     const score = fieldScores(sim, p);
     const val = (x: number, y: number) => { const k = sim.fieldAt(x, y, true); return k ? score.get(k) ?? 0 : 0; };
     const here = val(p.x, p.y);
-    if (here < -0.5) {
-      // 站在对自己不利的场地里：往最近的出口走
+    // 追进不利场地的野生宝可梦一样吃亏（被灼伤、减速、冷却变长），硬躲反而容易被围：
+    // 只有血少、身边又没有敌人的时候才离开正在灼伤自己的场地；很安全时往附近对自己有利的场地靠
+    if (here < -0.5 && p.fieldBurn > 0 && p.hp < p.d.maxHp * 0.4 && nearest > flee + 20) {
       const out = towards(sim, p.x, p.y, (x, y) => val(x, y) >= -0.5);
-      if (out) { const w = 1.4 + Math.min(1.5, -here / 2); fx += out.x * w; fy += out.y * w; }
-    } else {
-      // 不一脚踩进不利的场地；站在有利的场地里就尽量别走出去
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2, ux = Math.cos(a), uy = Math.sin(a);
-        const v = val(p.x + ux * 30, p.y + uy * 30);
-        if (v < -0.5) { fx -= ux * 1.1; fy -= uy * 1.1; }
-        else if (here > 0.5 && v <= 0.5) { fx -= ux * 0.45; fy -= uy * 0.45; }
-      }
-      if (here <= 0.5 && safe) {
-        const to = towards(sim, p.x, p.y, (x, y) => val(x, y) > 0.5, 200);
-        if (to) { fx += to.x * 0.7; fy += to.y * 0.7; }
-      }
+      if (out) { fx += out.x * 1.2; fy += out.y * 1.2; }
+    } else if (here <= 0.5 && nearest > want + 80) {
+      const to = towards(sim, p.x, p.y, (x, y) => val(x, y) > 0.5, 200);
+      if (to) { fx += to.x * 0.5; fy += to.y * 0.5; }
     }
   }
   // 目标：被围住时的爆炸之种 > 倒下的队友 > 血少时的橙橙果 > 增幅种子 > 附近的糖果和道具球

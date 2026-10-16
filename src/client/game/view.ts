@@ -454,7 +454,8 @@ export class GameView {
     const f = here === null ? undefined : this.fields.get(here);
     if (!f || (this.enteredAt.get(f.id) ?? -99) > this.time - 6) return;
     this.enteredAt.set(f.id, this.time);
-    this.fx.text(this.local.x, this.local.y - 40, `进入${FIELDS[f.kind].name}`, FIELDS[f.kind].color, 11, 1.2);
+    // 刚生效时场地中间还写着名字，不用再提示
+    if (this.time - f.activeAt > 3) this.fx.text(this.local.x, this.local.y - 40, `进入${FIELDS[f.kind].name}`, FIELDS[f.kind].color, 11, 1.2);
   }
 
   private skillFx(ev: Ev) {
