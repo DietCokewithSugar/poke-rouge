@@ -1629,3 +1629,46 @@ body.pad .th-num, .th-quick .btn:not(:hover) .th-num { opacity: .8; }
 .conflict-lines { display: grid; gap: 0.1875rem; font-size: 0.875rem; line-height: 1.35; flex: 1; }
 .conflict-card .btn { margin-top: auto; align-self: flex-start; max-width: 100%; }
 .panel-foot .set-note { flex: 1; min-width: 0; text-align: center; }
+
+/* ================================================================
+ * 手机横屏（触屏、高度不到 540 像素）：字和按钮不能太小，按钮要好按
+ * 战斗 HUD 和真新镇的浮层不受卡片界面尺寸的限制，整体放大；暂停、自动战斗这些常用按钮至少 44 像素；
+ * 卡片界面（最大 60rem × 33.5rem）受屏幕高度限制，只把最小的字和小按钮抬起来
+ * ================================================================ */
+@media (pointer: coarse) and (max-height: 540px) {
+  #hud { zoom: 1.4; }
+  #town-hud { zoom: 1.3; }
+  /* 商店里另有一个同样位置的暂停按钮（盖在 HUD 上面），尺寸要跟着一起变 */
+  .hud-pause.inter-menu { zoom: 1.4; }
+  #hud .hud-pause.icon, .hud-pause.inter-menu { width: 2.8rem; height: 2.8rem; }
+  #hud .hud-pause.icon img.uico, .hud-pause.inter-menu img.uico { width: 1.875rem; height: 1.875rem; }
+  #hud > .hud-auto { min-height: 2.8rem; padding: 0.3125rem 0.75rem; }
+  /* 对战：中间的比分牌放大以后会压住左上角的自己，两边都收窄一点 */
+  #hud.pvp .hud-me { min-width: 12.5rem; }
+  #hud.pvp .hud-pvp { zoom: 0.86; }
+  .hf-line, .hf-v { font-size: 0.75rem; }
+  .hf-types .type, .hf-here { font-size: 0.6875rem; line-height: 0.9375rem; }
+  .hud-diff { font-size: 0.8125rem; }
+  #town-hud .btn.small { min-height: 2.75rem; }
+  #town-hud .btn.small.icon { min-width: 2.75rem; }
+  #town-hud .th-stat { min-height: 2.5rem; }
+  #town-hud .th-goal { min-height: 2.6rem; font-size: 0.875rem; }
+  #town-hud .th-goal-tag { font-size: 0.75rem; }
+  #town-hud .th-prompt { min-height: 2.75rem; }
+  .small { font-size: max(0.875rem, 11px); }
+  .type { font-size: max(0.8125rem, 10.5px); }
+  .btn.small { font-size: max(0.875rem, 11px); min-height: 2.25rem; }
+  .btn.tiny { font-size: max(0.8125rem, 10.5px); min-height: 1.875rem; }
+  .menu-item { min-height: 3.25rem; }
+  /* 商店 */
+  .card-body, .preview-label { font-size: 0.8125rem; }
+  .card .lock { min-height: 1.75rem; font-size: 0.8125rem; padding: 0 0.4375rem; }
+  .stat { font-size: 0.875rem; }
+  .btn.undo small { font-size: 0.75rem; }
+  /* 道馆 */
+  .gym-row .type { font-size: 0.6875rem; }
+  .gym-row-name small, .gym-field small { font-size: 0.75rem; }
+  .gym-no, .gym-mu { font-size: 0.8125rem; }
+  .gym-tier-btn { min-height: 1.875rem; font-size: 0.875rem; padding: 0 0.625rem; }
+  .gym-quote { font-size: 0.9375rem; }
+}
