@@ -14,19 +14,21 @@ import { SHINY_STAT, shinyName, shinyRate } from '../shiny';
 import { SKILLS, skillLevelCd } from '../skills';
 import {
   BURN_LINGER, BURN_PCT, CHILL_AMT, TERRAIN_FROM_WAVE, TERRAIN_IDS, TERRAIN_SPAWN_CLEAR,
-  burnStep, genTerrain, pickTerrain, terrainBurns, terrainEvent, terrainMove, type Terrain, type TerrainId,
+  burnStep, genTerrain, pickTerrain, terrainBurns, terrainEvent, terrainHitFlags, terrainMove, typeMask, type Terrain, type TerrainId,
 } from '../terrain';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
-import type { PType } from '../types';
+import { TYPES, type PType } from '../types';
 import { updateEnemy } from './ai';
 import { autopilot } from './autopilot';
 import { autoShop } from './autoshop';
-import { PLAYER_R, beamHit, healMult, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
+import { PLAYER_R, beamHit, enemyDmgMod, enemyHitPlayer, healMult, healPlayer, hitEnemy, updateSkills, type HitOpts } from './combat';
 import { freshStatus, type Enemy, type LevelCard, type PendingSpawn, type Pickup, type Proj, type ShopOffer, type SimPlayer, type Strike, type Zone } from './entities';
 import {
   addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, refreshOffers, rerollCards,
   rerollCost, resolveCrate, rollCrateItem, rollShop, shopBuy, shopLock, shopReroll, undoBuy, xpToNext,
 } from './player';
+
+const FIRE = TYPES.indexOf('fire');
 
 export const ARENA_W = 768;
 export const ARENA_H = 576;
@@ -260,7 +262,7 @@ export class GameSim {
     const e: Enemy = {
       id: this.newId(), def, kind: ENEMY_INDEX[id], x, y, vx: 0, vy: 0, hp, maxHp: hp,
       dmg: def.dmg * enemyDmgMult(this.wave) * D.dmg, speed: def.speed * (1 + Math.min(0.25, this.wave * 0.012)) * D.speed, r: def.r,
-      st: freshStatus(),
+      tmask: typeMask(def.types), st: freshStatus(),
       ai: { state: 0, t: 0, cd: this.rng.range(0.6, 1.8), cd2: this.rng.range(1.5, 3), tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
       dir: Math.PI / 2, hidden: false, lastHit: -1, age: 0,
     };
@@ -874,12 +876,22 @@ export class GameSim {
     this.emit(['ph', p.id, dmg, 4]);
   }
 
+  private enemyBurn(e: Enemy, dt: number) {
+    const burning = terrainBurns(this.terrain, e.x, e.y, e.tmask);
+    if (!burning && e.st.tburn <= 0) return;
+    const dmg = this.terrainBurnTick(e.st, burning, e.maxHp, e.hp, BURN_PCT[e.def.rank], dt);
+    if (dmg <= 0) return;
+    e.hp -= dmg;
+    this.addHit(e, dmg, 8, FIRE);
+  }
+
   private updateEnemies(dt: number) {
     const grid = new Map<number, Enemy[]>();
     const CELL = 24;
     for (const e of this.enemies) {
       if (e.dead) continue;
       if (!updateEnemy(this, e, dt)) { e.dead = true; e.hp = 0; continue; }
+      if (this.terrain) this.enemyBurn(e, dt);
       // 持续伤害
       const st = e.st;
       if (st.burn > 0 || st.poison > 0 || st.leech > 0) {
@@ -909,7 +921,10 @@ export class GameSim {
         for (const p of this.players) {
           if (p.down || !p.alive || p.invuln > 0) continue;
           const rr = e.r + PLAYER_R - 1;
-          if ((p.x - e.x) ** 2 + (p.y - e.y) ** 2 < rr * rr) hurtPlayer(this, p, e.dmg, 'phys', e);
+          if ((p.x - e.x) ** 2 + (p.y - e.y) ** 2 < rr * rr) {
+            const tf = terrainHitFlags(this.terrain, e.x, e.y, e.def.types[0]);
+            enemyHitPlayer(this, p, e.dmg * enemyDmgMod(this, e, 'phys'), 'phys', e, tf, true);
+          }
         }
       }
       const key = Math.floor(e.x / CELL) + Math.floor(e.y / CELL) * 1000;
@@ -1000,7 +1015,7 @@ export class GameSim {
           const rr = PLAYER_R + pr.r - 1;
           if ((p.x - pr.x) ** 2 + (p.y - 6 - pr.y) ** 2 > rr * rr) continue;
           if (p.invuln <= 0) {
-            hurtPlayer(this, p, pr.dmg, 'spec');
+            enemyHitPlayer(this, p, pr.dmg, 'spec', pr.src ?? null, pr.tf);
             if (pr.slow && !p.items.safety_goggles) { p.slowT = 1.6; p.slowAmt = pr.slow; this.dirty.add(p.id); }
           }
           alive = false;
@@ -1043,7 +1058,7 @@ export class GameSim {
             if (!p.down && p.alive && !p.items.safety_goggles && (p.x - z.x) ** 2 + (p.y - z.y) ** 2 <= (z.r + PLAYER_R) ** 2) {
               const inv = p.invuln;
               p.invuln = 0;
-              hurtPlayer(this, p, z.dmg, 'spec');
+              enemyHitPlayer(this, p, z.dmg, 'spec', z.src ?? null, z.tf);
               p.invuln = Math.max(p.invuln > 0 ? 0.1 : 0, inv);
             }
           }
@@ -1062,7 +1077,7 @@ export class GameSim {
       if (s.enemy) {
         this.emit(['boom', Math.round(s.x), Math.round(s.y), s.r, s.fx]);
         for (const p of this.players) {
-          if (!p.down && p.alive && Math.hypot(p.x - s.x, p.y - s.y) <= s.r + PLAYER_R) hurtPlayer(this, p, s.dmg, s.cat);
+          if (!p.down && p.alive && Math.hypot(p.x - s.x, p.y - s.y) <= s.r + PLAYER_R) enemyHitPlayer(this, p, s.dmg, s.cat, s.src ?? null, s.tf);
         }
         continue;
       }

@@ -1,6 +1,7 @@
 import { ENEMIES } from '../enemies';
+import { CHILL_AMT, inTerrain, terrainArea, terrainCd, terrainHitFlags, terrainMove } from '../terrain';
 import { enemyDmgMult } from '../waves';
-import { PLAYER_R, hurtPlayer } from './combat';
+import { PLAYER_R, enemyDmgMod, enemyHitPlayer } from './combat';
 import type { Enemy, SimPlayer } from './entities';
 import type { GameSim } from './game';
 
@@ -10,7 +11,7 @@ const TAU = Math.PI * 2;
 export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
   const st = e.st;
   e.age += dt;
-  for (const k of ['para', 'slow', 'freeze', 'stun'] as const) if (st[k] > 0) st[k] -= dt;
+  for (const k of ['para', 'slow', 'freeze', 'stun', 'chill'] as const) if (st[k] > 0) st[k] -= dt;
 
   const target = sim.nearestPlayer(e.x, e.y);
   const stopped = st.freeze > 0 || st.stun > 0;
@@ -18,6 +19,10 @@ export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
   if (st.para > 0) mul *= 0.5;
   if (st.slow > 0) mul *= 1 - st.slowAmt;
   if (sim.pressureAt(e.x, e.y)) mul *= 0.8;
+  // 局部属性场地：和宝可梦一样按自身属性减速，寒霜区域的命中减速
+  const T = sim.terrain && inTerrain(sim.terrain, e.x, e.y) ? sim.terrain : null;
+  if (T) mul *= terrainMove(T, e.x, e.y, e.tmask);
+  if (st.chill > 0) mul *= 1 - CHILL_AMT;
   const spd = e.speed * mul;
 
   let mx = 0, my = 0;
@@ -26,8 +31,10 @@ export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
     const d = Math.hypot(dx, dy) || 1;
     const ux = dx / d, uy = dy / d;
     const ai = e.ai;
-    ai.cd -= dt;
-    ai.cd2 -= dt;
+    // 场地改变冷却：敌人的攻击按主属性算
+    const cdt = T ? dt / terrainCd(T, e.x, e.y, e.def.types[0]) : dt;
+    ai.cd -= cdt;
+    ai.cd2 -= cdt;
     switch (e.def.ai) {
       case 'chase':
       case 'tank':
@@ -74,7 +81,9 @@ export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
           // 闪光的不会自爆：打倒它就一定能得到，不会被自己炸没
           if (d < b.radius * 0.6 && !e.shiny) {
             ai.state = 1; ai.t = 0.85;
-            sim.emit(['warn', 0, r1(e.x), r1(e.y), b.radius, 850, 0, 0]);
+            // 爆炸范围在亮出警示圈时就定下来（场地放大覆盖面积时警示圈也一样大）
+            ai.tx = Math.round(b.radius * Math.sqrt(terrainArea(T, e.x, e.y, e.def.types[0])));
+            sim.emit(['warn', 0, r1(e.x), r1(e.y), ai.tx, 850, 0, 0]);
           }
         } else {
           ai.t -= dt;
@@ -131,33 +140,42 @@ export function enemyShoot(sim: GameSim, e: Enemy, ang: number, override?: { cou
   const spread = override?.spread ?? shot.spread ?? 0;
   const speed = override?.speed ?? shot.speed;
   const ring = spread >= TAU - 0.01;
-  const power = (override?.power ?? shot.power) * enemyDmgMult(sim.wave) * 0.85;
+  const type = e.def.types[0], T = sim.terrain;
+  const power = (override?.power ?? shot.power) * enemyDmgMult(sim.wave) * 0.85 * enemyDmgMod(sim, e, 'spec');
+  const size = (override?.size ?? shot.size ?? 3) * Math.sqrt(terrainArea(T, e.x, e.y, type));
+  const tf = terrainHitFlags(T, e.x, e.y, type);
   for (let i = 0; i < n; i++) {
     const a = ring ? ang + (i / n) * TAU : n > 1 ? ang + spread * (i / (n - 1) - 0.5) : ang;
     sim.spawnProj({
-      fx: override?.fx ?? shot.fx, owner: -1, skill: null, type: e.def.types[0],
+      fx: override?.fx ?? shot.fx, owner: -1, skill: null, type,
       x: e.x, y: e.y - 6, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
-      r: override?.size ?? shot.size ?? 3, dmg: power, pierce: 0, life: (shot.range * 1.6) / Math.max(40, speed),
-      homing: override?.homing ?? 0, crit: 0, knock: 0, slow: shot.slow,
+      r: size, dmg: power, pierce: 0, life: (shot.range * 1.6) / Math.max(40, speed),
+      homing: override?.homing ?? 0, crit: 0, knock: 0, slow: shot.slow, tf, src: e,
     });
   }
 }
 
 function explode(sim: GameSim, e: Enemy) {
   const b = e.def.blast!;
-  const dmg = b.power * enemyDmgMult(sim.wave);
-  sim.emit(['boom', r1(e.x), r1(e.y), b.radius, b.cloud ? 'e_cloud' : 'e_blast']);
+  const radius = e.ai.tx || b.radius;
+  const dmg = b.power * enemyDmgMult(sim.wave) * enemyDmgMod(sim, e, 'spec');
+  const tf = terrainHitFlags(sim.terrain, e.x, e.y, e.def.types[0]);
+  sim.emit(['boom', r1(e.x), r1(e.y), radius, b.cloud ? 'e_cloud' : 'e_blast']);
   for (const p of sim.players) {
-    if (Math.hypot(p.x - e.x, p.y - e.y) <= b.radius + PLAYER_R) hurtPlayer(sim, p, dmg, 'spec');
+    if (Math.hypot(p.x - e.x, p.y - e.y) <= radius + PLAYER_R) enemyHitPlayer(sim, p, dmg, 'spec', e, tf);
   }
   if (b.cloud) {
-    sim.zones.push({ id: sim.newId(), fx: 'e_cloud', owner: -1, skill: null, type: 'poison', x: e.x, y: e.y, r: b.radius * 0.9, life: 3.5, maxLife: 3.5, tick: 0.5, t: 0, dmg: dmg * 0.25 });
+    sim.zones.push({ id: sim.newId(), fx: 'e_cloud', owner: -1, skill: null, type: 'poison', x: e.x, y: e.y, r: radius * 0.9, life: 3.5, maxLife: 3.5, tick: 0.5, t: 0, dmg: dmg * 0.25, tf });
   }
   sim.killEnemy(e, null, true);
 }
 
-function enemyStrike(sim: GameSim, x: number, y: number, r: number, delay: number, power: number, fx: string) {
-  sim.strikes.push({ owner: -1, skill: null, x, y, r, t: delay, dmg: power * enemyDmgMult(sim.wave), type: 'normal', fx, cat: 'phys', enemy: true });
+/** 敌人的落点攻击：按敌人的主属性吃场地加成（伤害、范围与命中效果在亮出警示圈时就定下来） */
+function enemyStrike(sim: GameSim, e: Enemy, x: number, y: number, r: number, delay: number, power: number, fx: string) {
+  const T = sim.terrain, type = e.def.types[0];
+  r = Math.round(r * Math.sqrt(terrainArea(T, e.x, e.y, type)));
+  const dmg = power * enemyDmgMult(sim.wave) * enemyDmgMod(sim, e, 'phys');
+  sim.strikes.push({ owner: -1, skill: null, x, y, r, t: delay, dmg, type, fx, cat: 'phys', enemy: true, tf: terrainHitFlags(T, e.x, e.y, type), src: e });
   sim.emit(['warn', 0, r1(x), r1(y), r, Math.round(delay * 1000), 0, 0]);
 }
 
@@ -187,7 +205,7 @@ function onix(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number): [nu
   if (ai.cd <= 0) {
     ai.cd = 3.0;
     for (let i = 0; i < 3; i++) {
-      enemyStrike(sim, t.x + sim.rng.range(-40, 40), t.y + sim.rng.range(-40, 40), 26, 1.0 + i * 0.15, e.def.shot!.power, 'e_rock');
+      enemyStrike(sim, e, t.x + sim.rng.range(-40, 40), t.y + sim.rng.range(-40, 40), 26, 1.0 + i * 0.15, e.def.shot!.power, 'e_rock');
     }
   }
   return [ux, uy];
@@ -258,8 +276,9 @@ function snorlax(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number, d
         e.hidden = false;
         ai.state = 0;
         sim.emit(['boom', r1(e.x), r1(e.y), 56, 'e_slam']);
+        const dmg = e.dmg * 1.3 * enemyDmgMod(sim, e, 'phys'), tf = terrainHitFlags(sim.terrain, e.x, e.y, e.def.types[0]);
         for (const p of sim.players) {
-          if (Math.hypot(p.x - e.x, p.y - e.y) <= 56 + PLAYER_R) hurtPlayer(sim, p, e.dmg * 1.3, 'phys', e);
+          if (Math.hypot(p.x - e.x, p.y - e.y) <= 56 + PLAYER_R) enemyHitPlayer(sim, p, dmg, 'phys', e, tf, true);
         }
         enemyShoot(sim, e, 0, { count: 12, spread: TAU, speed: 120, fx: 'e_ring' });
       }
@@ -336,7 +355,7 @@ function mew(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number, d: nu
         sim.emit(['boom', r1(e.x), r1(e.y), 22, 'e_vanish']);
         break;
       case 3:
-        for (const p of sim.players) if (p.alive && !p.down) enemyStrike(sim, p.x, p.y, 40, 1.0, ENEMIES.mew.shot!.power * 1.4, 'e_psy');
+        for (const p of sim.players) if (p.alive && !p.down) enemyStrike(sim, e, p.x, p.y, 40, 1.0, ENEMIES.mew.shot!.power * 1.4, 'e_psy');
         break;
     }
   }

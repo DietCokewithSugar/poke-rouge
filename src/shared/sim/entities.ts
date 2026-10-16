@@ -173,6 +173,8 @@ export interface Enemy {
   dmg: number;
   speed: number;
   r: number;
+  /** 自身属性的位掩码（局部属性场地的减速、灼伤看这个） */
+  tmask: number;
   st: StatusState;
   ai: { state: number; t: number; cd: number; cd2: number; tx: number; ty: number; ax: number; ay: number; n: number; flag: number };
   dir: number;

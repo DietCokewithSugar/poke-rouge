@@ -138,7 +138,7 @@ export class PvpSim extends GameSim {
       const def: EnemyDef = { id: 'pvp', dex: form.dex, name: p.name, types: form.types, hp: 1, dmg: 0, speed: 0, r: PLAYER_R + 1, ai: 'chase', rank: 'elite', candy: 0, knockResist: 1 };
       const e: Enemy = {
         id: this.newId(), def, kind: 0, x: p.x, y: p.y, vx: 0, vy: 0, hp: p.hp, maxHp: p.d.maxHp, dmg: 0, speed: 0, r: def.r,
-        st: freshStatus(), ai: { state: 0, t: 0, cd: 0, cd2: 0, tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
+        tmask: p.tmask, st: freshStatus(), ai: { state: 0, t: 0, cd: 0, cd2: 0, tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
         dir: 0, hidden: false, lastHit: -1, age: 0, pvp: p,
       };
       this.proxies.set(p.id, e);
