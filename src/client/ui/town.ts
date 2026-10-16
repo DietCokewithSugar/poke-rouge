@@ -9,7 +9,7 @@ import type { ServerStats } from '../../shared/protocol';
 import { fmtMod, type ModKey } from '../../shared/stats';
 import { TRAINERS, TRAINER_LIST, trainerOf } from '../../shared/trainers';
 import { TYPE_NAME, type PType } from '../../shared/types';
-import type { DifficultyId } from '../../shared/difficulty';
+import { DIFFICULTIES, type DifficultyId } from '../../shared/difficulty';
 import { sfx } from '../audio';
 import type { PlaceId, Spot } from '../gfx/town';
 import { artFull, trainerFull, trainerPortrait } from '../gfx/trainers';
@@ -434,6 +434,7 @@ export function routeScreen(root: HTMLElement, p: Profile, a: RouteActions) {
           iconBtn('swap', '换伙伴', () => { sfx('click'); a.partner(); }, { cls: 'small', text: '换伙伴' })),
       ),
       difficultyPicker(p, diff, (d) => { diff = d; render(); }),
+      difficultyRules(diff),
       h('p', { class: 'small muted' }, `一路上会有野生宝可梦乱入，击败它们，也许它们会崇拜你、成为新的伙伴。每只宝可梦有 ${shinyOddsOf(p)} 的几率是闪光的，打倒闪光宝可梦 100% 得到它。`),
       h('div', { class: 'row between route-foot' },
         assistToggle(p, render),
@@ -442,6 +443,13 @@ export function routeScreen(root: HTMLElement, p: Profile, a: RouteActions) {
     ), 'route');
   };
   render();
+}
+
+/** 选中的难度有什么变化（触屏上没有悬停提示，直接写在下面） */
+function difficultyRules(id: DifficultyId) {
+  const D = DIFFICULTIES[id];
+  return h('div', { class: 'route-rules small', style: `--dc:${D.color}` },
+    h('b', null, `${D.name}模式`), h('span', { class: 'gold' }, `（星之沙 ×${D.stardust}）`), D.desc.join(' · '));
 }
 
 /** AI 辅助战斗开关：首次通关后解锁 */

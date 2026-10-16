@@ -1342,6 +1342,8 @@ img.uico { width: var(--iw); height: var(--iw); image-rendering: pixelated; flex
 .route-portrait { width: 6rem; height: 6rem; }
 .route .diff-row { margin: 0; }
 .route .row.end { margin-top: auto; }
+.route-rules { flex: none; padding: 0.3125rem 0.625rem; border-radius: 0.5rem; background: rgba(0, 0, 0, .2); border-left: 0.25rem solid var(--dc); line-height: 1.45; }
+.route-rules b { color: var(--dc); }
 .route-foot { margin-top: auto; flex-wrap: nowrap; gap: 0.75rem; }
 .route-assist { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
 .route-assist .small { line-height: 1.1rem; }

@@ -17,7 +17,8 @@ test('冒险成绩：上报的数据要校验，打完全部波次才算通关',
   assert.deepEqual(cleanRun(run()), run());
   assert.equal(cleanRun(null), null);
   assert.equal(cleanRun('easy'), null);
-  assert.equal(cleanRun(run({ difficulty: 'nightmare' as never })), null);
+  assert.equal(cleanRun(run({ difficulty: 'inferno' as never })), null);
+  assert.equal(cleanRun(run({ difficulty: 'nightmare' }))!.difficulty, 'nightmare');
   assert.equal(cleanRun(run({ waves: TOTAL_WAVES + 1 })), null);
   assert.equal(cleanRun(run({ waves: 2.5 })), null);
   assert.equal(cleanRun(run({ time: -1 })), null);

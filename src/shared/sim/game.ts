@@ -1,5 +1,5 @@
 import { difficultyOf, type Difficulty, type DifficultyId } from '../difficulty';
-import { ENEMIES, ENEMY_INDEX } from '../enemies';
+import { ENEMIES, ENEMY_INDEX, EVOLVES } from '../enemies';
 import {
   BURN_PHYS, FIELDS, FIELD_CELL, FIELD_FORM, FIELD_FROM, FIELD_IDS, FIELD_MAX_FRAC, FIELD_MIN_FRAC, FIELD_SECOND_FROM, FIELD_TOTAL_FRAC, LAVA_BIG, LAVA_DPS, LAVA_LINGER,
   NO_MOVE_MOD, cellAt, encodeCells, fieldBurns, fieldCenter, fieldGrid, fieldSpeed, fieldTarget, growField, moveMod, pickFieldKind,
@@ -141,6 +141,8 @@ export class GameSim {
   private itemRng: Rng;
   /** 局部属性场地的种类、形状和位置也单独用一个随机数 */
   private fieldRng: Rng;
+  /** 地狱、噩梦里小怪要不要进化 */
+  private evoRng: Rng;
   /** 冒险里地图上会出现橙橙果和增幅种子（对战里没有） */
   protected mapItems = true;
   /** 冒险里地图上会出现局部属性场地（对战里没有） */
@@ -210,6 +212,7 @@ export class GameSim {
     this.shinyRng = new Rng(seed ^ 0x5a17c0de);
     this.itemRng = new Rng(seed ^ 0x3c6ef372);
     this.fieldRng = new Rng(seed ^ 0x1b873593);
+    this.evoRng = new Rng(seed ^ 0x27d4eb2f);
     this.diff = difficultyOf(difficulty);
     for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta, i));
     this.startPlayers = inits.length;
@@ -386,14 +389,25 @@ export class GameSim {
     this.projs.push({ ...p, id: this.newId(), hit: new Set() });
   }
 
-  queueSpawn(id: string, x: number, y: number, delay = 1) {
+  queueSpawn(id: string, x: number, y: number, delay = 1, candy?: number) {
     x = Math.max(20, Math.min(this.w - 20, x));
     y = Math.max(26, Math.min(this.h - 20, y));
-    this.pending.push({ t: delay, id, x, y });
+    this.pending.push({ t: delay, id, x, y, candy });
     this.emit(['mark', Math.round(x), Math.round(y)]);
   }
 
-  spawnEnemy(id: string, x: number, y: number): Enemy {
+  /**
+   * 地狱、噩梦：普通小怪以进化形态出现（可能连进两阶）。
+   * 开局几波还没成长起来，进化的几率从低往高爬：第 4 波起进化一阶到满，第 8 波起再进化一阶到满
+   */
+  evolveSpawn(id: string): string {
+    const D = this.diff;
+    if (!D.evolve || !EVOLVES[id] || !this.evoRng.chance(D.evolve * Math.min(1, this.wave / 4))) return id;
+    const once = EVOLVES[id];
+    return EVOLVES[once] && this.evoRng.chance(D.evolve2 * Math.min(1, Math.max(0, this.wave - 2) / 6)) ? EVOLVES[once] : once;
+  }
+
+  spawnEnemy(id: string, x: number, y: number, candy?: number): Enemy {
     const def = ENEMIES[id];
     const n = this.players.length;
     const D = this.diff;
@@ -406,6 +420,7 @@ export class GameSim {
       ai: { state: 0, t: 0, cd: this.rng.range(0.6, 1.8), cd2: this.rng.range(1.5, 3), tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
       dir: Math.PI / 2, hidden: false, lastHit: -1, age: 0,
     };
+    if (candy !== undefined) e.candy = candy;
     if (this.forceShiny > 0 || this.shinyRng.chance(this.shinyRate())) {
       this.forceShiny = Math.max(0, this.forceShiny - 1);
       e.shiny = true;
@@ -454,13 +469,15 @@ export class GameSim {
       if (this.boss === e) this.boss = null;
     }
     if (how === 'seed') return;
-    // 难度增加的敌人不额外给糖果（每波收入不变，只增加危险）；香水带来的敌人照常给
-    const cm = candyMult(this.wave) / this.diff.count;
+    // 难度增加的敌人不额外给糖果（每波收入不变，只增加危险）；香水带来的敌人照常给。
+    // 地狱、噩梦另外提高一波的糖果总量；进化出来的小怪按进化前的糖果算
+    const cm = (candyMult(this.wave) / this.diff.count) * this.diff.candy;
+    const candy = e.candy ?? e.def.candy;
     if (how === 'self' && e.def.ai === 'bomber') {
-      this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)) * cm);
+      this.dropCandy(e.x, e.y, Math.max(1, Math.floor(candy / 2)) * cm);
       return;
     }
-    this.dropCandy(e.x, e.y, e.def.candy * cm * (e.shiny ? 3 : 1));
+    this.dropCandy(e.x, e.y, candy * cm * (e.shiny ? 3 : 1));
     const luck = 1 + Math.max(0, this.players.reduce((a, p) => a + p.d.luck, 0) / Math.max(1, this.players.length)) / 100;
     if (e.def.rank !== 'minion' || this.rng.chance(0.004 * luck)) this.dropPickup('ball', e.x + this.rng.range(-8, 8), e.y + this.rng.range(-8, 8), 1);
     if (e.def.id === 'chansey' || this.rng.chance(0.012 * luck)) this.dropItem('berry', e.x + this.rng.range(-6, 6), e.y + this.rng.range(-6, 6));
@@ -713,7 +730,7 @@ export class GameSim {
     if (!W.boss && !W.elites && this.wave >= 6 && this.rng.chance(D.extraElite)) {
       this.extraElites.push(this.wave < 12 ? 'beedrill' : this.rng.pick(['onix', 'gengar', 'beedrill']));
     }
-    if (W.boss && this.wave === TOTAL_WAVES && D.id === 'hard') this.extraElites.push('gengar', 'gengar');
+    if (W.boss) this.extraElites.push(...D.guards[this.wave === TOTAL_WAVES ? 1 : 0]);
     const n = this.players.length;
     this.players.forEach((p, i) => {
       p.down = false;
@@ -900,7 +917,7 @@ export class GameSim {
       s.t -= dt;
       if (s.t <= 0) {
         this.pending.splice(i, 1);
-        this.spawnEnemy(s.id, s.x, s.y);
+        this.spawnEnemy(s.id, s.x, s.y, s.candy);
       }
     }
     if (W.boss && !this.bossSpawned && this.waveT >= 2) {
@@ -940,13 +957,14 @@ export class GameSim {
     const maxAlive = Math.round((100 + 30 * (n - 1)) * Math.min(1.4, Math.max(1, this.diff.count * (1 + this.enemiesPct() / 200))));
     while (this.spawnAcc >= 1) {
       if (this.enemies.length + this.pending.length >= maxAlive) { this.spawnAcc = 0; break; }
-      const id = this.rng.weighted(W.pool);
+      const base = this.rng.weighted(W.pool);
+      const id = this.evolveSpawn(base);
       const big = ENEMIES[id].hp >= 40 || ENEMIES[id].ai === 'shooter';
       const g = Math.max(1, Math.min(Math.floor(this.spawnAcc), big ? this.rng.int(1, 2) : this.rng.int(1, 2 + Math.floor(this.wave / 4))));
       const { x, y } = this.spawnPoint(100);
       for (let i = 0; i < g; i++) {
         const a = this.rng.range(0, Math.PI * 2), r = i === 0 ? 0 : this.rng.range(10, 22);
-        this.queueSpawn(id, x + Math.cos(a) * r, y + Math.sin(a) * r);
+        this.queueSpawn(id, x + Math.cos(a) * r, y + Math.sin(a) * r, 1, id === base ? undefined : ENEMIES[base].candy);
       }
       this.spawnAcc -= g;
     }

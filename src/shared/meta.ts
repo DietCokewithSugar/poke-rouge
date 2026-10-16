@@ -1,4 +1,4 @@
-import { DIFFICULTIES, type DifficultyId } from './difficulty';
+import { DIFFICULTIES, atLeast, type DifficultyId } from './difficulty';
 import { GYMS, badgeKey, masterKey } from './gyms';
 import { LINES, type LineId } from './pokemon';
 import { addTypeMods, type Mods, type TypeMods } from './stats';
@@ -199,7 +199,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'reach_wave_15', name: '月见山探险家', desc: '完成第 15 波', reward: 150, unlocks: ['omanyte', 'kabuto'], check: (r) => r.wavesCleared >= 15 },
   { id: 'victory', name: '宝可梦大师', desc: '击败梦幻，通关任意难度（解锁普通难度）', reward: 300, unlocks: ['dratini'], trainer: 'giovanni', unlocksDifficulty: 'normal', check: (r) => r.victory },
   { id: 'victory_normal', name: '道馆馆主', desc: '通关普通模式（解锁困难难度）', reward: 400, trainer: 'lance', unlocksDifficulty: 'hard', check: (r) => r.victory && r.difficulty !== 'easy' },
-  { id: 'victory_hard', name: '冠军之路', desc: '通关困难模式', reward: 600, unlocks: ['mewtwo'], check: (r) => r.victory && r.difficulty === 'hard' },
+  { id: 'victory_hard', name: '冠军之路', desc: '通关困难模式（解锁地狱难度）', reward: 600, unlocks: ['mewtwo'], unlocksDifficulty: 'hell', check: (r) => r.victory && atLeast(r.difficulty, 'hard') },
+  { id: 'victory_hell', name: '烈火中重生', desc: '通关地狱模式（解锁噩梦难度）', reward: 900, unlocksDifficulty: 'nightmare', check: (r) => r.victory && atLeast(r.difficulty, 'hell') },
+  { id: 'victory_nightmare', name: '从噩梦中醒来', desc: '通关噩梦模式', reward: 1500, check: (r) => r.victory && r.difficulty === 'nightmare' },
   { id: 'no_evolve_win', name: '坚持自我', desc: '用会进化的宝可梦不进化通关', reward: 150, check: (r) => r.victory && r.neverEvolved },
   { id: 'full_slots', name: '技能大师', desc: '技能栏全部填满', reward: 30, check: (r) => r.skillsFull },
   { id: 'foreign', name: '博采众长', desc: '学会一个不在自身技能表中的技能', reward: 30, check: (r) => r.foreignSkill },

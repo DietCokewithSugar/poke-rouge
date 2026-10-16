@@ -103,6 +103,14 @@ const LIST: EnemyDef[] = [
     shot: { power: 8, speed: 130, cd: 2.2, range: 170, fx: 'e_psy' } }),
   E({ id: 'butterfree', dex: 12, name: '巴大蝶', types: ['bug', 'flying'], hp: 38, dmg: 5, speed: 44, r: 9, ai: 'shooter', rank: 'minion', candy: 2, flying: true,
     shot: { power: 5, speed: 90, cd: 3.2, range: 150, count: 6, spread: Math.PI * 2, fx: 'e_spore', slow: 0.35 } }),
+  // 最终形态：只在噩梦难度里由小怪进化而来
+  E({ id: 'pidgeot', dex: 18, name: '大比鸟', types: ['normal', 'flying'], hp: 58, dmg: 11, speed: 58, r: 10, ai: 'charge', rank: 'minion', candy: 3, flying: true }),
+  E({ id: 'vileplume', dex: 45, name: '霸王花', types: ['grass', 'poison'], hp: 64, dmg: 7, speed: 26, r: 9, ai: 'shooter', rank: 'minion', candy: 3,
+    shot: { power: 7, speed: 90, cd: 2.6, range: 160, count: 5, spread: 0.9, fx: 'e_spore', slow: 0.35 } }),
+  E({ id: 'golem', dex: 76, name: '隆隆岩', types: ['rock', 'ground'], hp: 180, dmg: 18, speed: 24, r: 12, ai: 'tank', rank: 'minion', candy: 4, knockResist: 0.9 }),
+  E({ id: 'machamp', dex: 68, name: '怪力', types: ['fighting'], hp: 130, dmg: 17, speed: 44, r: 10, ai: 'chase', rank: 'minion', candy: 4, knockResist: 0.6 }),
+  E({ id: 'alakazam', dex: 65, name: '胡地', types: ['psychic'], hp: 70, dmg: 8, speed: 42, r: 9, ai: 'shooter', rank: 'minion', candy: 4,
+    shot: { power: 9, speed: 140, cd: 2.0, range: 180, count: 3, spread: 0.35, fx: 'e_psy' } }),
 
   // 宝藏怪：会逃跑，击败后掉落大量金钱 / 道具球
   E({ id: 'meowth', dex: 52, name: '喵喵', types: ['normal'], hp: 40, dmg: 0, speed: 70, r: 8, ai: 'flee', rank: 'minion', candy: 14 }),
@@ -155,3 +163,11 @@ for (let dex = 1; dex <= 151; dex++) LIST.push(wildOf(DEX[dex]));
 export const ENEMIES: Record<string, EnemyDef> = Object.fromEntries(LIST.map((e) => [e.id, e]));
 export const ENEMY_IDS = LIST.map((e) => e.id);
 export const ENEMY_INDEX: Record<string, number> = Object.fromEntries(ENEMY_IDS.map((id, i) => [id, i]));
+
+/** 地狱、噩梦难度里普通小怪的进化（只在小怪之间进化，不会变成精英） */
+export const EVOLVES: Record<string, string> = {
+  caterpie: 'metapod', metapod: 'butterfree', weedle: 'kakuna', rattata: 'raticate', pidgey: 'pidgeotto', pidgeotto: 'pidgeot',
+  spearow: 'fearow', zubat: 'golbat', oddish: 'gloom', gloom: 'vileplume', paras: 'parasect', ekans: 'arbok',
+  geodude: 'graveler', graveler: 'golem', magnemite: 'magneton', gastly: 'haunter', voltorb: 'electrode', koffing: 'weezing',
+  mankey: 'primeape', machop: 'machoke', machoke: 'machamp', kadabra: 'alakazam',
+};
