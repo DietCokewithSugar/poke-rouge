@@ -1,3 +1,4 @@
+import { BOOSTS, BOOST_DUR, type BoostId } from '../../shared/pickups';
 import { LINES } from '../../shared/pokemon';
 import { BIOMES } from '../../shared/waves';
 import { DIFFICULTIES } from '../../shared/difficulty';
@@ -5,6 +6,7 @@ import type { MeState, PublicState } from '../../shared/sim/game';
 import type { PvpSeatInfo } from '../../shared/protocol';
 import { PVP_MODES, RING_START, type PvpMode } from '../../shared/pvp/sim';
 import { shinyName } from '../../shared/shiny';
+import { BOOST_KIND, itemIconUrl } from '../gfx/pickups';
 import { Animator } from '../gfx/sprites';
 import { trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
@@ -45,6 +47,10 @@ export class Hud {
   private pvpBox = h('div', { class: 'hud-pvp box tight compact hidden' });
   /** 技能冷却：服务器每秒只同步几次，两次之间在本地按时间倒数，进度条才不会跳 */
   private cds: { cd: number; max: number; at: number }[] = [];
+  /** 增幅种子的倒计时（左上角，在训练家信息下面） */
+  private boostBox = h('div', { class: 'hud-boosts hidden' });
+  private boostKey = '';
+  private boosts: { left: number; at: number; t: HTMLElement; bar: HTMLElement }[] = [];
   private raf = 0;
   private pvpSeats: PvpSeatInfo[] = [];
   private myTeam = 0;
@@ -67,6 +73,7 @@ export class Hud {
           this.me.money,
         ),
       ),
+      this.boostBox,
       h('div', { class: 'hud-center' },
         h('div', { class: 'box tight hud-wavebox' }, this.wave, this.timer, this.hordeEl),
         this.pvpBox,
@@ -106,7 +113,38 @@ export class Hud {
       const p = `${Math.round(Math.min(1, left / c.max) * 100)}%`;
       if (cd.style.getPropertyValue('--p') !== p) cd.style.setProperty('--p', p);
     });
+    for (const b of this.boosts) {
+      // 服务器每 0.2 秒更新一次；两次之间最多往前推 0.3 秒（暂停时停在原地，不会自己倒数完）
+      const left = Math.max(0, b.left - Math.min(0.3, (now - b.at) / 1000));
+      set(b.t, `${Math.ceil(left)}秒`);
+      const w = `${Math.round((left / BOOST_DUR) * 100)}%`;
+      if (b.bar.style.width !== w) b.bar.style.width = w;
+    }
   };
+
+  /** 正在生效的增幅：小图标 + 名字 + 剩余秒数 + 进度条 */
+  private setBoosts(list: [BoostId, number][]) {
+    const key = list.map(([id]) => id).join(',');
+    if (key !== this.boostKey) {
+      this.boostKey = key;
+      clear(this.boostBox);
+      this.boosts = list.map(([id]) => {
+        const B = BOOSTS[id];
+        const t = h('span', { class: 'hb-t' });
+        const bar = h('i');
+        this.boostBox.appendChild(h('div', { class: 'hud-boost', style: `--c: ${B.color}`, title: `${B.name}：${B.desc}` },
+          h('img', { class: 'hb-ico', src: itemIconUrl(BOOST_KIND[id], 3), alt: '' }),
+          h('span', { class: 'hb-name' }, B.label),
+          t,
+          h('div', { class: 'hb-bar' }, bar),
+        ));
+        return { left: 0, at: 0, t, bar };
+      });
+      this.boostBox.classList.toggle('hidden', !list.length);
+    }
+    const now = performance.now();
+    list.forEach(([, left], i) => { const b = this.boosts[i]; if (b) { b.left = left; b.at = now; } });
+  }
 
   /** 左上角：训练家 + 宝可梦 */
   setTrainer(trainer: string, name: string) {
@@ -205,6 +243,7 @@ export class Hud {
       set(this.me.hpText, `${Math.max(0, hp)} / ${max}`);
       this.me.xpFill.style.width = `${Math.min(100, (me.xp / me.xpNext) * 100)}%`;
       set(this.me.money, `₽ ${me.money}`);
+      this.setBoosts(me.down ? [] : me.boosts ?? []);
       const key = me.skills.map((s) => `${s.id}:${s.lv}`).join(',') + `|${me.slots}`;
       if (key !== this.skillKey) {
         this.skillKey = key;
