@@ -14,7 +14,7 @@ import { SHINY_STAT, shinyName, shinyRate } from '../shiny';
 import { SKILLS, skillLevelCd } from '../skills';
 import {
   BURN_LINGER, BURN_PCT, CHILL_AMT, TERRAIN_FROM_WAVE, TERRAIN_IDS, TERRAIN_SPAWN_CLEAR,
-  burnStep, genTerrain, pickTerrain, terrainBurns, terrainEvent, terrainHitFlags, terrainMove, typeMask, type Terrain, type TerrainId,
+  burnDmg, genTerrain, pickTerrain, terrainBurns, terrainEvent, terrainHitFlags, terrainMove, typeMask, type Terrain, type TerrainId,
 } from '../terrain';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import { TYPES, type PType } from '../types';
@@ -861,23 +861,24 @@ export class GameSim {
     } else if (s.tburn > 0) s.tburn -= dt;
     if (s.tburn <= 0) return 0;
     s.tburnAcc += dt;
-    const step = burnStep(maxHp, pct);
-    if (s.tburnAcc < step.every) return 0;
-    s.tburnAcc -= step.every;
-    return Math.max(0, Math.min(step.dmg, Math.ceil(hp) - 1));
+    const dmg = burnDmg(maxHp, pct), every = dmg / Math.max(1e-6, maxHp * pct);
+    if (s.tburnAcc < every) return 0;
+    s.tburnAcc -= every;
+    return Math.max(0, Math.min(dmg, Math.ceil(hp) - 1));
   }
 
   private playerBurn(p: SimPlayer, dt: number) {
-    if (!this.terrain && p.tburn <= 0) return;
-    const dmg = this.terrainBurnTick(p, terrainBurns(this.terrain, p.x, p.y, p.tmask), p.d.maxHp, p.hp, BURN_PCT.player, dt);
+    const burning = terrainBurns(this.terrain, p.x, p.y, p.tmask);
+    if (!burning && p.tburn <= 0) return;
+    const dmg = this.terrainBurnTick(p, burning, p.d.maxHp, p.hp, BURN_PCT.player, dt);
     if (dmg <= 0) return;
     p.hp -= dmg;
     p.stats.taken += dmg;
     this.emit(['ph', p.id, dmg, 4]);
   }
 
-  private enemyBurn(e: Enemy, dt: number) {
-    const burning = terrainBurns(this.terrain, e.x, e.y, e.tmask);
+  private enemyBurn(e: Enemy, dt: number, lava: Terrain | null) {
+    const burning = !!lava && terrainBurns(lava, e.x, e.y, e.tmask);
     if (!burning && e.st.tburn <= 0) return;
     const dmg = this.terrainBurnTick(e.st, burning, e.maxHp, e.hp, BURN_PCT[e.def.rank], dt);
     if (dmg <= 0) return;
@@ -888,10 +889,11 @@ export class GameSim {
   private updateEnemies(dt: number) {
     const grid = new Map<number, Enemy[]>();
     const CELL = 24;
+    const lava = this.terrain?.kind === 'lava' ? this.terrain : null;
     for (const e of this.enemies) {
       if (e.dead) continue;
       if (!updateEnemy(this, e, dt)) { e.dead = true; e.hp = 0; continue; }
-      if (this.terrain) this.enemyBurn(e, dt);
+      if (lava || e.st.tburn > 0) this.enemyBurn(e, dt, lava);
       // 持续伤害
       const st = e.st;
       if (st.burn > 0 || st.poison > 0 || st.leech > 0) {

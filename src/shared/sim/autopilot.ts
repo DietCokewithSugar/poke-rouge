@@ -98,8 +98,8 @@ export function autopilotDir(sim: GameSim, p: SimPlayer): { x: number; y: number
   // 局部属性场地
   const T = sim.terrain;
   let tv = 0, inside = false;
-  if (T) {
-    tv = valueOf(T, p);
+  if (T) tv = valueOf(T, p);
+  if (T && (tv < -0.2 || tv > 0.2)) {
     inside = inTerrain(T, p.x, p.y);
     const dx = T.cx - p.x, dy = T.cy - p.y, d = Math.hypot(dx, dy) || 1;
     if (tv < -0.2 && inside) { fx -= (dx / d) * 1.6; fy -= (dy / d) * 1.6; }

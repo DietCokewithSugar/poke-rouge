@@ -24,11 +24,9 @@ export const BURN_LINGER = 1.5;
 export const BURN_TICK = 0.5;
 /** 灼伤每秒掉的最大 HP 比例：宝可梦和普通敌人 2%，精英 1%，首领 0.5% */
 export const BURN_PCT = { player: 0.02, minion: 0.02, elite: 0.01, boss: 0.005 };
-/** 灼伤每一跳的间隔（秒）与伤害：平均每秒掉 pct 最大 HP，每跳至少 1 点（HP 少的单位跳得慢一些） */
-export function burnStep(maxHp: number, pct: number): { every: number; dmg: number } {
-  const rate = Math.max(1e-6, maxHp * pct);
-  const dmg = Math.max(1, Math.round(rate * BURN_TICK));
-  return { every: dmg / rate, dmg };
+/** 灼伤每一跳的伤害：平均每秒掉 pct 最大 HP，每跳至少 1 点（HP 少的单位跳得慢一些，间隔 = 每跳伤害 ÷ 每秒伤害） */
+export function burnDmg(maxHp: number, pct: number): number {
+  return Math.max(1, Math.round(maxHp * pct * BURN_TICK));
 }
 /** 灼伤时物理招式（敌人的接触、物理攻击）伤害倍率 */
 export const BURN_PHYS = 0.5;
@@ -286,30 +284,71 @@ export function pickTerrain(rng: Rng, biome: number, prev: TerrainId | null): Te
   return rng.weighted(w);
 }
 
-const NB4 = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+/**
+ * 4 邻接的洪水填充：从 starts 出发，把 pass(j) 为真的格子都标进 mark（mark 里已标的不再走），返回走到的格子数。
+ * 生成时每波要做好几次，用定长的栈、直接算邻格下标，免得拖慢模拟。
+ */
+function flood(n: number, gw: number, mark: Uint8Array, stack: Int32Array, top: number, pass: (j: number) => boolean): number {
+  let seen = top;
+  while (top > 0) {
+    const c = stack[--top];
+    const x = c % gw;
+    if (x > 0 && !mark[c - 1] && pass(c - 1)) { mark[c - 1] = 1; stack[top++] = c - 1; seen++; }
+    if (x < gw - 1 && !mark[c + 1] && pass(c + 1)) { mark[c + 1] = 1; stack[top++] = c + 1; seen++; }
+    if (c >= gw && !mark[c - gw] && pass(c - gw)) { mark[c - gw] = 1; stack[top++] = c - gw; seen++; }
+    if (c + gw < n && !mark[c + gw] && pass(c + gw)) { mark[c + gw] = 1; stack[top++] = c + gw; seen++; }
+  }
+  return seen;
+}
+
+function countCells(cells: Uint8Array): number {
+  let k = 0;
+  for (let i = 0; i < cells.length; i++) k += cells[i];
+  return k;
+}
+
+/** 生成时用的临时数组：全部复用同一批（每个用到的地方自己清零），不给模拟添垃圾 */
+const scratch = { n: 0, allowed: new Uint8Array(0), front: new Uint8Array(0), mark: new Uint8Array(0), stack: new Int32Array(0), weight: new Float32Array(0), dist: new Int16Array(0) };
+function buf(n: number) {
+  if (scratch.n !== n) {
+    scratch.n = n;
+    scratch.allowed = new Uint8Array(n);
+    scratch.front = new Uint8Array(n);
+    scratch.mark = new Uint8Array(n);
+    scratch.stack = new Int32Array(n);
+    scratch.weight = new Float32Array(n);
+    scratch.dist = new Int16Array(n);
+  }
+  return scratch;
+}
 
 /** 4 邻接的连通块数（测试与生成时的检查） */
-export function terrainPieces(cells: Uint8Array, gw: number, gh: number): number {
-  const seen = new Uint8Array(cells.length);
+export function terrainPieces(cells: Uint8Array, gw: number, _gh?: number): number {
+  const n = cells.length;
+  const { mark: seen, stack } = buf(n);
+  seen.fill(0);
+  const pass = (j: number) => cells[j] === 1;
   let pieces = 0;
-  const stack: number[] = [];
-  for (let i = 0; i < cells.length; i++) {
+  for (let i = 0; i < n; i++) {
     if (!cells[i] || seen[i]) continue;
     pieces++;
     seen[i] = 1;
-    stack.push(i);
-    while (stack.length) {
-      const c = stack.pop()!;
-      const x = c % gw, y = (c / gw) | 0;
-      for (const [dx, dy] of NB4) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
-        const j = ny * gw + nx;
-        if (cells[j] && !seen[j]) { seen[j] = 1; stack.push(j); }
-      }
-    }
+    stack[0] = i;
+    flood(n, gw, seen, stack, 1, pass);
   }
   return pieces;
+}
+
+/** 是否连成一整块（共 count 格）：从任意一格出发能走遍所有格子 */
+function connected(cells: Uint8Array, gw: number, count: number, seen: Uint8Array, stack: Int32Array): boolean {
+  const n = cells.length;
+  let start = -1;
+  for (let i = 0; i < n && start < 0; i++) if (cells[i]) start = i;
+  if (start < 0) return count === 0;
+  seen.fill(0);
+  seen[start] = 1;
+  stack[0] = start;
+  return flood(n, gw, seen, stack, 1, (j) => cells[j] === 1) === count;
 }
 
 /**
@@ -319,7 +358,7 @@ export function terrainPieces(cells: Uint8Array, gw: number, gh: number): number
 export function genTerrain(rng: Rng, kind: TerrainId, o: TerrainGenOpts): Terrain {
   const gw = Math.ceil(o.w / TERRAIN_CELL), gh = Math.ceil(o.h / TERRAIN_CELL), n = gw * gh;
   const max = Math.floor(n / 3), min = Math.min(TERRAIN_MIN_CELLS, max);
-  const allowed = new Uint8Array(n);
+  const allowed = buf(n).allowed;
   const clear2 = (o.clearR + TERRAIN_CELL * 0.75) ** 2;
   for (let i = 0; i < n; i++) {
     const x = ((i % gw) + 0.5) * TERRAIN_CELL, y = (((i / gw) | 0) + 0.5) * TERRAIN_CELL;
@@ -329,7 +368,7 @@ export function genTerrain(rng: Rng, kind: TerrainId, o: TerrainGenOpts): Terrai
     const cells = grow(rng, kind, gw, gh, allowed, o, min, max);
     if (!cells) continue;
     smooth(cells, gw, gh, allowed);
-    let count = cells.reduce((a, c) => a + c, 0);
+    let count = countCells(cells);
     if (count > max) count = trim(cells, gw, gh, count - max);
     if (count < min || count > max || terrainPieces(cells, gw, gh) !== 1) continue;
     return finish(kind, cells, gw, gh, count);
@@ -338,7 +377,7 @@ export function genTerrain(rng: Rng, kind: TerrainId, o: TerrainGenOpts): Terrai
   const cells = new Uint8Array(n);
   const cx = o.clearX < o.w / 2 ? gw - 7 : 6, cy = o.clearY < o.h / 2 ? gh - 6 : 5;
   for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) if ((x - cx) ** 2 + (y - cy) ** 2 <= 30 && allowed[y * gw + x]) cells[y * gw + x] = 1;
-  return finish(kind, cells, gw, gh, cells.reduce((a, c) => a + c, 0));
+  return finish(kind, cells, gw, gh, countCells(cells));
 }
 
 function grow(rng: Rng, kind: TerrainId, gw: number, gh: number, allowed: Uint8Array, o: TerrainGenOpts, min: number, max: number): Uint8Array | null {
@@ -367,7 +406,8 @@ function grow(rng: Rng, kind: TerrainId, gw: number, gh: number, allowed: Uint8A
   }
   const sigma = R * (segs ? rng.range(0.5, 0.75) : rng.range(0.7, 1));
   // 每个格子的生长权重：离折线越近越大，再乘上一点随机（只给碰到的格子算）
-  const weight = new Float32Array(n);
+  const { weight, front: inFront } = buf(n);
+  inFront.fill(0);
   const weigh = (i: number) => {
     const x = i % gw, y = (i / gw) | 0;
     let d2 = Infinity;
@@ -382,18 +422,18 @@ function grow(rng: Rng, kind: TerrainId, gw: number, gh: number, allowed: Uint8A
     return (weight[i] = rng.range(0.4, 1.6) * (Math.exp(-d2 / (sigma * sigma)) + 0.004));
   };
   const cells = new Uint8Array(n);
-  const inFront = new Uint8Array(n);
   const front: number[] = [];
   let total = 0;
+  const touch = (j: number) => {
+    if (!cells[j] && !inFront[j] && allowed[j]) { inFront[j] = 1; front.push(j); total += weigh(j); }
+  };
   const add = (i: number) => {
     cells[i] = 1;
-    const x = i % gw, y = (i / gw) | 0;
-    for (const [dx, dy] of NB4) {
-      const nx = x + dx, ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
-      const j = ny * gw + nx;
-      if (!cells[j] && !inFront[j] && allowed[j]) { inFront[j] = 1; front.push(j); total += weigh(j); }
-    }
+    const x = i % gw;
+    if (x < gw - 1) touch(i + 1);
+    if (x > 0) touch(i - 1);
+    if (i + gw < n) touch(i + gw);
+    if (i >= gw) touch(i - gw);
   };
   add(seed);
   let count = 1;
@@ -435,28 +475,21 @@ function smooth(cells: Uint8Array, gw: number, gh: number, allowed: Uint8Array) 
     for (const i of cut) if (neighbors(cells, gw, gh, i) <= 1) cells[i] = 0;
   }
   // 从地图边缘出发能走到的空地是外面，走不到的就是空洞
-  const outside = new Uint8Array(n);
-  const stack: number[] = [];
+  const { mark: outside, stack } = buf(n);
+  outside.fill(0);
+  let top = 0;
   for (let i = 0; i < n; i++) {
     const x = i % gw, y = (i / gw) | 0;
-    if ((x === 0 || y === 0 || x === gw - 1 || y === gh - 1) && !cells[i]) { outside[i] = 1; stack.push(i); }
+    if ((x === 0 || y === 0 || x === gw - 1 || y === gh - 1) && !cells[i]) { outside[i] = 1; stack[top++] = i; }
   }
-  while (stack.length) {
-    const c = stack.pop()!;
-    const x = c % gw, y = (c / gw) | 0;
-    for (const [dx, dy] of NB4) {
-      const nx = x + dx, ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
-      const j = ny * gw + nx;
-      if (!cells[j] && !outside[j]) { outside[j] = 1; stack.push(j); }
-    }
-  }
+  flood(n, gw, outside, stack, top, (j) => !cells[j]);
   for (let i = 0; i < n; i++) if (!cells[i] && !outside[i] && allowed[i]) cells[i] = 1;
 }
 
 /** 面积超过上限时，从离中心最远的边缘开始去掉格子（去掉后仍然连通才去） */
 function trim(cells: Uint8Array, gw: number, gh: number, over: number): number {
-  let count = cells.reduce((a, c) => a + c, 0);
+  let count = countCells(cells);
+  const { mark: seen, stack } = buf(cells.length);
   let sx = 0, sy = 0;
   for (let i = 0; i < cells.length; i++) if (cells[i]) { sx += i % gw; sy += (i / gw) | 0; }
   sx /= count; sy /= count;
@@ -469,7 +502,7 @@ function trim(cells: Uint8Array, gw: number, gh: number, over: number): number {
     for (const [i] of edge) {
       if (over <= 0) break;
       cells[i] = 0;
-      if (terrainPieces(cells, gw, gh) === 1) { over--; count--; } else cells[i] = 1;
+      if (connected(cells, gw, count - 1, seen, stack)) { over--; count--; } else cells[i] = 1;
     }
   }
   return count;
@@ -478,23 +511,20 @@ function trim(cells: Uint8Array, gw: number, gh: number, over: number): number {
 /** 算出最靠里的格子（离场地外面最远，一样远时取离重心近的）作为晶石的位置，能量圈放得进场地 */
 function finish(kind: TerrainId, cells: Uint8Array, gw: number, gh: number, count: number): Terrain {
   const n = gw * gh;
-  const dist = new Int16Array(n).fill(-1);
-  const queue: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const x = i % gw, y = (i / gw) | 0;
-    if (!cells[i]) { dist[i] = 0; queue.push(i); }
-    else if (x === 0 || y === 0 || x === gw - 1 || y === gh - 1) { dist[i] = 1; queue.push(i); }
+  // 到最近的场地外格子（地图外也算）的棋盘距离：正反各扫一遍
+  const dist = buf(n).dist;
+  for (let y = 0; y < gh; y++) {
+    for (let x = 0; x < gw; x++) {
+      const i = y * gw + x;
+      if (!cells[i]) { dist[i] = 0; continue; }
+      if (x === 0 || y === 0 || x === gw - 1 || y === gh - 1) { dist[i] = 1; continue; }
+      dist[i] = Math.min(dist[i - 1], dist[i - gw - 1], dist[i - gw], dist[i - gw + 1]) + 1;
+    }
   }
-  for (let q = 0; q < queue.length; q++) {
-    const c = queue[q];
-    const x = c % gw, y = (c / gw) | 0;
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
-        const j = ny * gw + nx;
-        if (dist[j] < 0) { dist[j] = dist[c] + 1; queue.push(j); }
-      }
+  for (let y = gh - 2; y > 0; y--) {
+    for (let x = gw - 2; x > 0; x--) {
+      const i = y * gw + x;
+      if (dist[i] > 1) dist[i] = Math.min(dist[i], Math.min(dist[i + 1], dist[i + gw + 1], dist[i + gw], dist[i + gw - 1]) + 1);
     }
   }
   let mx = 0, my = 0;

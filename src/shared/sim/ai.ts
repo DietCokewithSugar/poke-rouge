@@ -11,7 +11,8 @@ const TAU = Math.PI * 2;
 export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
   const st = e.st;
   e.age += dt;
-  for (const k of ['para', 'slow', 'freeze', 'stun', 'chill'] as const) if (st[k] > 0) st[k] -= dt;
+  for (const k of ['para', 'slow', 'freeze', 'stun'] as const) if (st[k] > 0) st[k] -= dt;
+  if (st.chill > 0) st.chill -= dt;
 
   const target = sim.nearestPlayer(e.x, e.y);
   const stopped = st.freeze > 0 || st.stun > 0;
