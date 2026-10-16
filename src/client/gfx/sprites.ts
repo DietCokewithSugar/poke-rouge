@@ -2,7 +2,7 @@ import { SPRITE_META, type AnimMeta } from './spriteMeta';
 
 export type AnimName = 'Idle' | 'Walk' | 'Attack' | 'Shoot' | 'Hurt' | 'Faint';
 
-interface Sheet { img: HTMLImageElement; ready: boolean; white?: HTMLCanvasElement }
+interface Sheet { img: HTMLImageElement; ready: boolean; tints?: Map<string, HTMLCanvasElement> }
 const sheets = new Map<string, Sheet>();
 
 /** 这只宝可梦有没有闪光（异色）精灵图 */
@@ -30,17 +30,19 @@ function sheet(dex: number, anim: string, shiny = false): Sheet {
   return s;
 }
 
-function whiteOf(s: Sheet): HTMLCanvasElement {
-  if (s.white) return s.white;
+/** 精灵表的纯色剪影（受击闪白、灼伤闪红） */
+function tintOf(s: Sheet, color: string): HTMLCanvasElement {
+  const hit = s.tints?.get(color);
+  if (hit) return hit;
   const c = document.createElement('canvas');
   c.width = s.img.width;
   c.height = s.img.height;
   const x = c.getContext('2d')!;
   x.drawImage(s.img, 0, 0);
   x.globalCompositeOperation = 'source-in';
-  x.fillStyle = '#ffffff';
+  x.fillStyle = color;
   x.fillRect(0, 0, c.width, c.height);
-  s.white = c;
+  (s.tints ??= new Map()).set(color, c);
   return c;
 }
 
@@ -185,7 +187,7 @@ export class Animator {
   }
 
   /** 以脚底 (x, y) 为锚点绘制，scale 为整数倍。 */
-  draw(ctx: CanvasRenderingContext2D, x: number, y: number, scale = 1, flash = 0, alpha = 1) {
+  draw(ctx: CanvasRenderingContext2D, x: number, y: number, scale = 1, flash = 0, alpha = 1, tint = '#ffffff') {
     const p = this.pick();
     if (!p) {
       ctx.fillStyle = '#6b7a94';
@@ -201,7 +203,7 @@ export class Animator {
     ctx.drawImage(s.img, sx, sy, meta.w, meta.h, dx, dy, meta.w * scale, meta.h * scale);
     if (flash > 0) {
       ctx.globalAlpha = prev * alpha * Math.min(1, flash);
-      ctx.drawImage(whiteOf(s), sx, sy, meta.w, meta.h, dx, dy, meta.w * scale, meta.h * scale);
+      ctx.drawImage(tintOf(s, tint), sx, sy, meta.w, meta.h, dx, dy, meta.w * scale, meta.h * scale);
     }
     ctx.globalAlpha = prev;
   }

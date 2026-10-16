@@ -1240,6 +1240,7 @@ class App {
     } else {
       this.lastBiome = -1;
       this.hud = new Hud(this.ui, () => this.pauseOrMenu(), this.solo ? 'pause' : 'menu');
+      this.hud.terrainInfo = () => this.view?.terrainInfo() ?? null;
       this.inter = new Intermission(this.ui, (c) => this.send(c), { kind: this.solo ? 'pause' : 'menu', open: () => this.pauseOrMenu() });
       if (autoAssistUnlocked(this.profile)) {
         this.hud.enableAuto(() => this.toggleAuto(), 'AI 替你走位、躲开攻击、捡糖果和救队友；技能照常自动释放，商店和升级仍由你来选。');

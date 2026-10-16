@@ -6,6 +6,11 @@ import type { MeState, PublicState } from '../../shared/sim/game';
 import type { PvpSeatInfo } from '../../shared/protocol';
 import { PVP_MODES, RING_START, type PvpMode } from '../../shared/pvp/sim';
 import { shinyName } from '../../shared/shiny';
+import { SKILLS } from '../../shared/skills';
+import { formOf } from '../../shared/pokemon';
+import { TYPE_NAME, type PType } from '../../shared/types';
+import { TERRAINS, terrainHurtsUnit, terrainMoveSide, terrainRules, typeMask, type TerrainId } from '../../shared/terrain';
+import type { TerrainInfo } from '../game/view';
 import { BOOST_KIND, itemIconUrl } from '../gfx/pickups';
 import { Animator } from '../gfx/sprites';
 import { trainerPortrait } from '../gfx/trainers';
@@ -56,6 +61,12 @@ export class Hud {
   private myTeam = 0;
   private lastCount = -1;
   private autoBtn: HTMLButtonElement | null = null;
+  /** 局部属性场地：技能栏上方的小牌子，每帧问一次自己和场地的关系 */
+  terrainInfo: () => TerrainInfo | null = () => null;
+  private terrainEl = h('div', { class: 'hud-terrain hidden' });
+  private terrainKey = '';
+  private lastMe: MeState | null = null;
+  private lastPhase = '';
 
   /** onMenu：单人是暂停（pause），联机和对战是菜单（menu：设置、离开） */
   constructor(parent: HTMLElement, onMenu: (() => void) | null, kind: 'pause' | 'menu' = 'pause') {
@@ -82,12 +93,17 @@ export class Hud {
       this.team,
       this.pauseBtn,
       this.skills,
+      this.terrainEl,
       this.banner,
       this.sub,
       this.downBox,
       this.net,
     );
     this.bossBox.append(this.bossName, h('div', { class: 'bar boss' }, this.bossFill));
+    tip(this.terrainEl, () => {
+      const info = this.terrainInfo(), me = this.lastMe;
+      return info && me ? terrainTip(info.kind, me) : '';
+    });
     parent.appendChild(this.root);
     this.raf = requestAnimationFrame(this.tick);
   }
@@ -120,7 +136,23 @@ export class Hud {
       const w = `${Math.round((left / BOOST_DUR) * 100)}%`;
       if (b.bar.style.width !== w) b.bar.style.width = w;
     }
+    this.updateTerrain();
   };
+
+  private updateTerrain() {
+    const me = this.lastMe;
+    const info = me && !me.down && this.lastPhase === 'wave' ? this.terrainInfo() : null;
+    const line = info && me ? terrainLine(info, me) : null;
+    const key = line ? `${info!.kind}|${line.cls}|${line.parts.map((p) => p.join(':')).join('|')}` : '';
+    if (key === this.terrainKey) return;
+    this.terrainKey = key;
+    this.terrainEl.classList.toggle('hidden', !line);
+    if (!line || !info) return;
+    clear(this.terrainEl);
+    this.terrainEl.className = `hud-terrain ${line.cls}`;
+    this.terrainEl.style.setProperty('--c', TERRAINS[info.kind].color);
+    this.terrainEl.append(h('i', { class: 'ht-dot' }), ...line.parts.map(([cls, text]) => h('span', { class: cls }, text)));
+  }
 
   /** 正在生效的增幅：小图标 + 名字 + 剩余秒数 + 进度条 */
   private setBoosts(list: [BoostId, number][]) {
@@ -229,6 +261,8 @@ export class Hud {
   show(on: boolean) { this.root.classList.toggle('hidden', !on); }
 
   update(me: MeState | null, pub: PublicState | null, you: number, hpOverride?: { hp: number; maxHp: number }) {
+    this.lastMe = me;
+    this.lastPhase = pub?.phase ?? '';
     if (me) {
       if (me.dex !== this.lastDex) {
         this.lastDex = me.dex;
@@ -330,4 +364,68 @@ export class Hud {
 
 function set(el: HTMLElement, text: string) {
   if (el.textContent !== text) el.textContent = text;
+}
+
+// ---------------------------------------------------------------- 局部属性场地的提示
+
+const GOOD_SHORT: Record<TerrainId, string> = {
+  lava: '招式 +25%', miasma: '招式范围 ×2', rain: '招式冷却 −20%', thicket: '招式命中回血',
+  crystal: '招式 +25%', updraft: '招式范围 +50%', clearing: '招式暴击 +15%', frost: '招式命中减速',
+};
+const BAD_SHORT: Partial<Record<TerrainId, string>> = {
+  miasma: '招式冷却 ×2', crystal: '招式 −20%', updraft: '招式冷却 +35%', clearing: '招式 −20%', frost: '招式冷却 +35%',
+};
+
+/** 这块场地对自己的影响：获益 / 受损的招式属性，会不会灼伤、减速 */
+function sideOf(kind: TerrainId, me: MeState) {
+  const types = [...new Set(me.skills.map((s) => SKILLS[s.id]?.type).filter((t): t is PType => !!t))];
+  const hurt = terrainHurtsUnit(kind, typeMask(formOf(me.line, me.stage).types));
+  return { good: types.filter((t) => terrainMoveSide(kind, t) > 0), bad: types.filter((t) => terrainMoveSide(kind, t) < 0), burn: hurt.burn, slow: hurt.slow };
+}
+
+const typeNames = (ts: PType[]) => ts.map((t) => TYPE_NAME[t]).join('/');
+
+function verdict(s: ReturnType<typeof sideOf>) {
+  const good = s.good.length > 0, bad = s.bad.length > 0 || s.burn || s.slow > 0;
+  return good && bad ? '对你有利有弊' : good ? '对你有利' : bad ? '对你不利' : '对你没有影响';
+}
+
+/** 牌子上的几段文字：[样式, 文字]。场地刚出现时提示出现了什么，站进去后显示对自己的好坏，在外面只显示名字和总体好坏 */
+function terrainLine(info: TerrainInfo, me: MeState): { cls: string; parts: [string, string][] } {
+  const D = TERRAINS[info.kind];
+  const s = sideOf(info.kind, me);
+  const parts: [string, string][] = [];
+  if (!info.inside && !info.burn && !info.chill) {
+    parts.push(['ht-name', info.intro ? `这一波出现了${D.name}` : D.name], ['ht-note', verdict(s)]);
+    return { cls: info.intro ? 'intro' : 'dim', parts };
+  }
+  parts.push(['ht-name', `${D.name}：`]);
+  if (info.inside && s.good.length) {
+    if (D.circle && !info.circle) parts.push(['ht-hint', `进能量圈 ${typeNames(s.good)}系${GOOD_SHORT[info.kind]}`]);
+    else parts.push(['ht-good', `${typeNames(s.good)}系${GOOD_SHORT[info.kind]}`]);
+  }
+  if (info.burn) parts.push(['ht-bad', '灼伤中']);
+  if (info.inside && info.slowed) parts.push(['ht-bad', `移动 −${Math.round(s.slow * 100)}%`]);
+  if (info.chill) parts.push(['ht-bad', '冻得减速中']);
+  const bad = BAD_SHORT[info.kind];
+  if (info.inside && s.bad.length && bad) parts.push(['ht-bad', `${typeNames(s.bad)}系${bad}`]);
+  if (parts.length === 1) parts.push(['ht-note', '对你没有影响']);
+  return { cls: 'in', parts };
+}
+
+/** 悬停 / 点按牌子：完整规则和对自己的影响 */
+function terrainTip(kind: TerrainId, me: MeState): Node {
+  const D = TERRAINS[kind];
+  const s = sideOf(kind, me);
+  const mine: string[] = [];
+  if (s.good.length) mine.push(`${typeNames(s.good)}系招式获益`);
+  if (s.bad.length) mine.push(`${typeNames(s.bad)}系招式受损`);
+  if (s.burn) mine.push('站进去会灼伤');
+  if (s.slow) mine.push(`站进去移动 −${Math.round(s.slow * 100)}%`);
+  return h('div', { class: 'info' },
+    h('b', { style: `color: ${D.color}` }, D.name),
+    ...terrainRules(kind).map((l) => h('div', { class: 'small' }, l)),
+    h('div', { class: 'small', style: 'color: var(--gold)' }, `对你：${mine.length ? mine.join('，') : '没有影响'}`),
+    h('div', { class: 'small', style: 'color: var(--muted)' }, '招式加成看施放时站没站在场地里，减速和灼伤看现在的位置；敌人也遵守同样的规则。'),
+  );
 }

@@ -590,6 +590,10 @@ export class FxLayer {
       ctx.globalAlpha = 0.33;
       ctx.fillStyle = '#f83848';
       ctx.fillRect(0, -g.a / 2, len, g.a);
+      // 深色的影子线：落在熔岩池这类红色地面上也看得清
+      ctx.globalAlpha = blink * 0.7;
+      ctx.fillStyle = '#300810';
+      for (let d = 0; d < len; d += 4) { ctx.fillRect(d, -g.a / 2 - 1, 2, 1); ctx.fillRect(d, g.a / 2, 2, 1); }
       ctx.globalAlpha = blink;
       ctx.fillStyle = '#ff9098';
       for (let d = 0; d < len; d += 4) { ctx.fillRect(d, -g.a / 2, 2, 1); ctx.fillRect(d, g.a / 2 - 1, 2, 1); }
@@ -597,6 +601,8 @@ export class FxLayer {
       ctx.fillRect(0, -g.a / 2, Math.round(len * k), g.a);
       ctx.restore();
     } else {
+      ctx.globalAlpha = blink * 0.7;
+      pxRing(ctx, g.x, g.y + 1, g.a + 1, '#300810', 1, 0.8, 3);
       ctx.globalAlpha = blink;
       pxRing(ctx, g.x, g.y, g.a, '#ff5060', 1, 0.8, 3);
       ctx.globalAlpha = 0.33;

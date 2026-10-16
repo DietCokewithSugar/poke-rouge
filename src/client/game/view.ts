@@ -10,8 +10,10 @@ import { vis, type Trail } from '../gfx/vfx';
 import { shownAmount } from '../../shared/stats';
 import { TYPES } from '../../shared/types';
 import { Animator, dirRow, preload, shadowSize } from '../gfx/sprites';
-import { LINE_OF_DEX } from '../../shared/pokemon';
+import { LINE_OF_DEX, formOf } from '../../shared/pokemon';
+import { TERRAINS, inCircle, inTerrain, terrainFromEvent, terrainMove, typeMask, type Terrain, type TerrainId } from '../../shared/terrain';
 import { BORDER, arenaCanvas } from '../gfx/tiles';
+import { drawTerrain } from '../gfx/terrain';
 import { moveVector } from '../input';
 import type { Settings } from '../save';
 
@@ -32,7 +34,22 @@ const SEND_EVERY = 1000 / 20;
 
 interface TimedSnap { t: number; s: Snapshot; players: Map<number, SnapPlayer>; enemies: Map<number, SnapEnemy>; projs: Map<number, SnapProj> }
 interface EnemyVis { anim: Animator; flash: number; lx: number; ly: number; dir: number; scale: number; seen: number; tw: number }
-interface PlayerVis { anim: Animator; flash: number; down: boolean; evoFlash: number; tw: number }
+/** burn：灼伤掉血时身上闪一下红 */
+interface PlayerVis { anim: Animator; flash: number; down: boolean; evoFlash: number; tw: number; burn: number }
+
+/** HUD 用：自己和本波局部属性场地的关系 */
+export interface TerrainInfo {
+  kind: TerrainId;
+  /** 站在场地里 / 站在共鸣晶石的能量圈里 */
+  inside: boolean;
+  circle: boolean;
+  burn: boolean;
+  /** 被场地减速 / 被寒霜区域里的攻击减速 */
+  slowed: boolean;
+  chill: boolean;
+  /** 场地刚出现（波次开始的几秒） */
+  intro: boolean;
+}
 interface Corpse { anim: Animator; x: number; y: number; t: number; scale: number }
 interface Flyer { x: number; y: number; kind: number; value: number; pid: number; t: number }
 
@@ -92,6 +109,10 @@ export class GameView {
   private boostTxt = new Map<number, { at: number; row: number }>();
   private lastSnapPhase = 0;
   private ringR = 0;
+  /** 本波的局部属性场地（出现时淡入）；oldTerrain 是刚换掉的那块（淡出） */
+  terrain: Terrain | null = null;
+  private terrainAt = 0;
+  private oldTerrain: { t: Terrain; at: number } | null = null;
   settings: Settings;
   hooks: ViewHooks;
   send: (x: number, y: number, moving: boolean, dir: number) => void = () => {};
@@ -202,7 +223,7 @@ export class GameView {
         const v = this.enemyVis.get(id);
         // 受击闪白要有间隔，否则持续挨打的首领会一直是白色剪影
         if (v && v.flash < -0.14) v.flash = 0.08;
-        if (f & 8) { this.fx.text(x, y - 18, shownAmount(dmg), '#d890f0', 10, 0.6); break; }
+        if (f & 8) { this.fx.text(x, y - 18, shownAmount(dmg), TYPES[n(6)] === 'fire' ? '#ffa060' : '#d890f0', 10, 0.6); break; }
         const crit = !!(f & 1);
         this.fx.hit(x, y - 8 * (v?.scale ?? 1), TYPES[n(6)] ?? 'normal', crit);
         const col = crit ? '#ffd23f' : f & 2 ? '#ff8c5a' : f & 4 ? '#a0a8b8' : '#ffffff';
@@ -220,7 +241,14 @@ export class GameView {
         const hf = (ev[4] as number | undefined) ?? 0, by = (ev[5] as number | undefined) ?? -1;
         const pos = this.playerPos(pid);
         if (!pos) break;
-        if (f & 1) this.fx.text(pos.x, pos.y - 26, '闪避', '#9fe8ff', 10);
+        if (f & 4) {
+          // 灼伤：小小的橙色数字、冒火星、身上闪一下红；不震屏，也不播受伤音效
+          this.fx.text(pos.x + (Math.random() - 0.5) * 8, pos.y - 24, `-${shownAmount(dmg)}`, '#ffa060', 9, 0.55);
+          this.fx.burst(pos.x, pos.y - 8, ['#ff6a1f', '#ffb22e'], 4, 30);
+          const v = this.playerVis.get(pid);
+          if (v) v.burn = 0.22;
+          if (pid === this.you) this.hurtFlash = Math.max(this.hurtFlash, 0.12);
+        } else if (f & 1) this.fx.text(pos.x, pos.y - 26, '闪避', '#9fe8ff', 10);
         else if (f & 2) this.fx.text(pos.x, pos.y - 26, '护盾', '#9fd0ff', 10);
         else if (this.isFoe(pid)) {
           // 对战中打到对手：和打野生宝可梦一样显示伤害数字
@@ -387,6 +415,16 @@ export class GameView {
         sfx('boss');
         break;
       }
+      case 'terrain': {
+        const t = terrainFromEvent(ev);
+        const cur = this.terrain;
+        // 重新连上时服务器会再发一次同一块场地：不重新淡入
+        if (t && cur && t.kind === cur.kind && t.cx === cur.cx && t.cy === cur.cy && t.count === cur.count) break;
+        if (cur) this.oldTerrain = { t: cur, at: this.time };
+        this.terrain = t;
+        this.terrainAt = this.time;
+        break;
+      }
       case 'wave':
         this.biome = n(3);
         this.local.synced = false;
@@ -449,6 +487,26 @@ export class GameView {
     return p ? { x: p.x, y: p.y } : null;
   }
 
+  /** 自己宝可梦的属性位（场地的减速、灼伤看单位自身的属性） */
+  private myMask() {
+    const m = this.me;
+    return m ? typeMask(formOf(m.line, m.stage).types) : 0;
+  }
+
+  terrainInfo(): TerrainInfo | null {
+    const T = this.terrain;
+    if (!T || this.pvp) return null;
+    const mine = this.snaps[this.snaps.length - 1]?.players.get(this.you);
+    const { x, y } = this.local;
+    const inside = inTerrain(T, x, y);
+    const tst = mine?.tst ?? 0;
+    return {
+      kind: T.kind, inside, circle: inside && inCircle(T, x, y),
+      burn: (tst & 1) !== 0, slowed: inside && terrainMove(T, x, y, this.myMask()) < 1, chill: (tst & 2) !== 0,
+      intro: this.time - this.terrainAt < 5,
+    };
+  }
+
   // ------------------------------------------------------------ 主循环
 
   private frame = (now: number) => {
@@ -493,7 +551,8 @@ export class GameView {
       return;
     }
     const mv = inWave && !down && this.canMove() ? moveVector() : { x: 0, y: 0 };
-    const speed = this.me?.speed ?? 100;
+    // 私有状态里的速度不含场地减速：按自己现在的位置在本地乘上（服务器按同样的规则限制移动距离）
+    const speed = (this.me?.speed ?? 100) * terrainMove(this.terrain, this.local.x, this.local.y, this.myMask());
     this.local.moving = !!(mv.x || mv.y);
     if (this.local.moving) {
       this.local.x = Math.max(8, Math.min(this.w - 8, this.local.x + mv.x * speed * dt));
@@ -551,6 +610,15 @@ export class GameView {
 
     const ip = this.interp();
     const t = this.time;
+
+    // 局部属性场地（地面最底层：区域、警示圈、敌人和弹幕都画在它上面）
+    const area = { x: cx, y: cy, w: this.viewW, h: this.viewH };
+    if (this.oldTerrain) {
+      const k = 1 - (t - this.oldTerrain.at) / 0.6;
+      if (k <= 0) this.oldTerrain = null;
+      else drawTerrain(ctx, this.oldTerrain.t, t, k, area);
+    }
+    if (this.terrain) drawTerrain(ctx, this.terrain, t, Math.min(1, (t - this.terrainAt) / 0.6), area);
 
     // 区域
     if (ip) {
@@ -613,7 +681,7 @@ export class GameView {
         if (p.id === this.you && this.local.synced) { x = this.local.x; y = this.local.y; }
         const shiny = (p.flags & 128) !== 0;
         let v = this.playerVis.get(p.id);
-        if (!v) { v = { anim: new Animator(p.dex, shiny), flash: 0, down: false, evoFlash: 0, tw: 0.5 }; this.playerVis.set(p.id, v); }
+        if (!v) { v = { anim: new Animator(p.dex, shiny), flash: 0, down: false, evoFlash: 0, tw: 0.5, burn: 0 }; this.playerVis.set(p.id, v); }
         const vis = v;
         vis.anim.setDex(p.dex, shiny);
         const down = (p.flags & 1) !== 0;
@@ -633,6 +701,7 @@ export class GameView {
         vis.anim.update(dt);
         vis.flash = Math.max(0, vis.flash - dt);
         vis.evoFlash = Math.max(0, vis.evoFlash - dt);
+        vis.burn = Math.max(0, vis.burn - dt);
         list.push({ y, draw: () => this.drawPlayer(p, x, y, vis, t) });
       }
     }
@@ -748,6 +817,43 @@ export class GameView {
         ctx.restore();
       }
     }
+    // 屏幕层：场地刚出现时，如果不在画面里，在画面边上指出方向
+    const T = this.terrain;
+    if (T && !this.pvp && t - this.terrainAt < 6) {
+      const W = this.canvas.width, H = this.canvas.height;
+      const sx = (T.cx - cx) * S, sy = (T.cy - cy) * S;
+      if (sx < 0 || sy < 0 || sx > W || sy > H) {
+        const mx = Math.max(24 * S, W * 0.08), top = Math.max(24 * S, H * 0.22), bottom = Math.max(30 * S, H * 0.24);
+        const ex = Math.max(mx, Math.min(W - mx, sx)), ey = Math.max(top, Math.min(H - bottom, sy));
+        const a = Math.atan2(sy - ey, sx - ex);
+        const col = TERRAINS[T.kind].color;
+        ctx.save();
+        ctx.translate(Math.round(ex), Math.round(ey));
+        ctx.globalAlpha = Math.floor(t * 3) % 2 ? 1 : 0.75;
+        ctx.save();
+        ctx.rotate(a);
+        ctx.fillStyle = '#101018';
+        ctx.beginPath();
+        ctx.moveTo(12 * S, 0); ctx.lineTo(-5 * S, -8 * S); ctx.lineTo(-5 * S, 8 * S);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(10 * S, 0); ctx.lineTo(-4 * S, -6 * S); ctx.lineTo(-4 * S, 6 * S);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        const label = TERRAINS[T.kind].name;
+        ctx.font = `${Math.round(9 * S)}px FusionPixel, monospace`;
+        ctx.textAlign = 'center';
+        const ly = Math.sin(a) > 0.5 ? -12 * S : 20 * S;
+        ctx.fillStyle = '#101018';
+        ctx.fillText(label, S, ly + S);
+        ctx.fillStyle = col;
+        ctx.fillText(label, 0, ly);
+        ctx.restore();
+      }
+    }
     // 屏幕层：受伤红闪
     if (this.hurtFlash > 0) {
       this.hurtFlash -= dt;
@@ -796,6 +902,7 @@ export class GameView {
     if (f & 4 && Math.random() < 0.2) this.fx.px(jx(), y - 4, '#d995f2', { vy: -25, life: 0.5, size: 2 });
     if (f & 8 && Math.random() < 0.12) this.fx.sp('spark', 'electric', jx(), y - 6 - Math.random() * 12 * v.scale, { life: 0.15, fr: 20 });
     if (f & 16) { ctx.globalAlpha = 0.33; pxCircle(ctx, x, y - 8 * v.scale, 7 * v.scale, '#bff3ff'); ctx.globalAlpha = 1; }
+    if (f & 32 && Math.random() < 0.14) this.fx.px(jx(), y - 1 - Math.random() * 5 * v.scale, Math.random() < 0.5 ? '#8fd8ff' : '#d0f2ff', { vy: -14, life: 0.45 });
     if (f & 64) {
       ctx.fillStyle = '#f83838';
       ctx.fillRect(Math.round(x) - 1, Math.round(top) - 6, 2, 5);
@@ -841,7 +948,9 @@ export class GameView {
     }
     const invuln = (p.flags & 2) !== 0 && !(p.flags & 1);
     const alpha = invuln && Math.floor(t * 16) % 2 ? 0.55 : 1;
-    v.anim.draw(ctx, x, y, 1, v.flash > 0 ? 0.6 : v.evoFlash > 0 ? Math.min(1, v.evoFlash) : 0, alpha);
+    const white = v.flash > 0 || v.evoFlash > 0;
+    const flash = v.flash > 0 ? 0.6 : v.evoFlash > 0 ? Math.min(1, v.evoFlash) : Math.min(0.55, v.burn * 3);
+    v.anim.draw(ctx, x, y, 1, flash, alpha, white ? '#ffffff' : '#ff4a2a');
     if (v.evoFlash > 0) {
       ctx.globalAlpha = v.evoFlash / 1.4;
       pxRing(ctx, x, y - 10, 10 + (1.4 - v.evoFlash) * 30, '#ffffff', 2);
@@ -859,6 +968,9 @@ export class GameView {
       const col = bs?.length ? BOOSTS[bs[Math.floor(Math.random() * bs.length)][0]].color : '#fff36a';
       this.fx.px(x + (Math.random() - 0.5) * 12, y - 2, col, { vy: -40, life: 0.35 });
     }
+    // 局部属性场地：灼伤冒火星，减速冒蓝色的冰晶
+    if (p.tst & 1 && Math.random() < 0.3) this.fx.px(x + (Math.random() - 0.5) * 12, y - 4 - Math.random() * 12, Math.random() < 0.5 ? '#ff6a1f' : '#ffb22e', { vy: -38, life: 0.4 });
+    if (p.tst & 6 && Math.random() < (p.tst & 2 ? 0.25 : 0.15)) this.fx.px(x + (Math.random() - 0.5) * 14, y - 1 - Math.random() * 4, Math.random() < 0.5 ? '#8fd8ff' : '#d0f2ff', { vy: -14, life: 0.5 });
     // 名字与血条
     const name = this.names.get(p.id) ?? '';
     ctx.font = '10px FusionPixel, monospace';

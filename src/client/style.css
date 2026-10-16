@@ -44,7 +44,7 @@ img.ico { width: var(--iw); height: var(--ih); }
 #ui { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
 #ui > * { pointer-events: auto; }
 #ui #hud { pointer-events: none; }
-#ui #hud .hud-pause, #ui #hud .hud-skill, #ui #hud .hud-auto { pointer-events: auto; }
+#ui #hud .hud-pause, #ui #hud .hud-skill, #ui #hud .hud-auto, #ui #hud .hud-terrain { pointer-events: auto; }
 
 .scr {
   position: fixed; inset: 0; z-index: 20;
@@ -239,6 +239,22 @@ label { display: block; font-size: 0.875rem; color: var(--muted); margin: 0.25re
 .hud-skill.empty { opacity: .4; border-style: dashed; }
 .hud-skill .skill-ico { width: 100%; height: 100%; }
 .hud-skill .cd { position: absolute; inset: 0; background: conic-gradient(rgba(0, 0, 0, .62) var(--p, 0%), transparent 0); pointer-events: none; }
+/* 局部属性场地：技能栏正上方的小牌子（悬停 / 点按看完整规则） */
+.hud-terrain {
+  position: absolute; left: 50%; bottom: 4.25rem; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 0.375rem; height: 1.625rem; padding: 0 0.625rem 0 0.5rem;
+  border-radius: 0.375rem; background: rgba(10, 20, 50, .82); border: 0.125rem solid var(--c); box-shadow: 0 0 0 0.125rem var(--edge-out);
+  font-size: 0.875rem; line-height: 1; white-space: nowrap; text-shadow: 1px 1px 0 #000; cursor: help;
+}
+.hud-terrain.dim { opacity: .82; border-color: rgba(255, 255, 255, .35); }
+.hud-terrain.intro { animation: ht-pop .35s ease-out; }
+@keyframes ht-pop { from { transform: translateX(-50%) scale(1.25); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
+.ht-dot { width: 0.5rem; height: 0.5rem; flex: none; background: var(--c); box-shadow: 0 0 0 0.125rem rgba(0, 0, 0, .6); }
+.ht-name { color: var(--c); }
+.ht-good { color: #8ef08e; }
+.ht-bad { color: #ff8a8a; }
+.ht-hint { color: var(--gold); }
+.ht-note { color: var(--muted); font-size: 0.8125rem; }
 .hud-banner {
   position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(.8);
   font-size: 2.5rem; color: var(--gold); text-shadow: 0.1875rem 0.1875rem 0 #6a3a00, 0.375rem 0.375rem 0 #000; opacity: 0; white-space: nowrap;
