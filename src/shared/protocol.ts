@@ -9,7 +9,7 @@ import type { PvpMatchResult, PvpMode } from './pvp/sim';
 import type { RankKind, RankRow, RunRecord } from './ranks';
 import { formOf } from './pokemon';
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 export const MAX_PLAYERS = 4;
 
 // ---------------------------------------------------------------- 对战
@@ -72,7 +72,7 @@ export type C2S =
   | { t: 'visibility'; public: boolean }
   | { t: 'browse'; on: boolean }
   | { t: 'stats' }
-  | { t: 'debug'; cmd: 'down' | 'downAll' | 'endWave' | 'xp' | 'shiny' | 'items' }
+  | { t: 'debug'; cmd: 'down' | 'downAll' | 'endWave' | 'xp' | 'shiny' | 'items' | 'field' }
   /** k：客户端收到的最新快照编号（顺便确认收到，服务器据此估计网络排队） */
   | { t: 'pos'; x: number; y: number; m: 0 | 1; d: number; k?: number }
   | { t: 'ack'; k: number }

@@ -110,6 +110,7 @@ export class PvpSim extends GameSim {
   private hpBudget = new Map<number, number>();
   private owners = new Map<number, { owner: number; helper: boolean }>();
   protected override mapItems = false;
+  protected override mapFields = false;
 
   constructor(mode: PvpMode, inits: PvpInit[], seed: number) {
     super([], seed, 'easy', false);

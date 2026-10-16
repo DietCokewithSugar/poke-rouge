@@ -1,8 +1,9 @@
+import { FROST_SLOW, FROST_SLOW_DUR, GRASS_DRAIN_CAP, type MoveMod } from '../fields';
 import { ITEMS } from '../items';
 import { LINES, formOf } from '../pokemon';
 import { SKILLS, skillLevelCd, skillLevelDmg, type SkillDef } from '../skills';
 import { TYPES, gameEffectiveness, type PType } from '../types';
-import type { Enemy, SimPlayer, StatusApply } from './entities';
+import type { Enemy, HitFx, SimPlayer, StatusApply } from './entities';
 import type { GameSim } from './game';
 
 export const PLAYER_R = 7;
@@ -43,6 +44,9 @@ export interface HitOpts {
   noEff?: boolean;
   heal?: number;
   skill?: SkillDef | null;
+  /** 场地效果：命中回复造成伤害的这个比例、命中减速 */
+  drain?: number;
+  chill?: boolean;
 }
 
 /** 对敌人造成伤害，返回实际伤害。 */
@@ -81,6 +85,8 @@ export function hitEnemy(sim: GameSim, e: Enemy, p: SimPlayer | null, raw: numbe
     }
   }
   sim.addHit(e, dmg, flags, TYPES.indexOf(type));
+  if (o.drain && p) drainHeal(sim, p, dmg * o.drain);
+  if (o.chill) applyStatus(e, { kind: 'slow', chance: 1, dur: FROST_SLOW_DUR, amount: FROST_SLOW }, dmg, p?.id ?? -1);
   if (o.status && sim.rng.chance(o.status.chance)) applyStatus(e, o.status, dmg, p?.id ?? -1, o.heal);
   if (o.knock && e.def.knockResist !== 1) {
     const k = o.knock * (1 - (e.def.knockResist ?? 0));
@@ -107,6 +113,32 @@ export function applyStatus(e: Enemy, s: StatusApply, dmg: number, src: number, 
   }
 }
 
+/** 繁茂草丛的命中回复：每秒最多回复最大 HP 的 2% */
+export function drainHeal(sim: GameSim, p: SimPlayer, amount: number) {
+  if (sim.time - p.drainAt >= 1) { p.drainAt = sim.time; p.drained = 0; }
+  const amt = Math.min(amount, p.d.maxHp * GRASS_DRAIN_CAP - p.drained);
+  if (amt <= 0) return;
+  p.drained += amt;
+  healPlayer(sim, p, amt);
+}
+
+/** 野生宝可梦在繁茂草丛里的命中回复，规则和玩家一样 */
+function enemyDrain(sim: GameSim, e: Enemy, amount: number) {
+  if (e.dead || e.hp <= 0) return;
+  if (sim.time - (e.drainAt ?? -9) >= 1) { e.drainAt = sim.time; e.drained = 0; }
+  const amt = Math.min(amount, e.maxHp * GRASS_DRAIN_CAP - (e.drained ?? 0));
+  if (amt <= 0) return;
+  e.drained = (e.drained ?? 0) + amt;
+  e.hp = Math.min(e.maxHp, e.hp + amt);
+}
+
+/** 寒霜区域的命中减速：20%，持续 2 秒，重复命中刷新时间 */
+export function chillPlayer(sim: GameSim, p: SimPlayer) {
+  p.slowAmt = p.slowT > 0 ? Math.max(p.slowAmt, FROST_SLOW) : FROST_SLOW;
+  p.slowT = Math.max(p.slowT, FROST_SLOW_DUR);
+  sim.dirty.add(p.id);
+}
+
 export function healPlayer(sim: GameSim, p: SimPlayer, amount: number, lifesteal = false) {
   if (!p.alive || p.down) return;
   if (lifesteal) {
@@ -129,19 +161,25 @@ export interface HurtOpts {
   dot?: boolean;
   /** 对战：这一下最多扣多少 HP（按受击方的承伤上限） */
   cap?: number;
+  /** 熔岩池的灼伤：按最大 HP 的比例掉血，不看无敌时间和防御，不能闪避，也不会带来无敌时间 */
+  field?: boolean;
 }
+
+/** 'ph' 事件的标记：熔岩池的灼伤（客户端用橙色的小数字显示，不闪红） */
+export const PH_BURN = 32;
 
 /** 玩家受到伤害。cat：phys 接触伤害（物防减免），spec 弹幕/爆炸（特防减免）。 */
 export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' | 'spec', src?: Enemy, o: HurtOpts = {}): number {
-  if (!p.alive || p.down || p.invuln > 0 || raw <= 0) return 0;
-  const tail = o.pvp ? [o.flags ?? 0, o.by ?? -1] : [];
-  if (!o.dot && sim.rng.chance(p.d.dodge)) {
+  if (!p.alive || p.down || (p.invuln > 0 && !o.field) || raw <= 0) return 0;
+  const tail = o.pvp ? [o.flags ?? 0, o.by ?? -1] : o.field ? [PH_BURN, -1] : [];
+  const frames = !o.pvp && !o.field;
+  if (!o.dot && !o.field && sim.rng.chance(p.d.dodge)) {
     if (!o.pvp) p.invuln = 0.2;
     p.stats.dodges++;
     sim.emit(['ph', p.id, 0, 1, ...tail]);
     return 0;
   }
-  let dmg = Math.max(1, Math.round(raw * (cat === 'phys' ? p.d.physTaken : p.d.specTaken)));
+  let dmg = Math.max(1, Math.round(o.field ? raw : raw * (cat === 'phys' ? p.d.physTaken : p.d.specTaken)));
   if (o.cap !== undefined) {
     dmg = Math.min(dmg, Math.floor(o.cap));
     if (dmg <= 0) return 0;
@@ -151,14 +189,14 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
     p.shield -= absorbed;
     dmg -= absorbed;
     if (dmg <= 0) {
-      if (!o.pvp) p.invuln = 0.3;
+      if (frames) p.invuln = 0.3;
       sim.emit(['ph', p.id, absorbed, 2, ...tail]);
       return 0;
     }
   }
   p.hp -= dmg;
   p.stats.taken += dmg;
-  if (!o.pvp) p.invuln = 0.45;
+  if (frames) p.invuln = 0.45;
   sim.emit(['ph', p.id, dmg, 0, ...tail]);
   const F = LINES[p.line].flags;
   if (src && src.hp > 0) {
@@ -199,6 +237,19 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
   return dmg;
 }
 
+/**
+ * 野生宝可梦打到玩家：场地的伤害倍率已经算进 raw，这里结算场地的暴击、命中回复（回到出招的敌人身上）和命中减速。
+ * contact：接触伤害，会触发反伤、静电这类特性
+ */
+export function enemyHurt(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' | 'spec', fx: HitFx, src: Enemy | null | undefined, contact = false): number {
+  if (fx.crit && sim.rng.chance(fx.crit / 100)) raw *= 1.5;
+  const dealt = hurtPlayer(sim, p, raw, cat, contact ? src ?? undefined : undefined);
+  if (dealt <= 0) return dealt;
+  if (fx.chill) chillPlayer(sim, p);
+  if (fx.drain && src) enemyDrain(sim, src, dealt * fx.drain);
+  return dealt;
+}
+
 // ---------------------------------------------------------------- 技能释放
 
 function nearest(sim: GameSim, p: SimPlayer, range: number): Enemy | null {
@@ -229,14 +280,18 @@ export function updateSkills(sim: GameSim, p: SimPlayer, dt: number) {
     if (s.cd > 0) continue;
     const def = SKILLS[s.id];
     if (!def) continue;
-    if (cast(sim, p, def, s.lv)) s.cd = def.cd * skillLevelCd(s.lv) * p.d.cdMult;
+    const fm = sim.castMod(p, def);
+    if (cast(sim, p, def, s.lv, fm)) s.cd = def.cd * skillLevelCd(s.lv) * p.d.cdMult * fm.cd;
     else s.cd = 0.1;
   }
 }
 
-function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
+/** fm：出招时脚下场地的修正（伤害、范围、暴击、命中回复与减速在出招时就定下来，弹体飞出场地也照样算） */
+function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number, fm: Readonly<MoveMod>): boolean {
   const rm = p.d.rangeMult;
   const range = s.range * rm;
+  const k = fm.size;
+  const drain = fm.drain || undefined, chill = fm.chill || undefined;
   switch (s.pattern) {
     case 'heal': return castHeal(sim, p, s);
     case 'shield': {
@@ -261,9 +316,10 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
 
   const t = nearest(sim, p, range);
   if (!t) return false;
-  const base = baseDamage(p, s, lv);
+  const base = baseDamage(p, s, lv) * fm.dmg;
+  const crit = (s.crit ?? 0) + fm.crit;
   const ang = Math.atan2(t.y - p.y, t.x - p.x);
-  const opts: HitOpts = { crit: s.crit, status: s.status, knock: s.knock, heal: s.heal, skill: s };
+  const opts: HitOpts = { crit, status: s.status, knock: s.knock, heal: s.heal, skill: s, drain, chill };
 
   switch (s.pattern) {
     case 'proj': {
@@ -274,15 +330,15 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
         sim.spawnProj({
           fx: s.fx, owner: p.id, skill: s, type: s.type,
           x: p.x, y: p.y - 6, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
-          r: s.size ?? 3, dmg: base, pierce: s.pierce ?? 0, life: (range * 1.25) / spd,
-          homing: s.homing ?? 0, crit: s.crit ?? 0, knock: s.knock ?? 0, status: s.status,
+          r: (s.size ?? 3) * k, dmg: base, pierce: s.pierce ?? 0, life: (range * 1.25) / spd,
+          homing: s.homing ?? 0, crit, knock: s.knock ?? 0, status: s.status, drain, chill,
         });
       }
       sim.emitCast(p, 1);
       break;
     }
     case 'melee': {
-      const rad = (s.radius ?? 34) * rm;
+      const rad = (s.radius ?? 34) * rm * k;
       const arc = s.arc ?? Math.PI / 2;
       let total = 0;
       for (const e of enemiesInRange(sim, p, p.x, p.y, rad)) {
@@ -297,20 +353,20 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
       break;
     }
     case 'beam': {
-      const len = range;
-      const width = s.width ?? 10;
+      const len = range * k;
+      const width = (s.width ?? 10) * k;
       if (s.delay) {
-        sim.strikes.push({ owner: p.id, skill: s, x: p.x, y: p.y - 4, r: width, t: s.delay, dmg: base, type: s.type, fx: s.fx, cat: s.cat === 'phys' ? 'phys' : 'spec', line: { ang, len } });
-        sim.emit(['fx', s.fx + '_charge', p.x, p.y - 4, round2(ang), Math.round(len), width, p.id, Math.round(s.delay * 1000)]);
+        sim.strikes.push({ owner: p.id, skill: s, x: p.x, y: p.y - 4, r: width, t: s.delay, dmg: base, type: s.type, fx: s.fx, cat: s.cat === 'phys' ? 'phys' : 'spec', line: { ang, len }, crit, drain, chill });
+        sim.emit(['fx', s.fx + '_charge', p.x, p.y - 4, round2(ang), Math.round(len), Math.round(width), p.id, Math.round(s.delay * 1000)]);
       } else {
-        beamHit(sim, p, s, p.x, p.y - 4, ang, len, width, base);
-        sim.emit(['fx', s.fx, p.x, p.y - 4, round2(ang), Math.round(len), width, p.id]);
+        beamHit(sim, p, s, p.x, p.y - 4, ang, len, width, base, { crit, drain, chill });
+        sim.emit(['fx', s.fx, p.x, p.y - 4, round2(ang), Math.round(len), Math.round(width), p.id]);
       }
       sim.emitCast(p, 1);
       break;
     }
     case 'nova': {
-      const rad = (s.radius ?? 60) * rm;
+      const rad = (s.radius ?? 60) * rm * k;
       let total = 0;
       for (const e of enemiesInRange(sim, p, p.x, p.y, rad)) {
         total += hitEnemy(sim, e, p, base, s.type, { ...opts, kx: e.x - p.x, ky: e.y - p.y });
@@ -332,7 +388,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
         hitEnemy(sim, from, p, dmg, s.type, { ...opts, kx: from.x - p.x, ky: from.y - p.y });
         dmg *= 0.88;
         let next: Enemy | null = null;
-        let bd = 95 * 95;
+        let bd = (95 * k) ** 2;
         for (const e of sim.targetsFor(p.id)) {
           if (e.hp <= 0 || e.hidden || hit.has(e.id)) continue;
           const d = (e.x - from.x) ** 2 + (e.y - from.y) ** 2;
@@ -352,7 +408,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
         sim.rng.shuffle(pool);
         for (const e of pool) { if (targets.length >= n) break; targets.push(e); }
       }
-      const rad = (s.radius ?? 30) * Math.sqrt(rm);
+      const rad = (s.radius ?? 30) * Math.sqrt(rm) * k;
       for (let i = 0; i < n; i++) {
         let x: number, y: number;
         if (i < targets.length) { x = targets[i].x; y = targets[i].y; }
@@ -362,7 +418,7 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
           x = t.x + Math.cos(a) * d; y = t.y + Math.sin(a) * d;
         }
         const delay = (s.delay ?? 0.3) + i * 0.08;
-        sim.strikes.push({ owner: p.id, skill: s, x, y, r: rad, t: delay, dmg: base, type: s.type, fx: s.fx, cat: s.cat === 'phys' ? 'phys' : 'spec' });
+        sim.strikes.push({ owner: p.id, skill: s, x, y, r: rad, t: delay, dmg: base, type: s.type, fx: s.fx, cat: s.cat === 'phys' ? 'phys' : 'spec', crit, drain, chill });
         sim.emit(['fx', s.fx + '_pre', Math.round(x), Math.round(y), 0, Math.round(rad), Math.round(delay * 1000), p.id]);
       }
       sim.emitCast(p, 1);
@@ -370,22 +426,22 @@ function cast(sim: GameSim, p: SimPlayer, s: SkillDef, lv: number): boolean {
     }
     case 'orbit': {
       const n = s.count ?? 4;
-      const rad = (s.radius ?? 40) * rm;
+      const rad = (s.radius ?? 40) * rm * k;
       for (let i = 0; i < n; i++) {
         sim.spawnProj({
           fx: s.fx, owner: p.id, skill: s, type: s.type, x: p.x, y: p.y, vx: 0, vy: 0,
-          r: s.size ?? 4, dmg: base, pierce: 9999, life: s.duration ?? 4, homing: 0, crit: s.crit ?? 0,
-          knock: s.knock ?? 20, status: s.status, orbit: { ang: (i / n) * TAU, rad, spd: 4.2 },
+          r: (s.size ?? 4) * k, dmg: base, pierce: 9999, life: s.duration ?? 4, homing: 0, crit,
+          knock: s.knock ?? 20, status: s.status, orbit: { ang: (i / n) * TAU, rad, spd: 4.2 }, drain, chill,
         });
       }
       sim.emitCast(p, 1);
       break;
     }
     case 'zone': {
-      const rad = (s.radius ?? 30) * Math.sqrt(rm);
+      const rad = (s.radius ?? 30) * Math.sqrt(rm) * k;
       sim.zones.push({
         id: sim.newId(), fx: s.fx, owner: p.id, skill: s, type: s.type, x: t.x, y: t.y, r: rad,
-        life: s.duration ?? 3, maxLife: s.duration ?? 3, tick: s.tick ?? 0.5, t: 0, dmg: base,
+        life: s.duration ?? 3, maxLife: s.duration ?? 3, tick: s.tick ?? 0.5, t: 0, dmg: base, crit, drain, chill,
       });
       sim.emitCast(p, 1);
       break;
@@ -417,7 +473,7 @@ function recoil(p: SimPlayer, s: SkillDef, total: number) {
   p.hp = Math.max(1, p.hp - r);
 }
 
-export function beamHit(sim: GameSim, p: SimPlayer | null, s: SkillDef, x: number, y: number, ang: number, len: number, width: number, dmg: number) {
+export function beamHit(sim: GameSim, p: SimPlayer | null, s: SkillDef, x: number, y: number, ang: number, len: number, width: number, dmg: number, fx: HitFx = {}) {
   const cx = Math.cos(ang), cy = Math.sin(ang);
   for (const e of sim.targetsFor(p ? p.id : -1).slice()) {
     if (e.hp <= 0 || e.hidden) continue;
@@ -426,7 +482,7 @@ export function beamHit(sim: GameSim, p: SimPlayer | null, s: SkillDef, x: numbe
     if (along < -e.r || along > len + e.r) continue;
     const perp = Math.abs(-dx * cy + dy * cx);
     if (perp > width / 2 + e.r) continue;
-    hitEnemy(sim, e, p, dmg, s.type, { crit: s.crit, status: s.status, knock: s.knock, kx: cx, ky: cy, skill: s });
+    hitEnemy(sim, e, p, dmg, s.type, { crit: fx.crit ?? s.crit, status: s.status, knock: s.knock, kx: cx, ky: cy, skill: s, drain: fx.drain, chill: fx.chill });
   }
 }
 

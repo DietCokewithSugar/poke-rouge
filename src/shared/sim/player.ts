@@ -39,6 +39,7 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     d: derive(formOf(line, 0).base, emptyMods()),
     slots: formOf(line, 0).slots,
     invuln: 1.5, shield: 0, shieldT: 0, buffT: 0, buff: { haste: 0, spe: 0 }, boosts: { crit: 0, dodge: 0, speed: 0 },
+    fieldBurn: 0, fieldDot: 0, drainAt: -9, drained: 0,
     slowT: 0, slowAmt: 0, regenAcc: 0, lsWindow: 0, lsCount: 0, sashUsed: false, sturdyUsed: false,
     levelQueue: [], cards: null, cardRerolls: 0, crates: [], evoPrompt: false,
     shop: { offers: [], locked: [false, false, false, false], rerolls: 0, freeRerolls: 0 },
