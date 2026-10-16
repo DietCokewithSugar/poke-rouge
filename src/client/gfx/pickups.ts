@@ -1,8 +1,8 @@
 /**
- * 地图道具的像素图：橙橙果（蓝色圆果 + 绿叶）和三种增幅种子（同一个种子形状，按颜色区分）。
- * 字符图 + 调色板，和 icons.ts 的道具图标同一种画法：. 透明  k 描边  w 高光  1/2/3 深 → 浅  g/G 叶子
+ * 地图道具的像素图：橙橙果（蓝色圆果 + 绿叶）、三种增幅种子（同一个种子形状，按颜色区分）和爆炸之种（裂开的黑红种子，顶上冒火星）。
+ * 字符图 + 调色板，和 icons.ts 的道具图标同一种画法：. 透明  k 描边  w 高光  1/2/3 深 → 浅  g/G 叶子  r/y 裂缝和火星
  */
-import type { BoostId } from '../../shared/pickups';
+import { BLAST_COLOR, type BoostId } from '../../shared/pickups';
 
 const BERRY = [
   '.....kk..',
@@ -29,6 +29,22 @@ const SEED = [
   '..kkk..',
 ];
 
+const BLAST = [
+  '....y....',
+  '...yry...',
+  '....k....',
+  '...k3k...',
+  '..k3w2k..',
+  '..k3r2k..',
+  '.k33r22k.',
+  '.k3rr21k.',
+  'k3r2r221k',
+  'k32r2r21k',
+  'k322rr11k',
+  '.k2r211k.',
+  '..kkkkk..',
+];
+
 interface Art { rows: string[]; pal: [string, string, string]; glow: string }
 
 /** 线上的种类编号（shared/pickups.ts 的 PICKUP_KINDS）→ 像素图 */
@@ -37,9 +53,11 @@ const ART: Record<number, Art> = {
   3: { rows: SEED, pal: ['#a01810', '#e84828', '#ffa078'], glow: '#ff8a5a' },
   4: { rows: SEED, pal: ['#5a2a9a', '#9a5ae0', '#e0c0ff'], glow: '#d0a8ff' },
   5: { rows: SEED, pal: ['#9a7000', '#e8c020', '#fff4a0'], glow: '#ffe45a' },
+  6: { rows: BLAST, pal: ['#3a0e0c', '#62201a', '#94402c'], glow: BLAST_COLOR },
 };
 
 export const BOOST_KIND: Record<BoostId, number> = { crit: 3, dodge: 4, speed: 5 };
+export const BLAST_KIND = 6;
 
 export const hasArt = (kind: number) => kind in ART;
 export const artGlow = (kind: number) => ART[kind]?.glow ?? '#ffffff';
@@ -52,7 +70,7 @@ export function itemSprite(kind: number, scale = 1): HTMLCanvasElement {
   const hit = cache.get(key);
   if (hit) return hit;
   const a = ART[kind] ?? ART[1];
-  const col: Record<string, string> = { k: '#181020', w: '#ffffff', g: '#2a7a1c', G: '#6cd040', '1': a.pal[0], '2': a.pal[1], '3': a.pal[2] };
+  const col: Record<string, string> = { k: '#181020', w: '#ffffff', g: '#2a7a1c', G: '#6cd040', r: '#ff6a1f', y: '#ffe060', '1': a.pal[0], '2': a.pal[1], '3': a.pal[2] };
   const c = document.createElement('canvas');
   c.width = a.rows[0].length * scale;
   c.height = a.rows.length * scale;

@@ -126,8 +126,8 @@ export class PeerSync {
       return JSON.stringify({ t: 'me', s: me });
     }
     const { hp, maxHp, xp, money, down, speed, skills, boosts, ...rest } = me;
-    const stat = JSON.stringify({ ...rest, skills: skills.map((s) => [s.id, s.lv, s.max]) });
-    const dyn: MeDyn = { hp, maxHp, xp, money, down, speed, cds: skills.map((s) => s.cd), boosts };
+    const stat = JSON.stringify({ ...rest, skills: skills.map((s) => [s.id, s.lv]) });
+    const dyn: MeDyn = { hp, maxHp, xp, money, down, speed, cds: skills.map((s) => s.cd), cdm: skills.map((s) => s.max), boosts };
     const d = JSON.stringify(dyn);
     if (stat !== this.lastStatic) {
       this.lastStatic = stat;

@@ -1,20 +1,24 @@
 import { ENEMIES } from '../enemies';
 import { enemyDmgMult } from '../waves';
-import { PLAYER_R, hurtPlayer } from './combat';
+import { PLAYER_R, enemyHurt } from './combat';
 import type { Enemy, SimPlayer } from './entities';
 import type { GameSim } from './game';
 
 const TAU = Math.PI * 2;
+
+/** 场地对这只野生宝可梦出招冷却的倍率（按它的第一属性算，和玩家的规则一样） */
+const cdOf = (sim: GameSim, e: Enemy) => sim.enemyMod(e, 'spec').cd;
 
 /** 敌人每帧行为。返回 false 表示该敌人自行消失（自爆、逃走）。 */
 export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
   const st = e.st;
   e.age += dt;
   for (const k of ['para', 'slow', 'freeze', 'stun'] as const) if (st[k] > 0) st[k] -= dt;
+  if (st.slow <= 0) st.slowAmt = 0;
 
   const target = sim.nearestPlayer(e.x, e.y);
   const stopped = st.freeze > 0 || st.stun > 0;
-  let mul = 1;
+  let mul = sim.enemyFieldSpeed(e);
   if (st.para > 0) mul *= 0.5;
   if (st.slow > 0) mul *= 1 - st.slowAmt;
   if (sim.pressureAt(e.x, e.y)) mul *= 0.8;
@@ -52,7 +56,7 @@ export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
         } else {
           ai.t -= dt;
           mx = ai.ax * 4.2; my = ai.ay * 4.2;
-          if (ai.t <= 0) { ai.state = 0; ai.cd = 2.6; }
+          if (ai.t <= 0) { ai.state = 0; ai.cd = 2.6 * cdOf(sim, e); }
         }
         break;
       case 'shooter': {
@@ -62,7 +66,7 @@ export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
         else if (d < want - 35) { mx = -ux; my = -uy; }
         else { mx = -uy * 0.35 * (e.id % 2 ? 1 : -1); my = ux * 0.35 * (e.id % 2 ? 1 : -1); }
         if (ai.cd <= 0 && d < shot.range) {
-          ai.cd = shot.cd * sim.rng.range(0.85, 1.2);
+          ai.cd = shot.cd * sim.rng.range(0.85, 1.2) * cdOf(sim, e);
           enemyShoot(sim, e, Math.atan2(dy, dx));
         }
         break;
@@ -74,7 +78,7 @@ export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
           // 闪光的不会自爆：打倒它就一定能得到，不会被自己炸没
           if (d < b.radius * 0.6 && !e.shiny) {
             ai.state = 1; ai.t = 0.85;
-            sim.emit(['warn', 0, r1(e.x), r1(e.y), b.radius, 850, 0, 0]);
+            sim.emit(['warn', 0, r1(e.x), r1(e.y), r1(b.radius * sim.enemyMod(e, 'spec').size), 850, 0, 0]);
           }
         } else {
           ai.t -= dt;
@@ -127,38 +131,47 @@ function r2(v: number) { return Math.round(v * 100) / 100; }
 
 export function enemyShoot(sim: GameSim, e: Enemy, ang: number, override?: { count?: number; spread?: number; speed?: number; power?: number; homing?: number; fx?: string; size?: number }) {
   const shot = e.def.shot!;
+  const m = sim.enemyMod(e, 'spec');
   const n = override?.count ?? shot.count ?? 1;
   const spread = override?.spread ?? shot.spread ?? 0;
   const speed = override?.speed ?? shot.speed;
   const ring = spread >= TAU - 0.01;
-  const power = (override?.power ?? shot.power) * enemyDmgMult(sim.wave) * 0.85;
+  const power = (override?.power ?? shot.power) * enemyDmgMult(sim.wave) * 0.85 * m.dmg;
   for (let i = 0; i < n; i++) {
     const a = ring ? ang + (i / n) * TAU : n > 1 ? ang + spread * (i / (n - 1) - 0.5) : ang;
     sim.spawnProj({
       fx: override?.fx ?? shot.fx, owner: -1, skill: null, type: e.def.types[0],
       x: e.x, y: e.y - 6, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
-      r: override?.size ?? shot.size ?? 3, dmg: power, pierce: 0, life: (shot.range * 1.6) / Math.max(40, speed),
-      homing: override?.homing ?? 0, crit: 0, knock: 0, slow: shot.slow,
+      r: (override?.size ?? shot.size ?? 3) * m.size, dmg: power, pierce: 0, life: (shot.range * 1.6) / Math.max(40, speed),
+      homing: override?.homing ?? 0, crit: m.crit, knock: 0, slow: shot.slow, drain: m.drain || undefined, chill: m.chill || undefined, src: e.id,
     });
   }
 }
 
 function explode(sim: GameSim, e: Enemy) {
   const b = e.def.blast!;
-  const dmg = b.power * enemyDmgMult(sim.wave);
-  sim.emit(['boom', r1(e.x), r1(e.y), b.radius, b.cloud ? 'e_cloud' : 'e_blast']);
+  const m = sim.enemyMod(e, 'spec');
+  const dmg = b.power * enemyDmgMult(sim.wave) * m.dmg;
+  const radius = b.radius * m.size;
+  sim.emit(['boom', r1(e.x), r1(e.y), r1(radius), b.cloud ? 'e_cloud' : 'e_blast']);
   for (const p of sim.players) {
-    if (Math.hypot(p.x - e.x, p.y - e.y) <= b.radius + PLAYER_R) hurtPlayer(sim, p, dmg, 'spec');
+    if (Math.hypot(p.x - e.x, p.y - e.y) <= radius + PLAYER_R) enemyHurt(sim, p, dmg, 'spec', m, null);
   }
   if (b.cloud) {
-    sim.zones.push({ id: sim.newId(), fx: 'e_cloud', owner: -1, skill: null, type: 'poison', x: e.x, y: e.y, r: b.radius * 0.9, life: 3.5, maxLife: 3.5, tick: 0.5, t: 0, dmg: dmg * 0.25 });
+    sim.zones.push({ id: sim.newId(), fx: 'e_cloud', owner: -1, skill: null, type: 'poison', x: e.x, y: e.y, r: radius * 0.9, life: 3.5, maxLife: 3.5, tick: 0.5, t: 0, dmg: dmg * 0.25 });
   }
-  sim.killEnemy(e, null, true);
+  sim.killEnemy(e, null, 'self');
 }
 
-function enemyStrike(sim: GameSim, x: number, y: number, r: number, delay: number, power: number, fx: string) {
-  sim.strikes.push({ owner: -1, skill: null, x, y, r, t: delay, dmg: power * enemyDmgMult(sim.wave), type: 'normal', fx, cat: 'phys', enemy: true });
-  sim.emit(['warn', 0, r1(x), r1(y), r, Math.round(delay * 1000), 0, 0]);
+/** 敌人的定点攻击（落石、念力打击）：按出招时它脚下的场地修正伤害、范围、暴击、命中回复与减速 */
+function enemyStrike(sim: GameSim, e: Enemy, x: number, y: number, r: number, delay: number, power: number, fx: string) {
+  const m = sim.enemyMod(e, 'phys');
+  const rr = r * m.size;
+  sim.strikes.push({
+    owner: -1, skill: null, x, y, r: rr, t: delay, dmg: power * enemyDmgMult(sim.wave) * m.dmg, type: e.def.types[0], fx, cat: 'phys', enemy: true,
+    crit: m.crit, drain: m.drain || undefined, chill: m.chill || undefined, src: e.id,
+  });
+  sim.emit(['warn', 0, r1(x), r1(y), r1(rr), Math.round(delay * 1000), 0, 0]);
 }
 
 // ---------------------------------------------------------------- 精英
@@ -166,7 +179,7 @@ function enemyStrike(sim: GameSim, x: number, y: number, r: number, delay: numbe
 function beedrill(sim: GameSim, e: Enemy, _t: SimPlayer, ux: number, uy: number, d: number, dt: number): [number, number] {
   const ai = e.ai;
   if (ai.state === 0) {
-    if (ai.cd <= 0) { ai.cd = 2.0; enemyShoot(sim, e, Math.atan2(uy, ux)); }
+    if (ai.cd <= 0) { ai.cd = 2.0 * cdOf(sim, e); enemyShoot(sim, e, Math.atan2(uy, ux)); }
     if (ai.cd2 <= 0 && d < 170) {
       ai.state = 1; ai.t = 0.55; ai.ax = ux; ai.ay = uy;
       sim.emit(['warn', 1, r1(e.x), r1(e.y), 12, 550, r2(Math.atan2(uy, ux)), 170]);
@@ -178,16 +191,16 @@ function beedrill(sim: GameSim, e: Enemy, _t: SimPlayer, ux: number, uy: number,
     if (ai.t <= 0) { ai.state = 2; ai.t = 0.4; }
     return [0, 0];
   }
-  if (ai.t <= 0) { ai.state = 0; ai.cd2 = 3.2; }
+  if (ai.t <= 0) { ai.state = 0; ai.cd2 = 3.2 * cdOf(sim, e); }
   return [ai.ax * 5.5, ai.ay * 5.5];
 }
 
 function onix(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number): [number, number] {
   const ai = e.ai;
   if (ai.cd <= 0) {
-    ai.cd = 3.0;
+    ai.cd = 3.0 * cdOf(sim, e);
     for (let i = 0; i < 3; i++) {
-      enemyStrike(sim, t.x + sim.rng.range(-40, 40), t.y + sim.rng.range(-40, 40), 26, 1.0 + i * 0.15, e.def.shot!.power, 'e_rock');
+      enemyStrike(sim, e, t.x + sim.rng.range(-40, 40), t.y + sim.rng.range(-40, 40), 26, 1.0 + i * 0.15, e.def.shot!.power, 'e_rock');
     }
   }
   return [ux, uy];
@@ -207,9 +220,9 @@ function gengar(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number, d:
     }
     return [0, 0];
   }
-  if (ai.cd <= 0 && d < 220) { ai.cd = 1.6; enemyShoot(sim, e, Math.atan2(uy, ux)); }
+  if (ai.cd <= 0 && d < 220) { ai.cd = 1.6 * cdOf(sim, e); enemyShoot(sim, e, Math.atan2(uy, ux)); }
   if (ai.cd2 <= 0) {
-    ai.cd2 = 7;
+    ai.cd2 = 7 * cdOf(sim, e);
     ai.state = 1; ai.t = 0.7;
     e.hidden = true;
     sim.emit(['boom', r1(e.x), r1(e.y), 20, 'e_vanish']);
@@ -234,11 +247,11 @@ function snorlax(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number, d
         return [0, 0];
       }
       if (ai.cd2 <= 0) {
-        ai.cd2 = 4.2 * k;
+        ai.cd2 = 4.2 * k * cdOf(sim, e);
         enemyShoot(sim, e, sim.rng.range(0, TAU));
       }
       if (ai.cd <= 0) {
-        ai.cd = 6 * k;
+        ai.cd = 6 * k * cdOf(sim, e);
         ai.state = 1; ai.t = 0.5; ai.tx = t.x; ai.ty = t.y; ai.ax = e.x; ai.ay = e.y;
         sim.emit(['warn', 0, r1(t.x), r1(t.y), 56, 1100, 0, 0]);
         return [0, 0];
@@ -257,9 +270,10 @@ function snorlax(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number, d
       if (ai.t <= 0) {
         e.hidden = false;
         ai.state = 0;
-        sim.emit(['boom', r1(e.x), r1(e.y), 56, 'e_slam']);
+        const m = sim.enemyMod(e, 'phys');
+        sim.emit(['boom', r1(e.x), r1(e.y), r1(56 * m.size), 'e_slam']);
         for (const p of sim.players) {
-          if (Math.hypot(p.x - e.x, p.y - e.y) <= 56 + PLAYER_R) hurtPlayer(sim, p, e.dmg * 1.3, 'phys', e);
+          if (Math.hypot(p.x - e.x, p.y - e.y) <= 56 * m.size + PLAYER_R) enemyHurt(sim, p, e.dmg * 1.3 * m.dmg, 'phys', m, e, true);
         }
         enemyShoot(sim, e, 0, { count: 12, spread: TAU, speed: 120, fx: 'e_ring' });
       }
@@ -321,7 +335,7 @@ function mew(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number, d: nu
     enemyShoot(sim, e, Math.PI / 16, { count: 16, spread: TAU, speed: 100 });
   }
   if (ai.cd <= 0) {
-    ai.cd = 2.6 * k;
+    ai.cd = 2.6 * k * cdOf(sim, e);
     const pat = ai.state === 0 ? (ai.tx++ % 4) : 0;
     switch (pat) {
       case 0:
@@ -336,7 +350,7 @@ function mew(sim: GameSim, e: Enemy, t: SimPlayer, ux: number, uy: number, d: nu
         sim.emit(['boom', r1(e.x), r1(e.y), 22, 'e_vanish']);
         break;
       case 3:
-        for (const p of sim.players) if (p.alive && !p.down) enemyStrike(sim, p.x, p.y, 40, 1.0, ENEMIES.mew.shot!.power * 1.4, 'e_psy');
+        for (const p of sim.players) if (p.alive && !p.down) enemyStrike(sim, e, p.x, p.y, 40, 1.0, ENEMIES.mew.shot!.power * 1.4, 'e_psy');
         break;
     }
   }

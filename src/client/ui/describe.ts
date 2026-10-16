@@ -1,15 +1,12 @@
 import { GROUP_NAME, ITEMS } from '../../shared/items';
 import { isNative, type LineId } from '../../shared/pokemon';
-import { SHINY_MAX } from '../../shared/shiny';
+import { SHINY_MAX, SHINY_MAX_ODDS } from '../../shared/shiny';
 import { CAT_NAME, SKILLS, TIER_COLOR, TIER_NAME, skillLevelCd, skillLevelDmg } from '../../shared/skills';
 import { MOD_LABEL, fmtMod, type ModKey } from '../../shared/stats';
 import { TYPE_COLOR, TYPE_NAME, type PType } from '../../shared/types';
 import { iconImg } from '../gfx/icons';
 import { skillIconImg } from '../gfx/skillicons';
 import { h } from './dom';
-
-/** 闪光几率的上限：「1/200」 */
-const SHINY_ODDS_MAX = `1/${Math.round(1 / SHINY_MAX)}`;
 
 export function typeBadge(t: PType) {
   return h('span', { class: 'type', style: `background:${TYPE_COLOR[t]}` }, TYPE_NAME[t]);
@@ -77,7 +74,7 @@ export function itemInfo(id: string, count = 0) {
     h('div', { class: 'info-head' }, iconImg(it.icon, 2), h('b', null, it.name, count > 1 ? ` ×${count}` : ''), tierBadge(it.tier)),
     h('div', { class: 'muted small' }, GROUP_NAME[it.group]),
     ...itemLines(id).map((l) => h('div', { class: /-\d/.test(l) ? 'neg' : 'pos' }, l)),
-    it.mods?.shiny ? h('div', { class: 'muted small' }, `和研究所、训练家的加成加在一起，闪光宝可梦出现的几率最高 ${SHINY_ODDS_MAX}`) : null,
+    it.mods?.shiny ? h('div', { class: 'muted small' }, `和研究所、训练家的加成加在一起，闪光宝可梦出现的几率最高 ${SHINY_MAX_ODDS}`) : null,
   );
 }
 
@@ -107,14 +104,14 @@ export const STAT_ROWS: [string, string, (v: number) => string][] = [
   ['moveSpeed', '移动速度', (v) => String(v)],
   ['enemies', '敌人数量', (v) => `${v >= 0 ? '+' : ''}${v}%`],
   ['recruit', '崇拜几率', (v) => `${v >= 0 ? '+' : ''}${v}%`],
-  // 全队的闪光几率：1/N（所有加成合计最高 1/200）
+  // 全队的闪光几率：1/N（所有加成合计最高 1/800）
   ['shiny', '闪光几率', (v) => `1/${v}`],
 ];
 
 /** 属性页上闪光几率那一格的说明；到上限时数值标成金色 */
 export function shinyStatTip(v: number) {
   const max = v <= Math.round(1 / SHINY_MAX);
-  return { max, text: `闪光宝可梦出现的几率：研究所、训练家和闪耀护符的加成加在一起，最高 ${SHINY_ODDS_MAX}${max ? '（已经到上限）' : ''}` };
+  return { max, text: `闪光宝可梦出现的几率：研究所、训练家和闪耀护符的加成加在一起，最高 ${SHINY_MAX_ODDS}${max ? '（已经到上限）' : ''}` };
 }
 
 export function statCardText(stat: ModKey, amount: number) {

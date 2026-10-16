@@ -5,7 +5,7 @@ import { ACHIEVEMENT_BY_ID, NO_RUN, metaBonus, type LifetimeStats } from '../src
 import { PROTOCOL_VERSION, decodeSnapshot, encodeSnapshot, type S2C } from '../src/shared/protocol';
 import { buildOf, validateBuild } from '../src/shared/pvp/build';
 import { Room } from '../src/shared/room';
-import { SHINY_BASE, SHINY_MAX, shinyOdds, shinyRate } from '../src/shared/shiny';
+import { SHINY_BASE, SHINY_MAX, SHINY_MAX_ODDS, shinyOdds, shinyRate } from '../src/shared/shiny';
 import { GameSim } from '../src/shared/sim/game';
 import { createPlayerFromBuild, giveItem } from '../src/shared/sim/player';
 import { emptyMods, derive } from '../src/shared/stats';
@@ -13,14 +13,17 @@ import { TRAINERS } from '../src/shared/trainers';
 
 const MAX_LAB = { shiny: 5 };
 
-test('闪光几率：基础 1/1000，研究所和训练家可以提高，最高 1/200', () => {
+test('闪光几率：基础 1/4000，研究所和训练家可以提高，最高 1/800', () => {
   assert.equal(shinyRate(0), SHINY_BASE);
-  assert.equal(shinyOdds(0), '1/1000');
+  assert.equal(shinyOdds(0), '1/4000');
+  assert.equal(SHINY_BASE, 1 / 4000);
+  assert.equal(SHINY_MAX, 1 / 800);
+  assert.equal(SHINY_MAX_ODDS, '1/800');
   assert.ok(shinyRate(60) > shinyRate(0));
   const lab = metaBonus(MAX_LAB).mods.shiny ?? 0;
-  assert.equal(shinyOdds(lab), '1/250', '研究所满级');
+  assert.equal(shinyOdds(lab), '1/1000', '研究所满级');
   assert.equal(shinyRate(lab + (TRAINERS.rocket.mods.shiny ?? 0)), SHINY_MAX, '研究所满级 + 火箭队正好到上限');
-  assert.equal(shinyRate(99999), SHINY_MAX, '不会超过 1/200');
+  assert.equal(shinyRate(99999), SHINY_MAX, '不会超过 1/800');
   const ash = new GameSim([{ id: 1, name: 'a', line: 'squirtle', meta: {} }], 1);
   assert.equal(ash.shinyRate(), SHINY_BASE);
   const rocket = new GameSim([{ id: 1, name: 'a', line: 'squirtle', meta: MAX_LAB, trainer: 'rocket' }], 1);
@@ -32,17 +35,19 @@ test('闪光几率：基础 1/1000，研究所和训练家可以提高，最高 
   assert.equal(coop.shinyRate(), shinyRate(100), '联机时按队伍里最高的算');
 });
 
-test('闪耀护符：+50% 闪光几率，和其它加成合计后也不会超过 1/200', () => {
+test('闪耀护符：+50% 闪光几率，和其它加成合计后也不会超过 1/800', () => {
   const charm = ITEMS.shiny_charm.mods?.shiny ?? 0;
   assert.equal(charm, 50);
   const plain = new GameSim([{ id: 1, name: 'a', line: 'squirtle', meta: {} }], 1);
   giveItem(plain, plain.players[0], 'shiny_charm');
   assert.equal(plain.players[0].d.shiny, 50);
-  assert.equal(plain.shinyRate(), SHINY_BASE * 1.5, '只有闪耀护符：1/667');
+  assert.equal(plain.shinyRate(), SHINY_BASE * 1.5, '只有闪耀护符');
+  assert.equal(shinyOdds(50), '1/2667');
   const rocket = new GameSim([{ id: 1, name: 'a', line: 'squirtle', meta: {}, trainer: 'rocket' }], 1);
   giveItem(rocket, rocket.players[0], 'shiny_charm');
-  assert.equal(rocket.shinyRate(), shinyRate(150), '火箭队 + 闪耀护符：1/400');
-  // 研究所满级 + 火箭队已经是 1/200，再带闪耀护符也不会更高
+  assert.equal(rocket.shinyRate(), shinyRate(150), '火箭队 + 闪耀护符');
+  assert.equal(shinyOdds(150), '1/1600');
+  // 研究所满级 + 火箭队已经是 1/800，再带闪耀护符也不会更高
   const max = new GameSim([
     { id: 1, name: 'a', line: 'squirtle', meta: MAX_LAB, trainer: 'rocket' },
     { id: 2, name: 'b', line: 'charmander', meta: MAX_LAB, trainer: 'rocket' },
@@ -50,26 +55,26 @@ test('闪耀护符：+50% 闪光几率，和其它加成合计后也不会超过
   for (const p of max.players) giveItem(max, p, 'shiny_charm');
   assert.equal(max.players[0].d.shiny, 450);
   assert.equal(max.shinyRate(), SHINY_MAX);
-  assert.ok(max.shinyRate() <= 1 / 200);
+  assert.ok(max.shinyRate() <= 1 / 800);
   let n = 0;
-  const N = 60000;
+  const N = 240000;
   for (let i = 0; i < N; i++) {
     if (max.spawnEnemy('rattata', 100, 100).shiny) n++;
     if (max.enemies.length > 500) max.enemies = [];
   }
-  assert.ok(n < N * SHINY_MAX * 1.25, `最终几率不超过 1/200：${n} / ${N}`);
+  assert.ok(n < N * SHINY_MAX * 1.25, `最终几率不超过 1/800：${n} / ${N}`);
 });
 
 test('每只宝可梦出现时按闪光几率判定（统计）', () => {
   const sim = new GameSim([{ id: 1, name: 'a', line: 'squirtle', meta: MAX_LAB, trainer: 'rocket' }], 77);
   let n = 0;
-  const N = 60000;
+  const N = 240000;
   for (let i = 0; i < N; i++) {
     if (sim.spawnEnemy('rattata', 100, 100).shiny) n++;
     if (sim.enemies.length > 500) sim.enemies = [];
   }
   const want = N * SHINY_MAX;
-  assert.ok(Math.abs(n - want) < want * 0.25, `1/200：${n} / ${N}`);
+  assert.ok(Math.abs(n - want) < want * 0.25, `1/800：${n} / ${N}`);
 });
 
 test('闪光宝可梦六项能力各 +1%，其它能力不变', () => {

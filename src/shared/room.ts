@@ -4,7 +4,7 @@ import { pickupCode } from './pickups';
 import { MAX_PLAYERS, PROTOCOL_VERSION, encodeSnapshot, type C2S, type JoinIdentity, type LobbyPlayer, type RoomInfo, type S2C } from './protocol';
 import { trainerOf } from './trainers';
 import { PeerSync, cullEvents, type Conn } from './netsync';
-import { GameSim, TICK_RATE, type Ev } from './sim/game';
+import { GameSim, TICK_RATE, fieldEvent, type Ev } from './sim/game';
 
 export type { Conn } from './netsync';
 
@@ -163,13 +163,13 @@ export class Room {
     return '这局冒险已经结束了';
   }
 
-  /** 回到对局：重新发开局信息和现在的状态（地上的掉落物、场上的闪光宝可梦） */
+  /** 回到对局：重新发开局信息和现在的状态（局部属性场地、地上的掉落物、场上的闪光宝可梦） */
   private resync(id: number, m: Member) {
     this.send(m.conn, { t: 'joined', code: this.code, you: id, solo: this.solo, token: m.token });
     const sim = this.sim;
     if (!sim) { this.sendLobby(); return; }
     this.send(m.conn, { t: 'start', w: sim.w, h: sim.h, players: this.startPlayers() });
-    const ev: Ev[] = [];
+    const ev: Ev[] = sim.fields.map((f) => fieldEvent(f, sim.waveT));
     for (const pk of sim.pickups) ev.push(['drop', pk.id, pickupCode(pk.kind), Math.round(pk.x), Math.round(pk.y), Math.round(pk.value * 10) / 10]);
     for (const e of sim.enemies) if (e.shiny && !e.dead) ev.push(['shiny', e.id, e.kind, Math.round(e.x), Math.round(e.y)]);
     if (ev.length) this.send(m.conn, { t: 'ev', e: ev });
@@ -261,6 +261,7 @@ export class Room {
         else if (msg.cmd === 'xp') sim.debugXp(p, 400);
         else if (msg.cmd === 'shiny') sim.forceShiny += 3;
         else if (msg.cmd === 'items') sim.debugItems(p);
+        else if (msg.cmd === 'field' && sim.phase === 'wave') sim.debugField();
         return;
       }
       case 'pause':

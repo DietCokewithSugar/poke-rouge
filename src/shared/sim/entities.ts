@@ -88,6 +88,12 @@ export interface SimPlayer {
   buff: { haste: number; spe: number };
   /** 地图上的增幅种子：每种还剩几秒 */
   boosts: Record<BoostId, number>;
+  /** 熔岩池的灼伤还剩几秒（离开熔岩后还会持续一会儿），fieldDot 是掉血的计时 */
+  fieldBurn: number;
+  fieldDot: number;
+  /** 繁茂草丛的命中回复：这一秒从什么时候开始、已经回复了多少 */
+  drainAt: number;
+  drained: number;
   slowT: number;
   slowAmt: number;
   regenAcc: number;
@@ -166,6 +172,18 @@ export interface Enemy {
   orbitHit?: Map<number, number>;
   /** 对战：这个目标代表的玩家（伤害会转给该玩家） */
   pvp?: SimPlayer;
+  /** 熔岩池的灼伤还剩几秒 */
+  fieldBurn?: number;
+  /** 繁茂草丛的命中回复：这一秒从什么时候开始、已经回复了多少 */
+  drainAt?: number;
+  drained?: number;
+}
+
+/** 招式命中时还要结算的场地效果：暴击率（百分点）、命中回复的比例、命中减速 */
+export interface HitFx {
+  crit?: number;
+  drain?: number;
+  chill?: boolean;
 }
 
 export interface Proj {
@@ -187,6 +205,11 @@ export interface Proj {
   crit: number;
   knock: number;
   status?: SkillDef['status'];
+  /** 场地效果：命中回复的比例、命中减速 */
+  drain?: number;
+  chill?: boolean;
+  /** 敌人弹体：是谁射的（命中回复要回到它身上） */
+  src?: number;
 }
 
 export interface Zone {
@@ -199,6 +222,10 @@ export interface Zone {
   life: number; maxLife: number;
   tick: number; t: number;
   dmg: number;
+  /** 场地效果：暴击率（百分点）、命中回复、命中减速 */
+  crit?: number;
+  drain?: number;
+  chill?: boolean;
 }
 
 export interface Strike {
@@ -214,6 +241,11 @@ export interface Strike {
   cat: 'phys' | 'spec';
   /** 直线形（延迟光束）；r 为宽度 */
   line?: { ang: number; len: number };
+  /** 场地效果：暴击率（百分点）、命中回复、命中减速；src 是出招的敌人 */
+  crit?: number;
+  drain?: number;
+  chill?: boolean;
+  src?: number;
 }
 
 export interface Pickup {

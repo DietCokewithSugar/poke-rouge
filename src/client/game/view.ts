@@ -1,16 +1,20 @@
+import { DEX } from '../../shared/dex';
 import { ENEMIES, ENEMY_IDS } from '../../shared/enemies';
+import { FIELDS, FIELD_IDS, decodeCells, fieldBurns, fieldGrid, fieldSpeed, type FieldId } from '../../shared/fields';
 import { decodeSnapshot, type PvpSeatInfo, type SnapEnemy, type SnapPlayer, type SnapProj, type SnapZone, type Snapshot } from '../../shared/protocol';
 import { FX_KINDS, SKILLS } from '../../shared/skills';
+import { PH_BURN } from '../../shared/sim/combat';
 import { REVIVE_RADIUS, type Ev, type MeState, type PublicState } from '../../shared/sim/game';
 import { sfx } from '../audio';
 import { BOOSTS, PICKUP_KINDS, boostOfSeed, type BoostId } from '../../shared/pickups';
 import { FxLayer, drawPickup, drawProj, drawZone, pxCircle, pxRing, twinkle } from '../gfx/fx';
-import { artGlow, hasArt } from '../gfx/pickups';
+import { buildField, drawCrystal, drawFieldAir, drawFieldGround, drawFieldName, inField, type FieldVis } from '../gfx/fields';
+import { BLAST_KIND, artGlow, hasArt } from '../gfx/pickups';
 import { vis, type Trail } from '../gfx/vfx';
 import { shownAmount } from '../../shared/stats';
 import { TYPES } from '../../shared/types';
 import { Animator, dirRow, preload, shadowSize } from '../gfx/sprites';
-import { LINE_OF_DEX } from '../../shared/pokemon';
+import { LINE_OF_DEX, formOf } from '../../shared/pokemon';
 import { BORDER, arenaCanvas } from '../gfx/tiles';
 import { moveVector } from '../input';
 import type { Settings } from '../save';
@@ -74,6 +78,11 @@ export class GameView {
   private playerVis = new Map<number, PlayerVis>();
   private corpses: Corpse[] = [];
   private pickups = new Map<number, { kind: number; x: number; y: number; value: number }>();
+  /** 场上的局部属性场地（形状来自 'field' 事件，是否生效以公共状态为准） */
+  private fields = new Map<number, FieldVis>();
+  /** 自己上一帧站在哪块场地里；每块场地上次提示「进入」的时间 */
+  private lastHere: number | null = null;
+  private enteredAt = new Map<number, number>();
   private flyers: Flyer[] = [];
   private fx = new FxLayer();
   private local = { x: 0, y: 0, dir: Math.PI / 2, moving: false, synced: false };
@@ -238,6 +247,11 @@ export class GameView {
             this.fx.text(pos.x, pos.y - 38, '效果拔群！', '#ff8c5a', 10, 0.9);
           }
           if (by === this.you) sfx(crit ? 'crit' : 'hit');
+        } else if (hf & PH_BURN) {
+          // 熔岩池的灼伤：橙色的小数字、冒火星，不像挨打那样闪红
+          this.fx.text(pos.x, pos.y - 24, `-${shownAmount(dmg)}`, '#ffa040', 10, 0.6);
+          for (let i = 0; i < 3; i++) this.fx.px(pos.x + (Math.random() - 0.5) * 10, pos.y - 4, Math.random() < 0.5 ? '#ff6a1f' : '#ffb22e', { vy: -40, life: 0.4 });
+          if (pid === this.you) this.hurtFlash = Math.max(this.hurtFlash, 0.12);
         } else {
           this.fx.text(pos.x, pos.y - 26, `-${shownAmount(dmg)}`, hf & 16 ? '#d070ff' : '#ff5f6d', 12);
           const v = this.playerVis.get(pid);
@@ -391,12 +405,57 @@ export class GameView {
         this.biome = n(3);
         this.local.synced = false;
         this.pickups.clear();
+        this.fields.clear();
         this.corpses = [];
         this.shinyEnemies.clear();
         this.hooks.onWave(n(1));
         sfx('wave');
         break;
+      case 'field': {
+        const kind = FIELD_IDS[n(2)];
+        if (!kind) break;
+        const f = buildField(n(1), kind, decodeCells(ev[6] as number[]), fieldGrid(this.w, this.h).cols, n(3), n(4), this.time + n(5), this.time);
+        this.fields.set(f.id, f);
+        break;
+      }
+      case 'fieldOff': this.fields.clear(); break;
     }
+  }
+
+  /** (x, y) 所在的、已经生效的场地 */
+  fieldKindAt(x: number, y: number): FieldId | null {
+    for (const f of this.fields.values()) if (this.time >= f.activeAt && inField(f, x, y)) return f.kind;
+    return null;
+  }
+
+  /** 自己站在哪块场地里（HUD 上把这块的卡片点亮） */
+  fieldHere(): number | null {
+    for (const f of this.fields.values()) if (this.time >= f.activeAt && inField(f, this.local.x, this.local.y)) return f.id;
+    return null;
+  }
+
+  /** 以公共状态为准：已经生效的就算生效；这一波已经没有的场地（漏掉了消失的事件）去掉 */
+  private syncFields() {
+    const pf = this.pub?.fields;
+    if (!pf) return;
+    for (const s of pf) {
+      const f = this.fields.get(s.id);
+      if (f && s.on && f.activeAt > this.time) f.activeAt = this.time;
+    }
+    if (this.pub?.phase !== 'wave') return;
+    for (const [id, f] of this.fields) if (this.time - f.born > 2 && !pf.some((s) => s.id === id)) this.fields.delete(id);
+  }
+
+  /** 走进一块场地时在头顶提示一下（同一块 6 秒内只提示一次） */
+  private noteField() {
+    const here = this.fieldHere();
+    if (here === this.lastHere) return;
+    this.lastHere = here;
+    const f = here === null ? undefined : this.fields.get(here);
+    if (!f || (this.enteredAt.get(f.id) ?? -99) > this.time - 6) return;
+    this.enteredAt.set(f.id, this.time);
+    // 刚生效时场地中间还写着名字，不用再提示
+    if (this.time - f.activeAt > 3) this.fx.text(this.local.x, this.local.y - 40, `进入${FIELDS[f.kind].name}`, FIELDS[f.kind].color, 11, 1.2);
   }
 
   private skillFx(ev: Ev) {
@@ -409,9 +468,9 @@ export class GameView {
     if (!this.settings.shake) this.fx.shake = 0;
   }
 
-  /** 踩到种子：头顶飘字说明效果；橙橙果只冒一点光（回复的绿色数字由 'heal' 事件显示） */
+  /** 踩到种子：头顶飘字说明效果；橙橙果只冒一点光（回复的绿色数字由 'heal' 事件显示）；爆炸之种的爆炸由 'boom' 事件画 */
   private pickedItem(kind: number, boost: BoostId | null, pid: number) {
-    if (!hasArt(kind)) return;
+    if (!hasArt(kind) || kind === BLAST_KIND) return;
     const pos = this.playerPos(pid);
     if (!pos) return;
     if (boost) {
@@ -460,6 +519,7 @@ export class GameView {
     this.lastFrame = now;
     this.time += dt;
     this.updateLocal(dt, now);
+    if (this.fields.size) this.noteField();
     this.fx.update(dt);
     this.render(now, dt);
   };
@@ -493,7 +553,9 @@ export class GameView {
       return;
     }
     const mv = inWave && !down && this.canMove() ? moveVector() : { x: 0, y: 0 };
-    const speed = this.me?.speed ?? 100;
+    // 服务器发来的是不算场地的速度：按自己脚下的场地在本地乘上，走进阵雨、草丛时马上变慢，不用等服务器
+    const here = this.me && this.fieldKindAt(this.local.x, this.local.y);
+    const speed = (this.me?.speed ?? 100) * (here && this.me ? fieldSpeed(here, formOf(this.me.line, this.me.stage).types) : 1);
     this.local.moving = !!(mv.x || mv.y);
     if (this.local.moving) {
       this.local.x = Math.max(8, Math.min(this.w - 8, this.local.x + mv.x * speed * dt));
@@ -551,6 +613,11 @@ export class GameView {
 
     const ip = this.interp();
     const t = this.time;
+    const viewRect = { x0: cx, y0: cy, x1: cx + this.viewW, y1: cy + this.viewH };
+
+    // 局部属性场地
+    this.syncFields();
+    for (const f of this.fields.values()) drawFieldGround(ctx, f, t, viewRect);
 
     // 区域
     if (ip) {
@@ -624,6 +691,11 @@ export class GameView {
         if (down && !vis.down) vis.anim.play('Faint', true);
         if (!down && vis.down) vis.anim.loop('Idle');
         vis.down = down;
+        // 站在熔岩池里、没有火和岩石属性：身上冒火苗
+        const fk = !down && this.fields.size ? this.fieldKindAt(x, y) : null;
+        if (fk && fieldBurns(fk, DEX[p.dex]?.types ?? []) && Math.random() < 0.3) {
+          this.fx.px(x + (Math.random() - 0.5) * 10, y - 6, Math.random() < 0.5 ? '#ff6a1f' : '#ffb22e', { vy: -35, life: 0.45 });
+        }
         const moving = p.id === this.you ? this.local.moving : (p.flags & 8) !== 0;
         const dir = p.id === this.you ? this.local.dir : p.dir;
         if (!down) {
@@ -641,6 +713,7 @@ export class GameView {
       c.anim.update(dt);
       list.push({ y: c.y, draw: () => c.anim.draw(ctx, c.x, c.y, c.scale, 0, Math.max(0, 1 - c.t / 0.7)) });
     }
+    for (const f of this.fields.values()) if (f.kind === 'crystal') list.push({ y: f.cy, draw: () => drawCrystal(ctx, f, t) });
     this.corpses = this.corpses.filter((c) => c.t < 0.7);
     list.sort((p, q) => p.y - q.y);
     for (const d of list) d.draw();
@@ -683,6 +756,8 @@ export class GameView {
     }
     this.flyers = this.flyers.filter((f) => f.t < 0.25);
 
+    for (const f of this.fields.values()) drawFieldAir(ctx, f, t, viewRect);
+    for (const f of this.fields.values()) drawFieldName(ctx, f, t);
     this.fx.drawAir(ctx, this.settings.damageNumbers);
 
     // 屏幕层：指向画面外倒下的队友（对战中也指向对手）

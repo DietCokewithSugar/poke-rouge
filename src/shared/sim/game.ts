@@ -1,23 +1,28 @@
 import { difficultyOf, type Difficulty, type DifficultyId } from '../difficulty';
 import { ENEMIES, ENEMY_INDEX } from '../enemies';
+import {
+  BURN_PHYS, FIELDS, FIELD_CELL, FIELD_FORM, FIELD_FROM, FIELD_IDS, FIELD_MAX_FRAC, FIELD_MIN_FRAC, FIELD_SECOND_FROM, FIELD_TOTAL_FRAC, LAVA_BIG, LAVA_DPS, LAVA_LINGER,
+  NO_MOVE_MOD, cellAt, encodeCells, fieldBurns, fieldCenter, fieldGrid, fieldSpeed, fieldTarget, growField, moveMod, pickFieldKind,
+  type Field, type FieldId, type MoveMod,
+} from '../fields';
 import { ITEMS } from '../items';
 import type { RunSummary } from '../meta';
 import {
-  BOOSTS, BOOST_DUR, BOOST_IDS, MAX_BERRIES, MAX_SEEDS, SEED_DROP_ELITE, SEED_DROP_MINION, berryHeal, boostOfSeed, isSeed, pickupCode,
-  type BoostId, type PickupKind,
+  BLAST_CROWD, BLAST_CROWD_R, BLAST_NAME, BLAST_RADIUS, BOOSTS, BOOST_DUR, BOOST_IDS, MAX_BERRIES, MAX_BLASTS, MAX_SEEDS, SEED_DROP_ELITE, SEED_DROP_MINION,
+  berryHeal, blastSeedCount, boostOfSeed, isSeed, pickupCode, type BoostId, type PickupKind,
 } from '../pickups';
 import { LINES, LINE_IDS, LINE_OF_DEX, formOf, isFinal, type LineId } from '../pokemon';
 import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
 import { SHINY_STAT, shinyName, shinyRate } from '../shiny';
-import { SKILLS, skillLevelCd } from '../skills';
+import { SKILLS, skillLevelCd, type SkillDef } from '../skills';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
 import { updateEnemy } from './ai';
 import { autopilot } from './autopilot';
 import { autoShop } from './autoshop';
-import { PLAYER_R, beamHit, healMult, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
+import { PLAYER_R, beamHit, enemyHurt, healMult, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
 import {
   addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, refreshOffers, rerollCards,
@@ -47,7 +52,17 @@ export interface PlayerInit {
 }
 
 /** 击败后崇拜你的基础几率：乱入的野生宝可梦最高，普通小怪很低，首领不会崇拜 */
-export const RECRUIT_BASE = { wild: 0.1, treasure: 0.12, minion: 0.0025, elite: 0.02 };
+export const RECRUIT_BASE = { wild: 1 / 30, treasure: 1 / 25, minion: 1 / 1200, elite: 1 / 150 };
+
+/** 爆炸之种只炸普通小怪：首领、精英、闪光宝可梦、乱入的野生宝可梦和宝藏宝可梦都不受影响 */
+export function blastable(e: Enemy): boolean {
+  return !e.dead && !e.hidden && !e.pvp && !e.shiny && e.def.rank === 'minion' && !e.def.wild && e.def.ai !== 'flee';
+}
+
+/** hit：被打倒；self：自爆（不会崇拜，糖果减半）；seed：被爆炸之种炸飞（不会崇拜，什么都不掉） */
+export type KillHow = 'hit' | 'self' | 'seed';
+
+type ItemSlot = 'berry' | 'seed' | 'blast';
 
 export type Command =
   | { t: 'level'; i: number; slot?: number }
@@ -110,6 +125,8 @@ export interface PublicState {
   interLeft: number;
   boss: { name: string; hp: number; max: number } | null;
   players: { id: number; name: string; trainer: string; line: LineId; dex: number; shiny?: boolean; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean; away?: boolean }[];
+  /** 场上的局部属性场地（形状由 'field' 事件发送）；on：已经生效 */
+  fields: { id: number; kind: FieldId; on: boolean }[];
   /** 对战模式的额外信息 */
   pvp?: PvpPublic;
 }
@@ -122,10 +139,30 @@ export class GameSim {
   private shinyRng: Rng;
   /** 地图道具（场上刷出的橙橙果、种子，击倒敌人掉的种子）也单独用一个随机数 */
   private itemRng: Rng;
+  /** 局部属性场地的种类、形状和位置也单独用一个随机数 */
+  private fieldRng: Rng;
   /** 冒险里地图上会出现橙橙果和增幅种子（对战里没有） */
   protected mapItems = true;
+  /** 冒险里地图上会出现局部属性场地（对战里没有） */
+  protected mapFields = true;
+  /** 场上的局部属性场地（波次结束时消失） */
+  fields: Field[] = [];
+  /** 每个格子属于哪块场地：fields 的下标 + 1，0 表示不在场地里 */
+  private fieldMap = new Uint8Array(0);
+  private fieldCols = 0;
+  private fieldRows = 0;
+  /** 已经宣布过生效的场地 */
+  private fieldOn = new Set<number>();
+  /** 本波中途再出现一块场地的时间（波次时间），-1 表示不会再出现 */
+  private fieldNext = -1;
+  /** 上一波开场的场地：下一波开场换一种 */
+  private lastField: FieldId | null = null;
   /** 本波场上刷出地图道具的时间表：[出现时间, 种类]，种子的种类出现时再定 */
-  private itemPlan: [number, 'berry' | 'seed'][] = [];
+  private itemPlan: [number, ItemSlot][] = [];
+  /** 下一次检查有没有人被小怪围住（波次时间） */
+  private crowdAt = 0;
+  /** 这一局已经提示过爆炸之种的用法 */
+  private blastHinted = false;
   /** 调试：接下来出现的 N 只宝可梦一定是闪光的 */
   forceShiny = 0;
   time = 0;
@@ -172,6 +209,7 @@ export class GameSim {
     this.rng = new Rng(seed);
     this.shinyRng = new Rng(seed ^ 0x5a17c0de);
     this.itemRng = new Rng(seed ^ 0x3c6ef372);
+    this.fieldRng = new Rng(seed ^ 0x1b873593);
     this.diff = difficultyOf(difficulty);
     for (const i of inits) this.players.push(createPlayer(this, i.id, i.name, i.line, i.meta, i));
     this.startPlayers = inits.length;
@@ -229,6 +267,100 @@ export class GameSim {
     return false;
   }
 
+  // ------------------------------------------------------------ 局部属性场地
+
+  /** (x, y) 所在的、已经生效的场地；forming：还在闪烁预告的也算 */
+  fieldAt(x: number, y: number, forming = false): FieldId | null {
+    if (!this.fields.length) return null;
+    const i = this.fieldMap[cellAt(this.fieldCols, this.fieldRows, x, y)] ?? 0;
+    const f = i ? this.fields[i - 1] : null;
+    return f && (forming || this.waveT >= f.activeAt) ? f.kind : null;
+  }
+
+  /** 玩家出招时脚下场地的修正；被熔岩灼伤时物理招式的伤害减半 */
+  castMod(p: SimPlayer, s: SkillDef): Readonly<MoveMod> {
+    const m = moveMod(this.fieldAt(p.x, p.y), s.type);
+    return p.fieldBurn > 0 && s.cat === 'phys' ? { ...m, dmg: m.dmg * BURN_PHYS } : m;
+  }
+
+  /** 野生宝可梦出招时脚下场地的修正：按它的第一属性算；被灼伤时物理攻击（接触、冲撞、落石）伤害减半 */
+  enemyMod(e: Enemy, cat: 'phys' | 'spec'): Readonly<MoveMod> {
+    if (!this.fields.length) return NO_MOVE_MOD;
+    const m = moveMod(this.fieldAt(e.x, e.y), e.def.types[0]);
+    return (e.fieldBurn ?? 0) > 0 && cat === 'phys' ? { ...m, dmg: m.dmg * BURN_PHYS } : m;
+  }
+
+  /** 野生宝可梦站在场地里的移动速度倍率 */
+  enemyFieldSpeed(e: Enemy): number {
+    return this.fields.length ? fieldSpeed(this.fieldAt(e.x, e.y), e.def.types) : 1;
+  }
+
+  private rebuildFieldMap() {
+    const { cols, rows } = fieldGrid(this.w, this.h);
+    this.fieldCols = cols;
+    this.fieldRows = rows;
+    this.fieldMap = new Uint8Array(cols * rows);
+    this.fields.forEach((f, i) => { for (const c of f.cells) this.fieldMap[c] = i + 1; });
+  }
+
+  /**
+   * 长出一块新的场地：不和其他场地挨着，也不长在玩家脚下；出现后先闪烁 FIELD_FORM 秒才生效。
+   * opening：波次开场的那一块（和上一波开场的换一种）
+   */
+  private spawnField(opening: boolean, want?: FieldId) {
+    if (!this.mapFields) return;
+    const { cols, rows } = fieldGrid(this.w, this.h);
+    const total = cols * rows;
+    const used = this.fields.reduce((a, f) => a + f.cells.length, 0);
+    const max = Math.min(Math.floor(total * FIELD_MAX_FRAC), Math.floor(total * FIELD_TOTAL_FRAC) - used);
+    const min = Math.ceil(total * FIELD_MIN_FRAC);
+    if (max < min) return;
+    const blocked = new Uint8Array(total);
+    const block = (cx: number, cy: number) => { if (cx >= 0 && cy >= 0 && cx < cols && cy < rows) blocked[cy * cols + cx] = 1; };
+    for (const f of this.fields) {
+      for (const c of f.cells) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) block((c % cols) + dx, Math.floor(c / cols) + dy);
+    }
+    const R = 44;
+    for (const p of this.players) {
+      if (!p.alive) continue;
+      for (let y = p.y - R; y <= p.y + R; y += FIELD_CELL / 2) {
+        for (let x = p.x - R; x <= p.x + R; x += FIELD_CELL / 2) if ((x - p.x) ** 2 + (y - p.y) ** 2 <= R * R) block(Math.floor(x / FIELD_CELL), Math.floor(y / FIELD_CELL));
+      }
+    }
+    const exclude = this.fields.map((f) => f.kind);
+    if (opening && this.lastField) exclude.push(this.lastField);
+    const team = this.players.map((p) => formOf(p.line, p.stage).types);
+    const kind = want ?? pickFieldKind(this.fieldRng, WAVES[this.wave - 1].biome, team, exclude);
+    const cells = growField(this.fieldRng, { cols, rows, blocked, target: fieldTarget(this.fieldRng, total, max), min, max });
+    if (!cells) return;
+    if (opening) this.lastField = kind;
+    const c = fieldCenter(cols, cells);
+    const f: Field = { id: this.newId(), kind, cells, cx: c.x, cy: c.y, activeAt: this.waveT + FIELD_FORM };
+    this.fields.push(f);
+    this.rebuildFieldMap();
+    this.emit(fieldEvent(f, this.waveT));
+  }
+
+  private clearFields() {
+    this.fields = [];
+    this.fieldNext = -1;
+    this.fieldOn.clear();
+    this.rebuildFieldMap();
+  }
+
+  private updateFields() {
+    if (this.fieldNext >= 0 && this.waveT >= this.fieldNext) {
+      this.fieldNext = -1;
+      this.spawnField(false);
+    }
+    for (const f of this.fields) {
+      if (this.fieldOn.has(f.id) || this.waveT < f.activeAt) continue;
+      this.fieldOn.add(f.id);
+      const F = FIELDS[f.kind];
+      this.emit(['msg', `${F.name}出现了！${F.short[0]}`]);
+    }
+  }
+
   spawnProj(p: Omit<Proj, 'id' | 'hit'>) {
     if (this.projs.length > 900) return;
     this.projs.push({ ...p, id: this.newId(), hit: new Set() });
@@ -277,11 +409,12 @@ export class GameSim {
     return shinyRate(bonus);
   }
 
-  killEnemy(e: Enemy, killer: SimPlayer | null, silent = false) {
+  killEnemy(e: Enemy, killer: SimPlayer | null, how: KillHow = 'hit') {
     if (e.dead) return;
     e.dead = true;
     e.hp = 0;
     this.emit(['die', e.id, Math.round(e.x), Math.round(e.y), e.kind]);
+    const silent = how !== 'hit';
     const credit = killer ?? this.players.find((p) => p.id === e.lastHit) ?? null;
     if (credit) {
       credit.stats.kills++;
@@ -300,9 +433,10 @@ export class GameSim {
       this.emit(['msg', `${e.def.name}被打倒了！`]);
       if (this.boss === e) this.boss = null;
     }
+    if (how === 'seed') return;
     // 难度增加的敌人不额外给糖果（每波收入不变，只增加危险）；香水带来的敌人照常给
     const cm = candyMult(this.wave) / this.diff.count;
-    if (silent && e.def.ai === 'bomber') {
+    if (how === 'self' && e.def.ai === 'bomber') {
       this.dropCandy(e.x, e.y, Math.max(1, Math.floor(e.def.candy / 2)) * cm);
       return;
     }
@@ -413,13 +547,19 @@ export class GameSim {
   }
 
   /** 橙橙果和种子：场上已经很多时不再出现 */
-  private dropItem(kind: PickupKind, x: number, y: number) {
-    if (!this.mapItems) return;
+  private dropItem(kind: PickupKind, x: number, y: number): Pickup | null {
+    if (!this.mapItems) return null;
     const seed = isSeed(kind);
     let n = 0;
     for (const pk of this.pickups) if (seed ? isSeed(pk.kind) : pk.kind === kind) n++;
-    if (n >= (seed ? MAX_SEEDS : MAX_BERRIES)) return;
-    this.dropPickup(kind, x, y, 1);
+    if (n >= (seed ? MAX_SEEDS : kind === 'seed_blast' ? MAX_BLASTS : MAX_BERRIES)) return null;
+    return this.dropPickup(kind, x, y, 1);
+  }
+
+  private dropBlast(x: number, y: number) {
+    if (!this.dropItem('seed_blast', x, y) || this.blastHinted) return;
+    this.blastHinted = true;
+    this.emit(['msg', `${BLAST_NAME}出现了！踩上去炸飞身边的小怪（炸飞的不给经验）`]);
   }
 
   /** 随机一种种子，优先挑场上还没有的 */
@@ -431,16 +571,19 @@ export class GameSim {
 
   /**
    * 每波在场上刷出的地图道具：橙橙果、种子各 1~2 个，首领波和群聚波各多 1 个，三人以上联机再各多 1 个，
-   * 在波次的 12%~88% 之间陆续出现
+   * 在波次的 12%~88% 之间陆续出现。爆炸之种（第 5 波起）在 25%~90% 之间出现：越到后面身后的小怪越多
    */
-  private planItems(big: boolean): [number, 'berry' | 'seed'][] {
+  private planItems(big: boolean): [number, ItemSlot][] {
     if (!this.mapItems) return [];
     const extra = (big ? 1 : 0) + Math.floor((this.players.length - 1) / 2);
     const list: ('berry' | 'seed')[] = [];
     for (let i = this.itemRng.int(1, 2) + extra; i > 0; i--) list.push('berry');
     for (let i = this.itemRng.int(1, 2) + extra; i > 0; i--) list.push('seed');
     this.itemRng.shuffle(list);
-    return list.map((k, i) => [this.waveDur * (0.12 + (0.76 * (i + this.itemRng.next())) / list.length), k]);
+    const plan: [number, ItemSlot][] = list.map((k, i) => [this.waveDur * (0.12 + (0.76 * (i + this.itemRng.next())) / list.length), k]);
+    const blasts = blastSeedCount(this.wave, this.players.length, this.horde);
+    for (let i = 0; i < blasts; i++) plan.push([this.waveDur * (0.25 + (0.65 * (i + this.itemRng.next())) / blasts), 'blast']);
+    return plan.sort((a, b) => a[0] - b[0]);
   }
 
   private updateItems() {
@@ -453,8 +596,43 @@ export class GameSim {
       const a = this.itemRng.range(0, Math.PI * 2), d = this.itemRng.range(70, 180);
       const x = Math.max(36, Math.min(this.w - 36, p.x + Math.cos(a) * d));
       const y = Math.max(40, Math.min(this.h - 36, p.y + Math.sin(a) * d));
-      this.dropItem(k === 'berry' ? 'berry' : this.pickSeed(), x, y);
+      if (k === 'blast') this.dropBlast(x, y);
+      else this.dropItem(k === 'berry' ? 'berry' : this.pickSeed(), x, y);
     }
+    this.blastWhenCrowded();
+  }
+
+  /** 被一大群小怪围住、附近又没有爆炸之种时，这一波剩下的爆炸之种提前一颗，出现在背对小怪的方向上 */
+  private blastWhenCrowded() {
+    if (this.waveT < this.crowdAt) return;
+    this.crowdAt = this.waveT + 0.5;
+    const next = this.itemPlan.findIndex(([, k]) => k === 'blast');
+    if (next < 0) return;
+    for (const p of this.activePlayers()) {
+      let n = 0, cx = 0, cy = 0;
+      for (const e of this.enemies) {
+        if (!blastable(e) || (e.x - p.x) ** 2 + (e.y - p.y) ** 2 > BLAST_CROWD_R ** 2) continue;
+        n++; cx += e.x; cy += e.y;
+      }
+      if (n < BLAST_CROWD) continue;
+      if (this.pickups.some((pk) => pk.kind === 'seed_blast' && (pk.x - p.x) ** 2 + (pk.y - p.y) ** 2 < 260 ** 2)) continue;
+      this.itemPlan.splice(next, 1);
+      const a = Math.atan2(p.y - cy / n, p.x - cx / n) + this.itemRng.range(-0.6, 0.6), d = this.itemRng.range(70, 110);
+      this.dropBlast(Math.max(36, Math.min(this.w - 36, p.x + Math.cos(a) * d)), Math.max(40, Math.min(this.h - 36, p.y + Math.sin(a) * d)));
+      return;
+    }
+  }
+
+  /** 踩到爆炸之种：半径内的普通小怪全部炸飞，什么都不掉 */
+  private detonate(p: SimPlayer, x: number, y: number) {
+    this.emit(['boom', Math.round(x), Math.round(y), BLAST_RADIUS, 'seed_blast']);
+    let n = 0;
+    for (const e of this.enemies) {
+      if (!blastable(e) || (e.x - x) ** 2 + (e.y - y) ** 2 > (BLAST_RADIUS + e.r) ** 2) continue;
+      this.killEnemy(e, p, 'seed');
+      n++;
+    }
+    this.emit(['txt', Math.round(x), Math.round(y) - 34, n ? `${BLAST_NAME}！炸飞了 ${n} 只` : `${BLAST_NAME}！`, '#ffb070']);
   }
 
   /** 踩到种子：这一种增幅刷新为 5 秒（不叠加数值） */
@@ -526,6 +704,8 @@ export class GameSim {
       p.shield = 0;
       p.buffT = 0;
       this.clearBoosts(p);
+      p.fieldBurn = 0;
+      p.fieldDot = 0;
       p.slowT = 0;
       p.sashUsed = false;
       p.sturdyUsed = false;
@@ -540,8 +720,12 @@ export class GameSim {
       this.dirty.add(p.id);
     });
     this.itemPlan = this.planItems(!!W.boss || this.horde);
+    this.crowdAt = 0;
     this.intruders = this.pickIntruders();
+    this.clearFields();
     this.emit(['wave', this.wave, this.waveDur, W.biome]);
+    if (this.wave >= FIELD_FROM) this.spawnField(true);
+    if (this.wave >= FIELD_SECOND_FROM) this.fieldNext = this.waveDur * this.fieldRng.range(0.35, 0.5);
     if (this.intruders.length) this.emit(['wild', this.intruders.map(([, id]) => ENEMIES[id].dex)]);
     if (this.horde) this.emit(['msg', '群聚出现了！野生宝可梦成群结队地来了！']);
   }
@@ -570,6 +754,7 @@ export class GameSim {
     this.strikes = [];
     this.pending = [];
     this.boss = null;
+    if (this.fields.length) { this.clearFields(); this.emit(['fieldOff']); }
     // 场上剩余的糖果和道具球自动归最近的玩家；橙橙果和种子留到下一波也没用，直接消失
     this.itemPlan = [];
     for (const pk of this.pickups) {
@@ -627,6 +812,8 @@ export class GameSim {
     } else if (pk.kind === 'ball') {
       p.crates.push(rollCrateItem(this, p));
       this.emit(['txt', Math.round(p.x), Math.round(p.y) - 26, '获得道具球！', '#ffd23f']);
+    } else if (pk.kind === 'seed_blast') {
+      this.detonate(p, pk.x, pk.y);
     } else {
       const b = boostOfSeed(pk.kind);
       if (b) this.boost(p, b);
@@ -652,6 +839,7 @@ export class GameSim {
     }
     if (this.phase !== 'wave') return;
     this.waveT += dt;
+    this.updateFields();
     this.updateSpawning(dt);
     this.updateItems();
     for (const p of this.players) {
@@ -780,6 +968,20 @@ export class GameSim {
       } else p.revive = Math.max(0, p.revive - dt * (helpers.length ? 0.5 : 0.15));
       return;
     }
+    if (this.fields.length || p.fieldBurn > 0) {
+      // 熔岩池：没有火、岩石属性的宝可梦站在里面会被灼伤，离开后还要再烧一会儿
+      if (fieldBurns(this.fieldAt(p.x, p.y), formOf(p.line, p.stage).types)) p.fieldBurn = LAVA_LINGER;
+      else p.fieldBurn = Math.max(0, p.fieldBurn - dt);
+      if (p.fieldBurn > 0) {
+        p.fieldDot += dt;
+        if (p.fieldDot >= 0.5) {
+          p.fieldDot -= 0.5;
+          hurtPlayer(this, p, p.d.maxHp * LAVA_DPS * 0.5, 'spec', undefined, { field: true });
+          this.dirty.add(p.id);
+          if (p.down) return;
+        }
+      } else p.fieldDot = 0;
+    }
     if (p.invuln > 0) p.invuln -= dt;
     if (p.shieldT > 0) { p.shieldT -= dt; if (p.shieldT <= 0) p.shield = 0; }
     if (p.slowT > 0) p.slowT -= dt;
@@ -806,8 +1008,14 @@ export class GameSim {
     updateSkills(this, p, dt);
   }
 
-  moveSpeed(p: SimPlayer) {
+  /** 不算场地的移动速度：客户端按自己脚下的场地再乘一次，走进场地时不用等服务器 */
+  baseMoveSpeed(p: SimPlayer) {
     return p.d.moveSpeed * (p.slowT > 0 ? 1 - p.slowAmt : 1);
+  }
+
+  moveSpeed(p: SimPlayer) {
+    const v = this.baseMoveSpeed(p);
+    return this.fields.length ? v * fieldSpeed(this.fieldAt(p.x, p.y), formOf(p.line, p.stage).types) : v;
   }
 
   private updateEnemies(dt: number) {
@@ -816,15 +1024,22 @@ export class GameSim {
     for (const e of this.enemies) {
       if (e.dead) continue;
       if (!updateEnemy(this, e, dt)) { e.dead = true; e.hp = 0; continue; }
+      // 熔岩池：没有火、岩石属性的野生宝可梦一样会被灼伤（精英和首领掉血少一些）
+      if (this.fields.length || e.fieldBurn) {
+        if (!e.hidden && fieldBurns(this.fieldAt(e.x, e.y), e.def.types)) e.fieldBurn = LAVA_LINGER;
+        else e.fieldBurn = Math.max(0, (e.fieldBurn ?? 0) - dt);
+      }
+      const burning = (e.fieldBurn ?? 0) > 0;
       // 持续伤害
       const st = e.st;
-      if (st.burn > 0 || st.poison > 0 || st.leech > 0) {
+      if (st.burn > 0 || st.poison > 0 || st.leech > 0 || burning) {
         st.dotAcc += dt;
         if (st.dotAcc >= 0.5) {
           st.dotAcc -= 0.5;
           const parts: [number, number][] = [];
           if (st.burn > 0) { st.burn -= 0.5; parts.push([st.burnDps * 0.5, st.burnSrc]); }
           if (st.poison > 0) { st.poison -= 0.5; parts.push([st.poisonDps * 0.5, st.poisonSrc]); }
+          if (burning) parts.push([e.maxHp * LAVA_DPS * 0.5 * (e.def.rank === 'minion' ? 1 : LAVA_BIG), -1]);
           if (st.leech > 0) {
             st.leech -= 0.5;
             parts.push([st.leechDps * 0.5, st.leechSrc]);
@@ -845,7 +1060,9 @@ export class GameSim {
         for (const p of this.players) {
           if (p.down || !p.alive || p.invuln > 0) continue;
           const rr = e.r + PLAYER_R - 1;
-          if ((p.x - e.x) ** 2 + (p.y - e.y) ** 2 < rr * rr) hurtPlayer(this, p, e.dmg, 'phys', e);
+          if ((p.x - e.x) ** 2 + (p.y - e.y) ** 2 >= rr * rr) continue;
+          const m = this.enemyMod(e, 'phys');
+          enemyHurt(this, p, e.dmg * m.dmg, 'phys', m, e, true);
         }
       }
       const key = Math.floor(e.x / CELL) + Math.floor(e.y / CELL) * 1000;
@@ -923,7 +1140,7 @@ export class GameSim {
           pr.hit.add(e.id);
           const dirx = pr.orbit ? e.x - (owner?.x ?? pr.x) : pr.vx;
           const diry = pr.orbit ? e.y - (owner?.y ?? pr.y) : pr.vy;
-          hitEnemy(this, e, owner ?? null, pr.dmg, pr.type, { crit: pr.crit, status: pr.status, knock: pr.knock, kx: dirx, ky: diry, heal: pr.skill?.heal, skill: pr.skill });
+          hitEnemy(this, e, owner ?? null, pr.dmg, pr.type, { crit: pr.crit, status: pr.status, knock: pr.knock, kx: dirx, ky: diry, heal: pr.skill?.heal, skill: pr.skill, drain: pr.drain, chill: pr.chill });
           if (!pr.orbit) {
             if (pr.pierce <= 0) { alive = false; break; }
             pr.pierce--;
@@ -936,7 +1153,7 @@ export class GameSim {
           const rr = PLAYER_R + pr.r - 1;
           if ((p.x - pr.x) ** 2 + (p.y - 6 - pr.y) ** 2 > rr * rr) continue;
           if (p.invuln <= 0) {
-            hurtPlayer(this, p, pr.dmg, 'spec');
+            enemyHurt(this, p, pr.dmg, 'spec', pr, pr.drain ? this.enemies.find((e) => e.id === pr.src) : undefined);
             if (pr.slow && !p.items.safety_goggles) { p.slowT = 1.6; p.slowAmt = pr.slow; this.dirty.add(p.id); }
           }
           alive = false;
@@ -971,7 +1188,7 @@ export class GameSim {
           for (const e of this.targetsFor(z.owner)) {
             if (e.dead || e.hidden) continue;
             if ((e.x - z.x) ** 2 + (e.y - z.y) ** 2 <= (z.r + e.r) ** 2) {
-              hitEnemy(this, e, owner, z.dmg, z.type, { status: z.skill?.status, skill: z.skill });
+              hitEnemy(this, e, owner, z.dmg, z.type, { status: z.skill?.status, skill: z.skill, crit: z.crit, drain: z.drain, chill: z.chill });
             }
           }
         } else {
@@ -996,15 +1213,16 @@ export class GameSim {
       s.t -= dt;
       if (s.t > 0) { keep.push(s); continue; }
       if (s.enemy) {
-        this.emit(['boom', Math.round(s.x), Math.round(s.y), s.r, s.fx]);
+        this.emit(['boom', Math.round(s.x), Math.round(s.y), Math.round(s.r), s.fx]);
+        const src = s.drain ? this.enemies.find((e) => e.id === s.src) : undefined;
         for (const p of this.players) {
-          if (!p.down && p.alive && Math.hypot(p.x - s.x, p.y - s.y) <= s.r + PLAYER_R) hurtPlayer(this, p, s.dmg, s.cat);
+          if (!p.down && p.alive && Math.hypot(p.x - s.x, p.y - s.y) <= s.r + PLAYER_R) enemyHurt(this, p, s.dmg, s.cat, s, src);
         }
         continue;
       }
       const owner = this.players.find((p) => p.id === s.owner) ?? null;
       if (s.line && s.skill) {
-        beamHit(this, owner, s.skill, s.x, s.y, s.line.ang, s.line.len, s.r, s.dmg);
+        beamHit(this, owner, s.skill, s.x, s.y, s.line.ang, s.line.len, s.r, s.dmg, s);
         this.emit(['fx', s.fx, Math.round(s.x), Math.round(s.y), Math.round(s.line.ang * 100) / 100, Math.round(s.line.len), s.r, s.owner]);
         continue;
       }
@@ -1012,7 +1230,7 @@ export class GameSim {
       for (const e of this.targetsFor(s.owner).slice()) {
         if (e.dead || e.hidden) continue;
         if (Math.hypot(e.x - s.x, e.y - s.y) <= s.r + e.r) {
-          hitEnemy(this, e, owner, s.dmg, s.type, { crit: s.skill?.crit, status: s.skill?.status, knock: s.skill?.knock, kx: e.x - s.x, ky: e.y - s.y, skill: s.skill });
+          hitEnemy(this, e, owner, s.dmg, s.type, { crit: s.crit ?? s.skill?.crit, status: s.skill?.status, knock: s.skill?.knock, kx: e.x - s.x, ky: e.y - s.y, skill: s.skill, drain: s.drain, chill: s.chill });
         }
       }
     }
@@ -1134,11 +1352,14 @@ export class GameSim {
     return {
       id: p.id, line: p.line, stage: p.stage, dex: form.dex, form: form.name, level: p.level,
       xp: Math.floor(p.xp), xpNext: xpToNext(p.level), money: Math.floor(p.money),
-      hp: Math.ceil(p.hp), maxHp: p.d.maxHp, speed: this.moveSpeed(p), down: p.down, shiny: p.shiny,
+      hp: Math.ceil(p.hp), maxHp: p.d.maxHp, speed: this.baseMoveSpeed(p), down: p.down, shiny: p.shiny,
       slots: p.slots,
-      // max 是实际的冷却时间（技能等级与技能急速都算进去），界面按它画冷却进度
+      // max 是实际的冷却时间（技能等级、技能急速和脚下的场地都算进去），界面按它画冷却进度
       // 没有目标时技能每 0.1 秒重试一次，这种状态当作已经就绪，免得冷却图标一闪一闪
-      skills: p.skills.map((s) => ({ id: s.id, lv: s.lv, cd: s.cd <= 0.11 ? 0 : Math.round(s.cd * 10) / 10, max: Math.round(SKILLS[s.id].cd * skillLevelCd(s.lv) * p.d.cdMult * 100) / 100 })),
+      skills: p.skills.map((s) => ({
+        id: s.id, lv: s.lv, cd: s.cd <= 0.11 ? 0 : Math.round(s.cd * 10) / 10,
+        max: Math.round(SKILLS[s.id].cd * skillLevelCd(s.lv) * p.d.cdMult * this.castMod(p, SKILLS[s.id]).cd * 100) / 100,
+      })),
       items: Object.entries(p.items).filter(([, n]) => n > 0),
       stats: {
         maxHp: p.d.maxHp, atk: Math.round(p.d.atk), spa: Math.round(p.d.spa), def: Math.round(p.d.def), spd: Math.round(p.d.spd), spe: Math.round(p.d.spe),
@@ -1187,6 +1408,7 @@ export class GameSim {
         id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, shiny: p.shiny || undefined, level: p.level,
         hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills, bot: p.bot || undefined, away: p.away || undefined,
       })),
+      fields: this.fields.map((f) => ({ id: f.id, kind: f.kind, on: this.waveT >= f.activeAt })),
     };
   }
 
@@ -1272,14 +1494,37 @@ export class GameSim {
     return this.mapItems ? this.dropPickup(kind, x, y, 1) : null;
   }
 
-  /** 调试：在玩家身边放一颗橙橙果和每种种子各一颗 */
+  /** 测试与调试：放一块指定种类和格子的场地，formIn 秒后生效 */
+  placeField(kind: FieldId, cells: number[], formIn = 0): Field {
+    const c = fieldCenter(fieldGrid(this.w, this.h).cols, cells);
+    const f: Field = { id: this.newId(), kind, cells, cx: c.x, cy: c.y, activeAt: this.waveT + formIn };
+    this.fields.push(f);
+    this.rebuildFieldMap();
+    this.emit(fieldEvent(f, this.waveT));
+    return f;
+  }
+
+  /** 调试：把场上的场地换成下一种 */
+  debugField() {
+    const next = FIELD_IDS[(FIELD_IDS.indexOf(this.fields[0]?.kind ?? 'frost') + 1) % FIELD_IDS.length];
+    this.clearFields();
+    this.emit(['fieldOff']);
+    this.spawnField(false, next);
+  }
+
+  /** 调试：在玩家身边放一颗橙橙果、每种种子各一颗和一颗爆炸之种 */
   debugItems(p: SimPlayer) {
-    const kinds: PickupKind[] = ['berry', ...BOOST_IDS.map((id) => BOOSTS[id].seed)];
+    const kinds: PickupKind[] = ['berry', ...BOOST_IDS.map((id) => BOOSTS[id].seed), 'seed_blast'];
     kinds.forEach((k, i) => {
       const a = -Math.PI / 2 + (i / kinds.length) * Math.PI * 2;
       this.placeItem(k, p.x + Math.cos(a) * 34, p.y + Math.sin(a) * 26);
     });
   }
+}
+
+/** 场地出现的事件：[field, id, 种类序号, 中心 x, 中心 y, 还要多少秒生效, 格子（连续段编码）] */
+export function fieldEvent(f: Field, now: number): Ev {
+  return ['field', f.id, FIELD_IDS.indexOf(f.kind), Math.round(f.cx), Math.round(f.cy), Math.max(0, Math.round((f.activeAt - now) * 10) / 10), encodeCells(f.cells)];
 }
 
 /** 正在生效的增幅与剩余秒数（保留一位小数） */
