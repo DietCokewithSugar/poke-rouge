@@ -235,6 +235,10 @@ export class PvpSim extends GameSim {
     return dealt;
   }
 
+  override readoutScale(p: SimPlayer) {
+    return pvpDamageScale(p.level, this.mode);
+  }
+
   overtime() {
     const R = this.ring;
     if (this.matchT <= R.t1) return 1;

@@ -17,7 +17,7 @@ import { iconBtn, pager } from './layout';
 
 const INV_PER_PAGE = 26;
 const STATS_PER_PAGE = 12;
-import { STAT_ROWS, itemInfo, itemLines, shinyStatTip, skillCardBody, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
+import { STAT_ROWS, itemInfo, itemLines, numsOf, shinyStatTip, skillCardBody, skillHeadline, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
 import { forgetRefund } from '../../shared/sim/player';
 
 const STAT_ICON: Record<string, string> = {
@@ -184,14 +184,17 @@ export class Intermission {
     }
     const s = SKILLS[c.skill];
     const owned = me.skills.find((x) => x.id === c.skill);
+    const lv = owned ? owned.lv + 1 : 1;
+    const nums = numsOf(me, c.skill, lv);
     const el = h('button', { class: `card skill tier${c.tier}`, onclick: () => this.chooseSkill(me, c.skill, (slot) => { this.lockCards(); this.send({ t: 'level', i, slot }); }) },
-      skillIcon(c.skill, owned ? owned.lv + 1 : 1),
+      skillIcon(c.skill, lv),
       h('div', { class: 'card-title' }, c.upgrade ? `强化 ${s.name}` : `领悟 ${s.name}`),
       h('div', null, typeBadge(s.type), ' ', tierBadge(s.tier)),
+      nums ? h('div', { class: 'card-nums live' }, skillHeadline(c.skill, lv, nums)) : null,
       h('div', { class: 'card-body' }, s.desc),
       h('div', { class: 'card-foot' }, '新技能'),
     );
-    tip(el, () => skillInfo(c.skill, owned ? owned.lv + 1 : 1, me.line));
+    tip(el, () => skillInfo(c.skill, lv, me.line, nums));
     return el;
   }
 
@@ -214,8 +217,8 @@ export class Intermission {
         cards.forEach((c, k) => c.classList.toggle('on', k === slot));
         confirmBtn.disabled = false;
         confirmBtn.textContent = `遗忘「${SKILLS[s.id].name}」，学习「${SKILLS[id].name}」`;
-      } }, skillCardBody(s.id, s.lv, me.line), h('div', { class: 'swap-mark' }, '遗忘'));
-      tip(el, () => skillInfo(s.id, s.lv, me.line));
+      } }, skillCardBody(s.id, s.lv, me.line, numsOf(me, s.id, s.lv)), h('div', { class: 'swap-mark' }, '遗忘'));
+      tip(el, () => skillInfo(s.id, s.lv, me.line, numsOf(me, s.id, s.lv)));
       return el;
     });
     this.openModal(h('div', { class: 'box modal-box skill-swap' },
@@ -224,7 +227,7 @@ export class Intermission {
         h('div', { class: 'sub' }, `想要学习「${SKILLS[id].name}」，需要先遗忘一个技能（${me.skills.length} / ${me.slots}）。`),
       ),
       h('div', { class: 'swap-body' },
-        h('div', { class: 'swap-new' }, h('div', { class: 'swap-label gold' }, '新技能'), h('div', { class: 'swap-card new' }, skillCardBody(id, 1, me.line))),
+        h('div', { class: 'swap-new' }, h('div', { class: 'swap-label gold' }, '新技能'), h('div', { class: 'swap-card new' }, skillCardBody(id, 1, me.line, numsOf(me, id, 1)))),
         h('div', { class: 'swap-arrow' }, '⇄'),
         h('div', { class: 'swap-old' }, h('div', { class: 'swap-label' }, '选择要遗忘的技能'), h('div', { class: `swap-grid ${cards.length > 4 ? 'dense' : ''}`, style: `grid-template-rows:repeat(${Math.max(2, Math.ceil(cards.length / 2))},minmax(0,1fr))` }, cards)),
       ),
@@ -243,7 +246,7 @@ export class Intermission {
     const refund = forgetRefund(s.id, s.lv, this.pub?.wave ?? 1);
     this.openModal(h('div', { class: 'box modal-box skill-forget' },
       h('h2', null, '遗忘技能'),
-      h('div', { class: 'swap-card new' }, skillCardBody(s.id, s.lv, me.line)),
+      h('div', { class: 'swap-card new' }, skillCardBody(s.id, s.lv, me.line, numsOf(me, s.id, s.lv))),
       h('div', { class: 'sub' }, `遗忘后返还 ₽${refund}，空出的技能栏可以学习新技能。`, s.lv > 1 ? '技能强化等级不会保留。' : ''),
       h('div', { class: 'swap-foot' },
         iconBtn('close', '取消', () => { sfx('click'); this.closeModal(); }, { cls: 'ghost', attrs: { 'data-back': '1' }, text: '取消' }),
@@ -430,15 +433,18 @@ export class Intermission {
     } else {
       const s = SKILLS[o.id];
       const owned = me.skills.find((x) => x.id === o.id);
+      const lv = owned ? owned.lv + 1 : 1;
+      const nums = numsOf(me, o.id, lv);
       el = h('div', { class: `card skill tier${o.tier} ${afford ? '' : 'poor'}` },
         lockBtn,
-        skillIcon(o.id, owned ? owned.lv + 1 : 1),
+        skillIcon(o.id, lv),
         h('div', { class: 'card-title' }, `招式学习器 · ${s.name}`),
         h('div', null, typeBadge(s.type), ' ', tierBadge(s.tier)),
+        nums ? h('div', { class: 'card-nums live' }, skillHeadline(o.id, lv, nums)) : null,
         h('div', { class: 'card-body' }, owned ? `已拥有：强化到 +${owned.lv}` : s.desc),
         h('button', { class: 'btn small buy', disabled: !afford, onclick: () => this.buy(me, i, o) }, `₽ ${o.price}`),
       );
-      tip(el, () => skillInfo(o.id, owned ? owned.lv + 1 : 1, me.line));
+      tip(el, () => skillInfo(o.id, lv, me.line, nums));
     }
     return el;
   }
@@ -476,7 +482,7 @@ export class Intermission {
         h('span', { class: 'grow side-skill-name' }, SKILLS[s.id].name, s.lv > 1 ? ` +${s.lv - 1}` : ''),
         !me.cards && me.skills.length > 1 ? h('button', { class: 'btn tiny ghost', title: '遗忘并返还少量金钱', onclick: (e: Event) => { e.stopPropagation(); this.confirmForget(me, slot); } }, '遗忘') : null,
       );
-      tip(row, () => skillInfo(s.id, s.lv, me.line));
+      tip(row, () => skillInfo(s.id, s.lv, me.line, numsOf(me, s.id, s.lv)));
       sk.appendChild(row);
     });
     for (let i = me.skills.length; i < rows; i++) sk.appendChild(h('div', { class: `side-skill empty ${i >= me.slots ? 'locked' : ''}` }, i < me.slots ? '— 空 —' : ''));

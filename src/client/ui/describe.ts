@@ -2,6 +2,7 @@ import { GROUP_NAME, ITEMS } from '../../shared/items';
 import { isNative, type LineId } from '../../shared/pokemon';
 import { SHINY_MAX, SHINY_MAX_ODDS } from '../../shared/shiny';
 import { CAT_NAME, SKILLS, TIER_COLOR, TIER_NAME, skillLevelCd, skillLevelDmg } from '../../shared/skills';
+import type { SkillNums } from '../../shared/sim/combat';
 import { MOD_LABEL, fmtMod, type ModKey } from '../../shared/stats';
 import { TYPE_COLOR, TYPE_NAME, type PType } from '../../shared/types';
 import { iconImg } from '../gfx/icons';
@@ -29,8 +30,35 @@ export function skillIcon(id: string, lv = 1, small = false) {
   );
 }
 
-/** 技能卡片的内容：图标、名字与等级、属性与级别、威力与冷却、简介 */
-export function skillCardBody(id: string, lv: number, line?: LineId) {
+const sec = (v: number) => `${Number(v.toFixed(v < 10 ? 2 : 1))}`;
+
+/** 技能的主要数值：有实际数值（局内）时用实际数值，没有时用技能本身的威力和冷却 */
+export function skillHeadline(id: string, lv: number, n?: SkillNums): string {
+  const s = SKILLS[id];
+  const cd = n ? n.cd : s.cd * skillLevelCd(lv);
+  if (n?.heal) return `回复 ${n.heal} HP · 冷却 ${sec(cd)} 秒`;
+  if (n?.shield) return `护盾 ${n.shield} HP · 冷却 ${sec(cd)} 秒`;
+  if (n?.dmg) return `伤害 ${n.dmg}${s.pattern === 'zone' ? ` / ${s.tick ?? 0.5} 秒` : ''} · 冷却 ${sec(cd)} 秒`;
+  return s.power > 0 ? `威力 ${Math.round(s.power * skillLevelDmg(lv))} · 冷却 ${sec(cd)} 秒` : `冷却 ${sec(cd)} 秒`;
+}
+
+/** 射程、范围、数量、持续时间、暴击率这些次要的数值 */
+function details(id: string, n: SkillNums): string {
+  const s = SKILLS[id];
+  const out: string[] = [];
+  if (s.pattern === 'beam') out.push(`长度 ${n.range} · 宽度 ${n.width}`);
+  else if (s.pattern !== 'melee' && s.pattern !== 'nova' && s.pattern !== 'heal') out.push(`射程 ${n.range}`);
+  if (n.radius) out.push(`范围 ${n.radius}`);
+  if (n.count && n.count > 1) out.push(s.pattern === 'proj' ? `${n.count} 发` : s.pattern === 'strike' ? `打击 ${n.count} 次` : s.pattern === 'orbit' ? `环绕 ${n.count} 个` : `连锁 ${n.count} 次`);
+  if (n.dur) out.push(`持续 ${sec(n.dur)} 秒`);
+  if (n.haste) out.push(`技能急速 +${n.haste}%`);
+  if (n.spe) out.push(`速度 +${n.spe}`);
+  if (n.crit !== undefined) out.push(`暴击率 ${n.crit}%`);
+  return out.join(' · ');
+}
+
+/** 技能卡片的内容：图标、名字与等级、属性与级别、伤害与冷却（局内是实际数值）、简介 */
+export function skillCardBody(id: string, lv: number, line?: LineId, nums?: SkillNums) {
   const s = SKILLS[id];
   const native = line ? isNative(line, id) : true;
   return h('div', { class: 'sk-card' },
@@ -38,23 +66,35 @@ export function skillCardBody(id: string, lv: number, line?: LineId) {
     h('div', { class: 'sk-card-body' },
       h('div', { class: 'sk-card-name' }, s.name, lv > 1 ? h('span', { class: 'gold' }, ` +${lv - 1}`) : null),
       h('div', { class: 'sk-card-tags' }, typeBadge(s.type), ' ', tierBadge(s.tier), !native ? h('span', { class: 'muted small' }, ' 外来') : null),
-      h('div', { class: 'small muted' }, s.power > 0 ? `威力 ${Math.round(s.power * skillLevelDmg(lv))} · 冷却 ${(s.cd * skillLevelCd(lv)).toFixed(1)}s` : `${CAT_NAME[s.cat]} · 冷却 ${(s.cd * skillLevelCd(lv)).toFixed(1)}s`),
+      h('div', { class: `small ${nums ? 'live' : 'muted'}` }, skillHeadline(id, lv, nums)),
       h('div', { class: 'small sk-card-desc' }, s.desc),
     ),
   );
 }
 
-export function skillInfo(id: string, lv = 1, line?: LineId) {
+/**
+ * 技能说明；nums 是局内的实际数值（能力、道具、技能等级和脚下的场地都算进去），
+ * 和基础数值不一样时把基础数值写在后面
+ */
+export function skillInfo(id: string, lv = 1, line?: LineId, nums?: SkillNums) {
   const s = SKILLS[id];
   const native = line ? isNative(line, id) : true;
+  const baseCd = s.cd * skillLevelCd(lv);
+  const base = nums && (Math.abs(nums.cd - baseCd) > 0.005 || s.power > 0)
+    ? `基础${s.power > 0 ? `威力 ${Math.round(s.power * skillLevelDmg(lv))} · ` : ''}冷却 ${sec(baseCd)} 秒` : '';
   return h('div', { class: 'info' },
     h('div', { class: 'info-head' }, h('b', null, s.name, lv > 1 ? ` +${lv - 1}` : ''), typeBadge(s.type), tierBadge(s.tier)),
     h('div', { class: 'muted small' }, `${CAT_NAME[s.cat]} · ${PATTERN_NAME[s.pattern]}${!native ? ' · 外来技能' : ''}`),
-    s.power > 0 ? h('div', { class: 'small' }, `威力 ${Math.round(s.power * skillLevelDmg(lv))}`, ` · 冷却 ${(s.cd * skillLevelCd(lv)).toFixed(1)} 秒`, s.range ? ` · 射程 ${s.range}` : '') : h('div', { class: 'small' }, `冷却 ${(s.cd * skillLevelCd(lv)).toFixed(1)} 秒`),
+    h('div', { class: nums ? 'live' : 'small' }, skillHeadline(id, lv, nums)),
+    nums ? h('div', { class: 'small' }, details(id, nums)) : s.range ? h('div', { class: 'small' }, `射程 ${s.range}`) : null,
     h('div', { class: 'desc' }, s.desc),
     s.cat === 'phys' ? h('div', { class: 'muted small' }, '受「物攻」加成') : s.cat === 'spec' ? h('div', { class: 'muted small' }, '受「特攻」加成') : null,
+    nums ? h('div', { class: 'muted small' }, `按你现在的能力、道具、技能等级和脚下的场地计算${base ? `（${base}）` : ''}`) : null,
   );
 }
+
+/** 局内某个技能（某个等级）现在的实际数值（不含脚下的场地，要算上时用 fieldNums） */
+export const numsOf = (me: { nums?: Record<string, SkillNums> } | null | undefined, id: string, lv: number) => me?.nums?.[`${id}:${lv}`];
 
 export function itemLines(id: string): string[] {
   const it = ITEMS[id];

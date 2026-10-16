@@ -16,13 +16,13 @@ import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
 import { SHINY_STAT, shinyName, shinyRate } from '../shiny';
-import { SKILLS, skillLevelCd, type SkillDef } from '../skills';
+import { SKILLS, type SkillDef } from '../skills';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
 import { updateEnemy } from './ai';
 import { autopilot } from './autopilot';
 import { autoShop } from './autoshop';
-import { PLAYER_R, beamHit, enemyHurt, healMult, healPlayer, hitEnemy, hurtPlayer, updateSkills, type HitOpts } from './combat';
+import { PLAYER_R, beamHit, enemyHurt, healMult, healPlayer, hitEnemy, hurtPlayer, skillNums, updateSkills, type HitOpts, type SkillNums } from './combat';
 import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
 import {
   addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, refreshOffers, rerollCards,
@@ -110,6 +110,11 @@ export interface MeState {
   evo: { prompt: boolean; from: string; fromDex: number; to: string; toDex: number } | null;
   /** 正在生效的增幅种子与剩余秒数 */
   boosts: [BoostId, number][];
+  /**
+   * 技能现在的实际数值（键是「技能:等级」）：已经学会的技能，以及商店和升级卡上可以学 / 强化的技能。
+   * 能力、道具、等级一变就跟着变；不含脚下的场地（界面按脚下的场地自己修正，见 describe.ts 的 fieldNums）
+   */
+  nums: Record<string, SkillNums>;
 }
 
 export interface PublicState {
@@ -279,6 +284,9 @@ export class GameSim {
     const f = i ? this.fields[i - 1] : null;
     return f && (forming || this.waveT >= f.activeAt) ? f.kind : null;
   }
+
+  /** 技能说明里的伤害换算（对战按自己的等级换算成对战伤害） */
+  readoutScale(_p: SimPlayer): number { return 1; }
 
   /** 玩家出招时脚下场地的修正；被熔岩灼伤时物理招式的伤害减半 */
   castMod(p: SimPlayer, s: SkillDef): Readonly<MoveMod> {
@@ -1384,9 +1392,26 @@ export class GameSim {
 
   // ------------------------------------------------------------ 状态导出
 
+  /** 要在界面上说明的技能（已经学会的、商店和升级卡上能学 / 强化的）现在的实际数值，不含脚下的场地 */
+  private skillReadouts(p: SimPlayer): Record<string, SkillNums> {
+    const out: Record<string, SkillNums> = {};
+    const add = (id: string, lv: number) => {
+      const key = `${id}:${lv}`;
+      if (out[key]) return;
+      const n = skillNums(this, p, id, lv, false);
+      if (n) out[key] = n;
+    };
+    const next = (id: string) => (p.skills.find((s) => s.id === id)?.lv ?? 0) + 1;
+    for (const s of p.skills) add(s.id, s.lv);
+    for (const o of p.shop.offers) if (o?.kind === 'skill') add(o.id, next(o.id));
+    for (const c of p.cards ?? []) if (c.kind === 'skill') add(c.skill, next(c.skill));
+    return out;
+  }
+
   privateState(p: SimPlayer): MeState {
     const form = formOf(p.line, p.stage);
     const crate = p.cards ? null : p.crates[0] ?? null;
+    const nums = this.skillReadouts(p);
     return {
       id: p.id, line: p.line, stage: p.stage, dex: form.dex, form: form.name, level: p.level,
       xp: Math.floor(p.xp), xpNext: xpToNext(p.level), money: Math.floor(p.money),
@@ -1396,7 +1421,7 @@ export class GameSim {
       // 没有目标时技能每 0.1 秒重试一次，这种状态当作已经就绪，免得冷却图标一闪一闪
       skills: p.skills.map((s) => ({
         id: s.id, lv: s.lv, cd: s.cd <= 0.11 ? 0 : Math.round(s.cd * 10) / 10,
-        max: Math.round(SKILLS[s.id].cd * skillLevelCd(s.lv) * p.d.cdMult * this.castMod(p, SKILLS[s.id]).cd * 100) / 100,
+        max: Math.round((nums[`${s.id}:${s.lv}`]?.cd ?? SKILLS[s.id].cd) * this.castMod(p, SKILLS[s.id]).cd * 100) / 100,
       })),
       items: Object.entries(p.items).filter(([, n]) => n > 0),
       stats: {
@@ -1426,6 +1451,7 @@ export class GameSim {
         ? { prompt: p.evoPrompt, from: form.name, fromDex: form.dex, to: formOf(p.line, p.stage + 1).name, toDex: formOf(p.line, p.stage + 1).dex }
         : null,
       boosts: boostsOf(p),
+      nums,
     };
   }
 

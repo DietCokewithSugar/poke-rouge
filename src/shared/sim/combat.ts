@@ -1,4 +1,4 @@
-import { FROST_SLOW, FROST_SLOW_DUR, GRASS_DRAIN_CAP, type MoveMod } from '../fields';
+import { BURN_PHYS, FROST_SLOW, FROST_SLOW_DUR, GRASS_DRAIN_CAP, NO_MOVE_MOD, fieldBurns, moveMod, type FieldId, type MoveMod } from '../fields';
 import { ITEMS } from '../items';
 import { LINES, formOf } from '../pokemon';
 import { SKILLS, skillLevelCd, skillLevelDmg, type SkillDef } from '../skills';
@@ -460,6 +460,80 @@ function castHeal(sim: GameSim, p: SimPlayer, s: SkillDef): boolean {
   sim.emit(['fx', s.fx, p.x, p.y, 0, s.team ? s.radius ?? 120 : 16, 0, p.id]);
   sim.emitCast(p, 1);
   return true;
+}
+
+/**
+ * 技能现在的实际数值：按现在的能力、道具、技能等级和脚下的场地计算，和真正放出去的一样（界面上的技能说明都用它）。
+ * dmg 是每次命中的伤害，不算属性克制、暴击和对小怪 / 首领的加成；对战里按自己的等级换算成对战伤害。
+ */
+export interface SkillNums {
+  /** 冷却（秒） */
+  cd: number;
+  dmg?: number;
+  /** 暴击率（%） */
+  crit?: number;
+  /** 射程（多远的敌人会让它出手）；光束是长度 */
+  range: number;
+  /** 覆盖半径（近身、范围、环绕、定点、区域） */
+  radius?: number;
+  /** 光束宽度 */
+  width?: number;
+  /** 弹体数 / 打击次数 / 环绕个数 / 连锁次数 */
+  count?: number;
+  /** 持续时间（区域、环绕、护盾、强化） */
+  dur?: number;
+  /** 回复量、护盾量（HP） */
+  heal?: number;
+  shield?: number;
+  /** 强化：技能急速（%）、速度 */
+  haste?: number;
+  spe?: number;
+}
+
+/** field：算不算脚下的场地（发给界面的不算，界面自己按脚下的场地修正，站进、走出场地时不用重发整份状态） */
+export function skillNums(sim: GameSim, p: SimPlayer, id: string, lv: number, field = true): SkillNums | null {
+  const s = SKILLS[id];
+  if (!s) return null;
+  const fm = field ? sim.castMod(p, s) : NO_MOVE_MOD;
+  const rm = p.d.rangeMult, k = fm.size;
+  const out: SkillNums = { cd: Math.round(s.cd * skillLevelCd(lv) * p.d.cdMult * fm.cd * 100) / 100, range: Math.round(s.range * rm) };
+  switch (s.pattern) {
+    case 'heal': return { ...out, heal: Math.round(p.d.maxHp * (s.heal ?? 0.2) * healMult(p)), radius: s.team ? s.radius ?? 120 : undefined };
+    case 'shield': return { ...out, shield: Math.round(p.d.maxHp * (s.shield ?? 0.15) * (LINES[p.line].flags.shieldMult ?? 1) * (p.items.light_clay ? 1.6 : 1)), dur: s.duration ?? 4 };
+    case 'buff': return { ...out, dur: s.buff?.dur, haste: s.buff?.haste, spe: s.buff?.spe };
+  }
+  out.dmg = Math.max(1, Math.round(baseDamage(p, s, lv) * fm.dmg * sim.readoutScale(p)));
+  out.crit = Math.round(Math.min(1, p.d.crit + ((s.crit ?? 0) + fm.crit) / 100) * 100);
+  switch (s.pattern) {
+    case 'proj': out.count = (s.count ?? 1) + ((s.count ?? 1) > 1 && LINES[p.line].flags.skillLink ? 1 : 0); break;
+    case 'melee': out.radius = Math.round((s.radius ?? 34) * rm * k); break;
+    case 'beam': out.range = Math.round(s.range * rm * k); out.width = Math.round((s.width ?? 10) * k); break;
+    case 'nova': out.radius = Math.round((s.radius ?? 60) * rm * k); break;
+    case 'chain': out.count = s.chains ?? 3; break;
+    case 'strike': out.count = s.strikes ?? 1; out.radius = Math.round((s.radius ?? 30) * Math.sqrt(rm) * k); break;
+    case 'orbit': out.count = s.count ?? 4; out.radius = Math.round((s.radius ?? 40) * rm * k); out.dur = s.duration ?? 4; break;
+    case 'zone': out.radius = Math.round((s.radius ?? 30) * Math.sqrt(rm) * k); out.dur = s.duration ?? 3; break;
+  }
+  return out;
+}
+
+/**
+ * 不含场地的实际数值再算上脚下的场地 field（和出招时的修正一样：伤害、冷却、覆盖范围、暴击，熔岩灼伤时物理招式伤害减半）。
+ * 界面用它：服务器发的数值不含场地，站进、走出场地时不用重发整份私有状态
+ */
+export function fieldNums(id: string, n: SkillNums | undefined, field: FieldId | null, types: readonly PType[]): SkillNums | undefined {
+  const s = SKILLS[id];
+  if (!n || !field || !s) return n;
+  const fm = moveMod(field, s.type);
+  const burn = s.cat === 'phys' && fieldBurns(field, types) ? BURN_PHYS : 1;
+  const out: SkillNums = { ...n, cd: Math.round(n.cd * fm.cd * 100) / 100 };
+  if (n.dmg !== undefined) out.dmg = Math.max(1, Math.round(n.dmg * fm.dmg * burn));
+  if (n.crit !== undefined) out.crit = Math.min(100, n.crit + fm.crit);
+  if (fm.size !== 1 && s.pattern !== 'heal') {
+    if (n.radius) out.radius = Math.round(n.radius * fm.size);
+    if (s.pattern === 'beam') { out.range = Math.round(n.range * fm.size); out.width = Math.round((n.width ?? 0) * fm.size); }
+  }
+  return out;
 }
 
 /** 回复类技能、寄生种子吸取的倍率 */

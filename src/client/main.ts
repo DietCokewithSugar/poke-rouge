@@ -1147,7 +1147,7 @@ class App {
         }
         break;
       case 'cmdErr': toast(m.msg, 'error'); sfx('error'); break;
-      case 'paused': this.paused = m.on; this.renderPause(); break;
+      case 'paused': this.paused = m.on; this.hud?.setPaused(m.on); this.renderPause(); break;
       case 'end':
         // 回来时这局已经结束了：服务器补发的结算，结算完回真新镇
         if (this.rejoining) { this.rejoining = false; this.roomGone = true; if (this.t === this.ws) this.t = null; }
