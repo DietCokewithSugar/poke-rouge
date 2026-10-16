@@ -179,7 +179,7 @@ export const TOURS: Record<string, TourStep[]> = {
   ],
   route: [
     { target: '.route-team', title: '你和伙伴', text: '冒险会带着跟随你的伙伴出发。想换别的宝可梦，点右边的「换伙伴」。' },
-    { target: '.diff-row', title: '难度', text: '一共三档难度，通关上一档才能解锁下一档。难度越高，星之沙越多。' },
+    { target: '.diff-row', title: '难度', text: '一共五档难度，通关上一档才能解锁下一档。难度越高，星之沙越多；地狱、噩梦的经验和金钱也更多。' },
     { target: '.route-foot .go', title: '出发', text: '一局 20 波：每波撑到倒计时结束就过关，波次之间在商店里升级技能、买道具。准备好了就出发吧！' },
   ],
   shop: [
@@ -196,6 +196,8 @@ export const TOURS: Record<string, TourStep[]> = {
     { target: '.gym-team', title: '馆主的队伍', text: '每个道馆的队伍都是固定的：先打败道馆训练家，再挑战馆主。输了可以研究一下属性克制再来。' },
     { target: '.gym-reward', title: '徽章', text: '每枚徽章永久提升一项能力和对应属性的技能伤害，冒险和对战里都生效。' },
     { target: '.gym-you', title: '你的队伍', text: '和单挑一样，三只宝可梦同时上场：队长由你操作，另外两只由 AI 操作。也可以打开「自动」整场观战。' },
+    { target: '.gym-fields', title: '道馆的场地', text: '馆主那一半是对馆主有利的主场，你这一半是克制馆主的场地。把馆主引出主场再打，会轻松很多。' },
+    { target: '.gym-tiers', title: '大师难度', text: '拿到徽章以后可以挑战大师难度：馆主换上进化后的王牌队伍，赢了得到大师徽章，徽章的加成再来一份。' },
   ],
   pvp: [
     { target: '.pvp-party', title: '背包', text: '冒险结束时放进来的宝可梦。点一下查看详情，可以设为队长或者让它上场。' },
