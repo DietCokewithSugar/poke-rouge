@@ -205,10 +205,10 @@ export class PvpService {
     return null;
   }
 
-  /** 拿到新徽章后上报：徽章变多才更新时间 */
+  /** 拿到新徽章后上报：徽章变多才更新时间（普通徽章和大师徽章加起来，最多 16 枚） */
   reportGym(msg: { pid: unknown; secret: unknown; name: unknown; badges: unknown; dex: unknown; shiny?: unknown }): string | null {
     const badges = Number(msg.badges);
-    if (!Number.isInteger(badges) || badges < 1 || badges > GYMS.length) return '徽章数据无效';
+    if (!Number.isInteger(badges) || badges < 1 || badges > GYMS.length * 2) return '徽章数据无效';
     const p = this.auth(msg.pid, msg.secret, String(msg.name ?? ''), true);
     if (!p || typeof p === 'string') return p ?? '对战身份无效';
     const dex = Number.isInteger(msg.dex) && (msg.dex as number) >= 1 && (msg.dex as number) <= 151 ? (msg.dex as number) : 25;

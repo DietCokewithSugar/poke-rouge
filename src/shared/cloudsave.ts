@@ -9,7 +9,7 @@ export const CLOUD_KEYS = [
   'name', 'setup', 'trainer', 'trainers', 'partner', 'partnerShiny', 'owned', 'shiny',
   'stardust', 'upgrades', 'achievements', 'stats', 'lastDifficulty', 'seenEnemies',
   'party', 'pvpId', 'pvpBest', 'bestRun', 'pvpMode', 'pvpPick', 'pvpTeam', 'pvpAuto',
-  'autoAssist', 'badges', 'gymJunior', 'gymLog', 'guide', 'townPos',
+  'autoAssist', 'badges', 'masterBadges', 'gymJunior', 'gymLog', 'guide', 'townPos',
 ] as const;
 
 export interface SaveSummary {

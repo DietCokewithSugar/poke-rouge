@@ -84,3 +84,29 @@ test('背包面板的属性 = 开局后对战里的属性（研究所强化、�
   const full = save.partyStats(p, team[0]).d;
   assert.ok(full.maxHp > bare.maxHp && full.def > bare.def && full.spd > bare.spd, `HP ${bare.maxHp}→${full.maxHp} 物防 ${bare.def}→${full.def}`);
 });
+
+test('大师徽章：第一次打败大师难度的馆主才给，加成翻倍，云存档里也有', async () => {
+  store.clear();
+  const p = save.loadProfile();
+  assert.deepEqual(p.masterBadges, {});
+  const dust0 = p.stardust;
+  const normal = save.winGym(p, { gym: 'pewter', underdog: false, auto: false, flawless: false });
+  assert.ok(normal.badge && p.badges.pewter && !p.masterBadges.pewter);
+  const dust1 = p.stardust;
+  assert.ok(dust1 > dust0);
+  const master = save.winGym(p, { gym: 'pewter', underdog: false, auto: false, flawless: false, master: true });
+  assert.ok(master.badge && p.masterBadges.pewter, '拿到大师徽章');
+  assert.ok(master.newAchievements.some((a) => a.id === 'master_1'), '成就：第一枚大师徽章');
+  assert.equal(save.masterCount(p), 1);
+  assert.equal(p.stats.masters, 1);
+  const again = save.winGym(p, { gym: 'pewter', underdog: false, auto: false, flawless: false, master: true });
+  assert.ok(!again.badge, '再赢一次不会再给');
+  const meta = save.runMeta(p);
+  assert.equal(meta.badge_pewter, 1);
+  assert.equal(meta.badge2_pewter, 1);
+  const { CLOUD_KEYS } = await import('../src/shared/cloudsave');
+  assert.ok((CLOUD_KEYS as readonly string[]).includes('masterBadges'));
+  // 旧存档没有这个字段
+  localStorage.setItem('poke-rouge-save-v1', JSON.stringify({ name: '小赤', setup: true, badges: { pewter: 1 } }));
+  assert.deepEqual(save.loadProfile().masterBadges, {});
+});

@@ -302,11 +302,11 @@ export class Hud {
         }
       }
     }
+    if (pub) this.setFields(pub, me);
     if (pub?.pvp) {
       this.updatePvp(pub);
       this.downBox.classList.toggle('hidden', !(me?.down && pub.phase === 'wave' && this.pvpSeats.filter((s) => s.team === this.myTeam).length > 1));
     } else if (pub) {
-      this.setFields(pub, me);
       const D = DIFFICULTIES[pub.difficulty];
       set(this.wave, `${D.name} · 第 ${pub.wave} / ${pub.total} 波 · ${BIOMES[pub.biome]?.name ?? ''}`);
       this.hordeEl.classList.toggle('hidden', !(pub.horde && pub.phase === 'wave'));

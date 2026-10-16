@@ -307,15 +307,9 @@ export class GameSim {
    * 长出一块新的场地：不和其他场地挨着，也不长在玩家脚下；出现后先闪烁 FIELD_FORM 秒才生效。
    * opening：波次开场的那一块（和上一波开场的换一种）
    */
-  private spawnField(opening: boolean, want?: FieldId) {
-    if (!this.mapFields) return;
-    const { cols, rows } = fieldGrid(this.w, this.h);
-    const total = cols * rows;
-    const used = this.fields.reduce((a, f) => a + f.cells.length, 0);
-    const max = Math.min(Math.floor(total * FIELD_MAX_FRAC), Math.floor(total * FIELD_TOTAL_FRAC) - used);
-    const min = Math.ceil(total * FIELD_MIN_FRAC);
-    if (max < min) return;
-    const blocked = new Uint8Array(total);
+  /** 新场地不能占的格子：已有的场地和它们周围一圈、宝可梦脚下 */
+  private fieldBlocked(cols: number, rows: number): Uint8Array {
+    const blocked = new Uint8Array(cols * rows);
     const block = (cx: number, cy: number) => { if (cx >= 0 && cy >= 0 && cx < cols && cy < rows) blocked[cy * cols + cx] = 1; };
     for (const f of this.fields) {
       for (const c of f.cells) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) block((c % cols) + dx, Math.floor(c / cols) + dy);
@@ -327,6 +321,32 @@ export class GameSim {
         for (let x = p.x - R; x <= p.x + R; x += FIELD_CELL / 2) if ((x - p.x) ** 2 + (y - p.y) ** 2 <= R * R) block(Math.floor(x / FIELD_CELL), Math.floor(y / FIELD_CELL));
       }
     }
+    return blocked;
+  }
+
+  /**
+   * 在 allow（格子坐标）允许的范围里长出一块指定的场地，大小约占地图的 frac，马上生效（道馆用）。
+   * 和随机出现的场地一样：连续的一整块，不和别的场地挨着，不长在宝可梦脚下。
+   */
+  protected growFieldIn(kind: FieldId, frac: number, allow: (gx: number, gy: number) => boolean): Field | null {
+    const { cols, rows } = fieldGrid(this.w, this.h);
+    const total = cols * rows;
+    const blocked = this.fieldBlocked(cols, rows);
+    for (let c = 0; c < total; c++) if (!allow(c % cols, Math.floor(c / cols))) blocked[c] = 1;
+    const max = Math.floor(total * FIELD_MAX_FRAC), min = Math.ceil(total * FIELD_MIN_FRAC);
+    const cells = growField(this.fieldRng, { cols, rows, blocked, target: Math.max(min, Math.min(max, Math.round(total * frac))), min, max });
+    return cells ? this.placeField(kind, cells) : null;
+  }
+
+  private spawnField(opening: boolean, want?: FieldId) {
+    if (!this.mapFields) return;
+    const { cols, rows } = fieldGrid(this.w, this.h);
+    const total = cols * rows;
+    const used = this.fields.reduce((a, f) => a + f.cells.length, 0);
+    const max = Math.min(Math.floor(total * FIELD_MAX_FRAC), Math.floor(total * FIELD_TOTAL_FRAC) - used);
+    const min = Math.ceil(total * FIELD_MIN_FRAC);
+    if (max < min) return;
+    const blocked = this.fieldBlocked(cols, rows);
     const exclude = this.fields.map((f) => f.kind);
     if (opening && this.lastField) exclude.push(this.lastField);
     const team = this.players.map((p) => formOf(p.line, p.stage).types);

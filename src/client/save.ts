@@ -1,6 +1,6 @@
 import { ACHIEVEMENTS, META_UPGRADES, NO_RUN, metaCost, stardustFor, type GymOutcome, type LifetimeStats, type RunSummary } from '../shared/meta';
 import { DIFFICULTIES, type DifficultyId } from '../shared/difficulty';
-import { GYM_BY_ID, badgeKey } from '../shared/gyms';
+import { GYM_BY_ID, badgeKey, masterKey, masterReward } from '../shared/gyms';
 import { LINES, LINE_IDS, STARTERS, isLine, type LineId } from '../shared/pokemon';
 import { buildPower, validateBuild, type SavedBuild } from '../shared/pvp/build';
 import { TIERS } from '../shared/pvp/rating';
@@ -93,6 +93,8 @@ export interface Profile {
   autoAssist: boolean;
   /** 道馆徽章：道馆 → 拿到的时间 */
   badges: Record<string, number>;
+  /** 大师徽章（打败大师难度的馆主）：道馆 → 拿到的时间 */
+  masterBadges: Record<string, number>;
   /** 打败过的道馆训练家（再来时直接挑战馆主） */
   gymJunior: Record<string, number>;
   /** 每个道馆的挑战记录（道馆训练家和馆主都算） */
@@ -116,7 +118,7 @@ function fresh(): Profile {
     stardust: 0,
     upgrades: {},
     achievements: {},
-    stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 0, badges: 0, shinies: 0 },
+    stats: { runs: 0, wins: 0, kills: 0, bestWave: 0, coopRuns: 0, revives: 0, recruits: 0, owned: 0, badges: 0, masters: 0, shinies: 0 },
     lastDifficulty: 'easy',
     settings: { volume: 0.6, music: 0.4, damageNumbers: true, gbFilter: false, shake: true, uiScale: defaultUiScale(), fps: 60, quality: 'high', transitions: true, fullscreen: true },
     seenEnemies: [],
@@ -130,6 +132,7 @@ function fresh(): Profile {
     pvpAuto: false,
     autoAssist: false,
     badges: {},
+    masterBadges: {},
     gymJunior: {},
     gymLog: {},
     guide: {},
@@ -142,10 +145,16 @@ export function defaultSettings(): Settings {
   return fresh().settings;
 }
 
-/** 徽章：和研究所强化一起发给服务器（badge_<道馆> = 1） */
+/** 徽章：和研究所强化一起发给服务器（badge_<道馆> = 1，大师徽章 badge2_<道馆> = 1） */
 export function badgeMeta(p: Profile): Record<string, number> {
-  return Object.fromEntries(Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).map((id) => [badgeKey(id), 1]));
+  return Object.fromEntries([
+    ...Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).map((id) => [badgeKey(id), 1]),
+    ...Object.keys(p.masterBadges).filter((id) => GYM_BY_ID[id] && p.badges[id]).map((id) => [masterKey(id), 1]),
+  ]);
 }
+
+export const badgeCount = (p: Profile) => Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).length;
+export const masterCount = (p: Profile) => Object.keys(p.masterBadges).filter((id) => GYM_BY_ID[id]).length;
 
 /** 开局时带上的局外加成：研究所强化 + 道馆徽章（冒险、对战、道馆都发这一份，服务器端同样计算） */
 export function runMeta(p: Profile): Record<string, number> {
@@ -254,6 +263,7 @@ export function normalizeProfile(raw: (Partial<Profile> & { lastLine?: string })
   out.pvpBest = Number.isFinite(out.pvpBest) ? out.pvpBest : 0;
   out.bestRun = cleanRun(out.bestRun);
   if (!out.gymLog || typeof out.gymLog !== 'object') out.gymLog = {};
+  if (!out.masterBadges || typeof out.masterBadges !== 'object') out.masterBadges = {};
   return out;
 }
 
@@ -405,7 +415,8 @@ export function applyRun(p: Profile, r: RunSummary): RunReward {
 export function evalAchievements(p: Profile, r: RunSummary = NO_RUN, g: GymOutcome | null = null) {
   const fresh: RunReward['newAchievements'] = [];
   let dust = 0;
-  p.stats.badges = Object.keys(p.badges).filter((id) => GYM_BY_ID[id]).length;
+  p.stats.badges = badgeCount(p);
+  p.stats.masters = masterCount(p);
   p.stats.owned = unlockedLines(p).length;
   p.stats.shinies = p.shiny.length;
   // 成就可能会连锁（解锁新宝可梦让图鉴数达标），多判定几轮
@@ -430,15 +441,16 @@ export function evalAchievements(p: Profile, r: RunSummary = NO_RUN, g: GymOutco
 
 export interface GymReward { badge: boolean; stardust: number; newAchievements: RunReward['newAchievements'] }
 
-/** 击败道馆馆主：第一次给徽章和星之沙，每次都判定道馆成就 */
+/** 击败道馆馆主：第一次给徽章（大师难度给大师徽章）和星之沙，每次都判定道馆成就 */
 export function winGym(p: Profile, outcome: GymOutcome): GymReward {
   const g = GYM_BY_ID[outcome.gym];
-  const first = !!g && !p.badges[g.id];
+  const box = outcome.master ? p.masterBadges : p.badges;
+  const first = !!g && !box[g.id];
   let dust = 0;
   if (g && first) {
-    p.badges[g.id] = Date.now();
-    dust += g.reward;
-    p.stardust += g.reward;
+    box[g.id] = Date.now();
+    dust += outcome.master ? masterReward(g) : g.reward;
+    p.stardust += dust;
   }
   const got = evalAchievements(p, NO_RUN, outcome);
   return { badge: first, stardust: dust + got.dust, newAchievements: got.fresh };

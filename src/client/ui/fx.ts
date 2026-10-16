@@ -125,7 +125,8 @@ export async function bigBanner(text: string, sub: string, tone: 'win' | 'lose' 
 
 // ---------------------------------------------------------------- 颁发徽章
 
-export interface BadgeAward { icon: string; name: string; color: string; gym: string; bonus: string[]; stardust: number; achievements: string[] }
+/** master：大师徽章（这枚徽章的加成再来一份） */
+export interface BadgeAward { icon: string; name: string; color: string; gym: string; bonus: string[]; stardust: number; achievements: string[]; master?: boolean }
 
 /** 拿到徽章：徽章转着放大，下面写加成和奖励，点按钮关闭（关闭过场动画时也会显示，只是没有动画） */
 export function badgeCeremony(a: BadgeAward): Promise<void> {
@@ -134,9 +135,9 @@ export function badgeCeremony(a: BadgeAward): Promise<void> {
     const el = h('div', { class: `badge-get modal ${enabled ? '' : 'still'}` },
       h('div', { class: 'box badge-box' },
         h('div', { class: 'badge-rays', style: `--bc:${a.color}` }),
-        h('div', { class: 'badge-big' }, uiIcon(a.icon, 8, 'uico badge-ico')),
+        h('div', { class: 'badge-big' }, uiIcon(a.icon, 8, `uico badge-ico ${a.master ? 'master' : ''}`)),
         h('h2', { class: 'gold' }, `获得了${a.name}！`),
-        h('div', { class: 'small muted' }, `${a.gym}的徽章 · 冒险与对战中永久生效`),
+        h('div', { class: 'small muted' }, a.master ? `${a.gym}的大师徽章 · 徽章的加成再来一份` : `${a.gym}的徽章 · 冒险与对战中永久生效`),
         h('div', { class: 'badge-bonus' }, a.bonus.map((b) => h('span', { class: 'pos' }, b))),
         a.stardust ? h('div', { class: 'small gold' }, `星之沙 +${a.stardust}`) : null,
         a.achievements.length ? h('div', { class: 'small' }, '新成就：', a.achievements.join('、')) : null,

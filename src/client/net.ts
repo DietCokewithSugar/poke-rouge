@@ -1,5 +1,6 @@
 import type { C2S, S2C } from '../shared/protocol';
 import { NPC_NAMES, fillTeam, generateBuild, generateTeam, npcTrainer, teamLevel, type SavedBuild } from '../shared/pvp/build';
+import type { GymFieldPlan } from '../shared/pvp/gym';
 import { PvpRoom, type PvpSeat } from '../shared/pvp/room';
 import { PVP_MODES, type PvpMode } from '../shared/pvp/sim';
 import { Rng } from '../shared/rng';
@@ -148,9 +149,9 @@ export class LocalPvpTransport implements Transport {
     queueMicrotask(() => this.onMessage(m));
   };
 
-  /** opponent：指定的对手（道馆训练家与馆主），不指定时生成 AI 训练家 */
+  /** opponent：指定的对手（道馆训练家与馆主）和道馆的场地，不指定时生成 AI 训练家 */
   constructor(mode: PvpMode, me: { name: string; team: SavedBuild[]; meta: Record<string, number>; trainer: string; auto?: boolean }, party: SavedBuild[],
-    opponent?: { name: string; trainer: string; builds: SavedBuild[]; meta: Record<string, number> }) {
+    opponent?: { name: string; trainer: string; builds: SavedBuild[]; meta: Record<string, number>; fields?: GymFieldPlan[] }) {
     const rng = new Rng((Math.random() * 2 ** 31) | 0);
     const M = PVP_MODES[mode];
     const names = rng.shuffle(NPC_NAMES.filter((n) => n !== me.name));
@@ -170,7 +171,7 @@ export class LocalPvpTransport implements Transport {
       for (const b of allies) seats.push(bot(0, [b]));
       for (const b of [mine[0], ...allies]) seats.push(bot(1, [generateBuild(rng, b.level + rng.int(-1, 1))]));
     }
-    this.room = new PvpRoom('练习赛', mode, seats);
+    this.room = new PvpRoom('练习赛', mode, seats, undefined, { fields: opponent?.fields });
     this.room.local = true;
     if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __pvpRoom: PvpRoom }).__pvpRoom = this.room;
     this.room.begin();

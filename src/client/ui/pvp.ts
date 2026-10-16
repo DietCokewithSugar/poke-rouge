@@ -532,13 +532,17 @@ function advRow(r: RankRow) {
   );
 }
 
+/** 道馆榜：badges 是普通徽章和大师徽章加起来的数量（大师徽章要先拿到对应的普通徽章，按顺序拿） */
 function gymRow(r: RankRow) {
   const n = r.badges ?? 0;
+  const normal = Math.min(GYMS.length, n), masters = Math.max(0, n - GYMS.length);
   const day = r.at ? new Date(r.at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
   return h('div', { class: `lb-row gym ${r.you ? 'me' : ''}` },
     h('span', { class: r.rank <= 3 ? `top${r.rank}` : '' }, r.rank || '-'),
     h('span', { class: 'board-mon' }, r.dex ? portraitSlot(r.dex, 1, 'tiny', r.shiny) : null, h('span', { class: 'lb-name' }, r.name)),
-    h('span', { class: 'lb-badges', title: `${n} / ${GYMS.length} 枚徽章` }, GYMS.slice(0, n).map((g) => uiIcon(g.badge.icon, 1)), h('small', null, ` ${n}`)),
+    h('span', { class: 'lb-badges', title: masters ? `${GYMS.length} 枚徽章 · ${masters} 枚大师徽章` : `${normal} / ${GYMS.length} 枚徽章` },
+      GYMS.slice(0, normal).map((g, i) => uiIcon(g.badge.icon, 1, `uico ${i < masters ? 'badge-ico master' : ''}`)),
+      h('small', { class: masters ? 'gold' : '' }, masters ? ` 大师${masters}` : ` ${normal}`)),
     h('span', { class: 'muted' }, day),
   );
 }

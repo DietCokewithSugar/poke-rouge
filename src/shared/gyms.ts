@@ -2,7 +2,10 @@
  * 道馆：关都地区的八个道馆。用背包里的宝可梦（和单挑一样三只同时上场）先打败道馆训练家，再挑战馆主，
  * 赢了就能得到徽章。每枚徽章永久提升一项能力，并提高馆主擅长的属性的技能伤害（冒险与对战都生效）。
  * 道馆要按顺序挑战；赢过的道馆可以随时再战（不会再给徽章）。
+ * 拿到徽章以后可以挑战大师难度：馆主换上进化后的王牌队伍、等级更高，赢了得到大师徽章（这枚徽章的加成再来一份）。
+ * 每个道馆都有自己的局部属性场地：馆主那一半是对馆主有利的主场，挑战者这一半是克制馆主的场地。
  */
+import type { FieldId } from './fields';
 import type { LineId } from './pokemon';
 import type { Mods, TypeMods } from './stats';
 import { TYPES, rawEffectiveness, type PType } from './types';
@@ -21,6 +24,15 @@ export interface GymTrainer {
   win: string;
 }
 
+/** 大师难度的馆主：换一支进化后的王牌队伍（名字、立绘和馆主一样） */
+export interface GymMaster {
+  team: LineId[];
+  level: number;
+  intro: string;
+  lose: string;
+  win: string;
+}
+
 export interface GymDef {
   id: string;
   /** 第几个道馆（1~8） */
@@ -30,6 +42,9 @@ export interface GymDef {
   badge: { name: string; icon: string; color: string; mods: Partial<Mods>; typeMods: TypeMods };
   leader: GymTrainer & { rematch: string };
   junior: GymTrainer;
+  master: GymMaster;
+  /** 道馆里的局部属性场地：[馆主的主场, 克制馆主的场地] */
+  fields: [FieldId, FieldId];
   /** 馆主宝可梦的研究所强化等级 */
   meta: Record<string, number>;
   /** 第一次拿到徽章时的星之沙 */
@@ -40,7 +55,13 @@ const lab = (n: number) => ({ hp: n, atk: n, spa: n, def: n, spd: n, spe: Math.m
 
 export const GYMS: GymDef[] = [
   {
-    id: 'pewter', no: 1, name: '深灰道馆', type: 'rock', meta: lab(1), reward: 60,
+    id: 'pewter', no: 1, name: '深灰道馆', type: 'rock', meta: lab(1), reward: 60, fields: ['lava', 'rain'],
+    master: {
+      team: ['geodude', 'omanyte', 'aerodactyl'], level: 30,
+      intro: '你又来了！这次我把压箱底的化石宝可梦都带来了——岩石的坚硬，可不只是用来防守的！',
+      lose: '了不起……连化石翼龙都拦不住你。这枚大师灰色徽章，就是岩石一样坚定的信任！',
+      win: '岩石不会说话，但它们赢了。回去好好想想，怎么撬开坚硬的外壳吧！',
+    },
     badge: { name: '灰色徽章', icon: 'badge_boulder', color: '#a8a8b8', mods: { defPct: 6, maxHp: 4 }, typeMods: { rock: 8 } },
     junior: {
       name: '阿亮', title: '露营男孩', art: 'camper', team: ['sandshrew', 'diglett'], level: 6,
@@ -57,7 +78,13 @@ export const GYMS: GymDef[] = [
     },
   },
   {
-    id: 'cerulean', no: 2, name: '华蓝道馆', type: 'water', meta: lab(2), reward: 80,
+    id: 'cerulean', no: 2, name: '华蓝道馆', type: 'water', meta: lab(2), reward: 80, fields: ['rain', 'grass'],
+    master: {
+      team: ['staryu', 'lapras', 'horsea'], level: 33,
+      intro: '拿了我的徽章还不满足？好！这回我要认真了——拉普拉斯，上！',
+      lose: '……好吧，是你赢了。大师蓝色徽章给你，下次记得陪我去钓鱼！',
+      win: '华蓝人鱼可不是浪得虚名！再去修行修行吧！',
+    },
     badge: { name: '蓝色徽章', icon: 'badge_cascade', color: '#58a8f8', mods: { regen: 2, spdPct: 4 }, typeMods: { water: 8 } },
     junior: {
       name: '小望', title: '泳装少女', art: 'swimmer', team: ['horsea', 'tentacool'], level: 10,
@@ -74,7 +101,13 @@ export const GYMS: GymDef[] = [
     },
   },
   {
-    id: 'vermilion', no: 3, name: '枯叶道馆', type: 'electric', meta: lab(3), reward: 100,
+    id: 'vermilion', no: 3, name: '枯叶道馆', type: 'electric', meta: lab(3), reward: 100, fields: ['rain', 'clearing'],
+    master: {
+      team: ['pikachu', 'electabuzz', 'magnemite'], level: 36,
+      intro: '嘿，小鬼！上次只是热身！这次是满功率——十万伏特，全员出击！',
+      lose: '哈哈哈，过瘾！你是真正的战士！大师橙色徽章拿去，小心别被电到！',
+      win: '电压太高了吧？下次多带几只地面系的，小鬼！',
+    },
     badge: { name: '橙色徽章', icon: 'badge_thunder', color: '#f8a040', mods: { spePct: 6, haste: 3 }, typeMods: { electric: 8 } },
     junior: {
       name: '阿雷', title: '摇滚歌手', art: 'rocker', team: ['voltorb', 'magnemite'], level: 14,
@@ -91,7 +124,13 @@ export const GYMS: GymDef[] = [
     },
   },
   {
-    id: 'celadon', no: 4, name: '玉虹道馆', type: 'grass', meta: lab(4), reward: 120,
+    id: 'celadon', no: 4, name: '玉虹道馆', type: 'grass', meta: lab(4), reward: 120, fields: ['grass', 'lava'],
+    master: {
+      team: ['oddish', 'exeggcute', 'bellsprout'], level: 39,
+      intro: '你来了呀……花儿们今天开得正好，我也不会再睡着了。请多指教。',
+      lose: '真是美丽的对战……这枚大师彩虹徽章像花一样珍贵，请收下吧。',
+      win: '花儿也有带刺的时候哦……欢迎再来赏花。',
+    },
     badge: { name: '彩虹徽章', icon: 'badge_rainbow', color: '#78d050', mods: { maxHp: 8, regen: 1 }, typeMods: { grass: 8 } },
     junior: {
       name: '花子', title: '美女', art: 'beauty', team: ['paras', 'exeggcute'], level: 18,
@@ -108,7 +147,13 @@ export const GYMS: GymDef[] = [
     },
   },
   {
-    id: 'fuchsia', no: 5, name: '浅红道馆', type: 'poison', meta: lab(5), reward: 140,
+    id: 'fuchsia', no: 5, name: '浅红道馆', type: 'poison', meta: lab(5), reward: 140, fields: ['smog', 'crystal'],
+    master: {
+      team: ['koffing', 'grimer', 'venonat'], level: 42,
+      intro: '呼哈哈！忍者之道，在于看不见的毒！这一次，你连我的影子都碰不到！',
+      lose: '……服了。你的本事已经超过忍术了。大师粉红徽章收好，别让阿杏看见。',
+      win: '毒已入骨！回去喝点解毒药吧……放心，这次贩卖机补货了。',
+    },
     badge: { name: '粉红徽章', icon: 'badge_soul', color: '#f080b8', mods: { dodge: 3, crit: 2 }, typeMods: { poison: 8 } },
     junior: {
       name: '阿杏', title: '忍者见习生', art: 'janine', team: ['zubat', 'ekans'], level: 22,
@@ -125,7 +170,13 @@ export const GYMS: GymDef[] = [
     },
   },
   {
-    id: 'saffron', no: 6, name: '金黄道馆', type: 'psychic', meta: lab(6), reward: 160,
+    id: 'saffron', no: 6, name: '金黄道馆', type: 'psychic', meta: lab(6), reward: 160, fields: ['crystal', 'smog'],
+    master: {
+      team: ['abra', 'jynx', 'slowpoke'], level: 45,
+      intro: '我预见到你会再来，也预见到了这场对战的结局……只是这一次，画面有点模糊。',
+      lose: '未来……改变了。大师金色徽章属于你。我的外卖又凉了。',
+      win: '结局和我预知的一模一样。你的未来还需要更多修行。',
+    },
     badge: { name: '金色徽章', icon: 'badge_marsh', color: '#f8d030', mods: { spaPct: 6, haste: 2 }, typeMods: { psychic: 8 } },
     junior: {
       name: '阿念', title: '超能力者', art: 'psychic', team: ['slowpoke', 'jynx'], level: 27,
@@ -142,7 +193,13 @@ export const GYMS: GymDef[] = [
     },
   },
   {
-    id: 'cinnabar', no: 7, name: '红莲道馆', type: 'fire', meta: lab(7), reward: 180,
+    id: 'cinnabar', no: 7, name: '红莲道馆', type: 'fire', meta: lab(7), reward: 180, fields: ['lava', 'frost'],
+    master: {
+      team: ['growlithe', 'vulpix', 'magmar'], level: 49,
+      intro: '哇哈哈！最终问题：比火焰更烫的是什么？答案是——我燃烧的斗志！',
+      lose: '我认输！你的热情比火山还猛！大师深红徽章送给你——回答正确！',
+      win: '哇哈哈！烧焦了吧！带上水系宝可梦再来答题吧！',
+    },
     badge: { name: '深红徽章', icon: 'badge_volcano', color: '#f05838', mods: { atkPct: 6, crit: 2 }, typeMods: { fire: 8 } },
     junior: {
       name: '阿尔', title: '研究员', art: 'scientist', team: ['vulpix', 'ponyta'], level: 34,
@@ -159,7 +216,13 @@ export const GYMS: GymDef[] = [
     },
   },
   {
-    id: 'viridian', no: 8, name: '常磐道馆', type: 'ground', meta: lab(9), reward: 240,
+    id: 'viridian', no: 8, name: '常磐道馆', type: 'ground', meta: lab(9), reward: 240, fields: ['clearing', 'updraft'],
+    master: {
+      team: ['rhyhorn', 'nidoran_m', 'nidoran_f'], level: 54,
+      intro: '你是第一个让我认真起来的训练家。好，让我看看你到底有多强。',
+      lose: '……我明白了。你已经是真正的强者。大师绿色徽章，你配得上它。',
+      win: '力量就是一切。在你明白这个道理之前，不要再来了。',
+    },
     badge: { name: '绿色徽章', icon: 'badge_earth', color: '#58b858', mods: { dmg: 4, dmgBoss: 6 }, typeMods: { ground: 8 } },
     junior: {
       name: '阿武', title: '空手王', art: 'blackbelt', team: ['machop', 'cubone'], level: 42,
@@ -189,6 +252,23 @@ export const GUIDE = {
 
 /** 存档与联机协议里的徽章键（和研究所强化一起发给服务器，开局时加到宝可梦身上） */
 export const badgeKey = (id: string) => `badge_${id}`;
+/** 大师徽章的键：这枚徽章的加成再算一次 */
+export const masterKey = (id: string) => `badge2_${id}`;
+
+/** 大师徽章的名字 */
+export const masterBadgeName = (g: GymDef) => `大师${g.badge.name}`;
+/** 第一次拿到大师徽章时的星之沙 */
+export const masterReward = (g: GymDef) => g.reward * 2;
+/** 大师难度馆主宝可梦的研究所强化：比普通难度高 3 级（最多 10 级） */
+export const masterMeta = (g: GymDef) => lab(Math.min(10, (g.meta.hp ?? 0) + 3));
+
+/**
+ * 大师难度也按顺序挑战：先拿到这个道馆的普通徽章，再拿到上一个道馆的大师徽章
+ * （masters：已经拿到的大师徽章）
+ */
+export function masterOpen(badges: Record<string, number>, masters: Record<string, number>, g: GymDef): boolean {
+  return !!badges[g.id] && (g.no === 1 || !!masters[GYMS[g.no - 2].id]);
+}
 
 /** 克制这个属性的属性（道馆向导的建议） */
 export function counters(t: PType): PType[] {
