@@ -566,6 +566,7 @@ const CREDIT_TABS: [string, () => Node][] = [
   ['致谢', () => h('div', { class: 'credit-list' },
     h('p', { class: 'small' }, '宝可梦像素精灵（包括闪光宝可梦的异色精灵图）：PMDCollab / SpriteCollab 的众多画师（CC BY-NC 4.0，非商业使用），通过 JPTER78/pokesurvivor 整理导入，完整名单见仓库 CREDITS.md。'),
     h('p', { class: 'small' }, '真新镇图块、行走图与大木博士的立绘：《宝可梦 火红 / 叶绿》（通过 pret/pokefirered 导入）；训练家与道馆馆主的立绘：PokéRogue（CC BY-NC-SA 4.0）。'),
+    h('p', { class: 'small' }, '局部属性场地的特效：PokéRogue 的战斗动画图（最早出自 Pokémon Reborn，CC BY-NC-SA 4.0）；熔岩与寒霜的液面画法参考 JPTER78/pokesurvivor。'),
     h('p', { class: 'small' }, '界面风格与部分界面图标（齿轮、声音、奖杯、硬币、星星、王冠等）来自 JPTER78/pokesurvivor（MIT）。字体：缝合像素字体 Fusion Pixel Font（OFL 1.1）。'),
     h('p', { class: 'small muted' }, 'Pokémon 及相关名称为 Nintendo / Creatures Inc. / GAME FREAK / The Pokémon Company 的商标。本作为非营利粉丝作品。'),
   )],

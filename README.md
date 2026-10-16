@@ -497,12 +497,14 @@ src/shared/gyms.ts 八个道馆、徽章加成与台词
 src/server/        Node 服务器：静态托管 + WebSocket 房间 + 对战匹配与排行榜
 src/client/        浏览器端：渲染（像素瓦片、PMD 精灵动画、特效、训练家与真新镇）、HUD、商店与菜单界面、音效
 tests/             测试与对局机器人
-tools/             素材导入（精灵、真新镇地图、训练家）、平衡性报告
+tools/             素材导入（精灵、真新镇地图、训练家、场地特效）、平衡性报告
 ```
 
 素材导入：`node tools/import-sprites.mjs /path/to/pokesurvivor` 会从 pokesurvivor 仓库复制初代 151 只的精灵表（包括闪光宝可梦的）并生成元数据与署名；
 `node tools/build-town.mjs /path/to/pokefirered` 用火红 / 叶绿的图块拼出真新镇（输出 `public/town/` 的两层图片与 `src/client/gfx/townMap.ts` 的碰撞、门与 NPC 位置）；
-`node tools/import-trainers.mjs /path/to/pokefirered /path/to/pokerogue-assets` 导入训练家的行走图与立绘。这几个工具只用 Node 自带的模块（PNG 的读写在 `tools/png.mjs`）。
+`node tools/import-trainers.mjs /path/to/pokefirered /path/to/pokerogue-assets` 导入训练家的行走图与立绘；
+`node tools/import-field-fx.mjs /path/to/pokerogue-assets` 从 PokéRogue 的战斗动画图里挑出局部属性场地要用的帧，裁切、换色后拼成 `public/fx/fields.png`，
+并把几张前景纹理转成 `public/fx/` 下可平铺的蒙版（帧的位置写进 `src/client/gfx/fieldFxMeta.ts`）。这几个工具只用 Node 自带的模块（PNG 的读写在 `tools/png.mjs`）。
 图鉴数据在 `src/shared/dex.ts`（种族值、属性、特性、进化族），进化线与技能表由 `src/shared/pokemon.ts` 生成。
 
 ## 版权与致谢
@@ -512,6 +514,8 @@ tools/             素材导入（精灵、真新镇地图、训练家）、平�
 - 界面风格与部分界面图标（齿轮、声音、奖杯、硬币、星星、闪光标记、王冠、好友、精灵球等）、闪光宝可梦的闪烁画法：[JPTER78/pokesurvivor](https://github.com/JPTER78/pokesurvivor)，MIT
 - 真新镇图块、训练家与 NPC 的行走图：《宝可梦 火红 / 叶绿》原版素材（通过 [pret/pokefirered](https://github.com/pret/pokefirered) 导入），权利属于 Nintendo / Creatures Inc. / GAME FREAK，仅作非营利粉丝作品使用
 - 训练家、道馆馆主与道馆训练家的立绘：[PokéRogue](https://github.com/pagefaultgames/pokerogue-assets)，CC BY-NC-SA 4.0（源自官方作品的部分以原权利人为准）
+- 局部属性场地的特效帧与纹理（`public/fx/`）：PokéRogue 的战斗动画图（最早出自 [Pokémon Reborn](https://www.rebornevo.com/)），CC BY-NC-SA 4.0；
+  熔岩、寒霜的液面画法参考 pokesurvivor 的 `js/world/tiles.js`（代码为本项目重写）
 - 大木博士的立绘与道馆向导的行走图：《宝可梦 火红 / 叶绿》原版素材（通过 pret/pokefirered 导入）
 - 字体：[缝合像素字体 Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)，SIL OFL 1.1
 - Pokémon 及相关名称、角色是 Nintendo、Creatures Inc.、GAME FREAK 与 The Pokémon Company 的商标与财产。本项目为非营利粉丝作品，与上述公司无关。

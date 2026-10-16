@@ -120,6 +120,16 @@ ${rows.join('\n')}
 - 训练家、道馆馆主与道馆训练家的立绘来自 [PokéRogue](https://github.com/pagefaultgames/pokerogue-assets)（pagefaultgames/pokerogue-assets），
   按 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 使用（源自官方作品的部分以原权利人为准）。
 
+## 局部属性场地特效（Field effects）
+
+- 火苗、熔岩喷柱与熔岩块、毒泡与毒云、雨点与落雷、嫩芽与落叶、共鸣波与光球、旋风、冰刺与寒气等动画帧，
+  以及烟雾、暴风雪、狂风、沙尘、精神场地的纹理，取自 [PokéRogue](https://github.com/pagefaultgames/pokerogue-assets)
+  的战斗动画图（\`images/battle_anims/\`），这批动画图最早出自 [Pokémon Reborn](https://www.rebornevo.com/)。
+  由 \`tools/import-field-fx.mjs\` 裁切、换色后拼成 \`public/fx/\` 下的图集与纹理，
+  按 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 使用，改动后的 \`public/fx/\` 素材同样按此许可提供。
+- 熔岩池、寒霜区域的液面画法（按到岸边的距离分出岸边、泡沫、浅处、深处，外角削圆）参考了
+  [JPTER78/pokesurvivor](https://github.com/JPTER78/pokesurvivor) 的 \`js/world/tiles.js\`，代码为本项目重写。
+
 ## 字体（Font）
 
 [缝合像素字体 Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font)（12px 比例 简体中文），
