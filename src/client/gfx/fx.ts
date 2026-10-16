@@ -601,10 +601,11 @@ export class FxLayer {
       ctx.fillRect(0, -g.a / 2, Math.round(len * k), g.a);
       ctx.restore();
     } else {
+      // 红圈包在一道深色带里：落在熔岩池这类橙红色地面上也看得清
       ctx.globalAlpha = blink * 0.7;
-      pxRing(ctx, g.x, g.y + 1, g.a + 1, '#300810', 1, 0.8, 3);
+      pxRing(ctx, g.x - 1, g.y - 1, g.a, '#300810', 4, 0.8, 2);
       ctx.globalAlpha = blink;
-      pxRing(ctx, g.x, g.y, g.a, '#ff5060', 1, 0.8, 3);
+      pxRing(ctx, g.x, g.y, g.a, '#ff5060', 2, 0.8, 2);
       ctx.globalAlpha = 0.33;
       pxRing(ctx, g.x, g.y, Math.max(1, g.a * k), '#f83848', 2, 0.8, 3);
       ctx.globalAlpha = 0.25;

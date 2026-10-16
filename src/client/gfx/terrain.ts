@@ -17,6 +17,8 @@ interface Look {
   rim: [number, number, number, number];
   /** 底色和花纹：画一个格子（画出格子的部分会按场地的形状裁掉） */
   tile(px: Px, x: number, y: number, rng: Rng): void;
+  /** 不按格子对齐的大花纹，先于 tile 铺满整张图（tile 画的细节叠在上面），ox、oy 为图在世界坐标里的左上角 */
+  paint?(d: Uint8ClampedArray, W: number, H: number, ox: number, oy: number, rng: Rng): void;
   /** 这些颜色的像素放进发光层，随时间变亮变暗 */
   glow?: { from: string[]; to: string };
   /** 每个格子放一个小动画的概率 */
@@ -48,27 +50,51 @@ function prism(px: Px, cx: number, by: number, w: number, h: number, light: stri
 }
 
 const MOLTEN = '#e8541c', MOLTEN2 = '#f47a26';
+const CRUST: [number, number, number][] = [[74, 30, 22], [85, 36, 26], [63, 26, 20], [70, 28, 24]];
+
+/**
+ * 熔岩：一块块大小不一的岩壳（抖动网格上的点做最近点划分，和格子不对齐），
+ * 岩壳之间是发光的岩浆缝，缝边的岩壳颜色亮一点，看起来是烧红的边。
+ */
+function lavaPlates(d: Uint8ClampedArray, W: number, H: number, ox: number, oy: number, rng: Rng) {
+  const S = 22;
+  const gx0 = Math.floor(ox / S) - 1, gy0 = Math.floor(oy / S) - 1;
+  const gw = Math.ceil(W / S) + 3, gh = Math.ceil(H / S) + 3;
+  const sx = new Float32Array(gw * gh), sy = new Float32Array(gw * gh), tone = new Uint8Array(gw * gh);
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+    const k = j * gw + i;
+    sx[k] = (gx0 + i) * S + rng.range(3, S - 3) - ox;
+    sy[k] = (gy0 + j) * S + rng.range(3, S - 3) - oy;
+    tone[k] = rng.chance(0.04) ? 255 : rng.int(0, CRUST.length - 1);
+  }
+  const m1 = [232, 84, 28], m2 = [244, 122, 38], hot = [106, 48, 34];
+  for (let y = 0; y < H; y++) {
+    const cj = Math.floor((y + oy) / S) - gy0;
+    for (let x = 0; x < W; x++) {
+      const ci = Math.floor((x + ox) / S) - gx0;
+      let d1 = 1e9, d2 = 1e9, best = 0;
+      for (let j = cj - 1; j <= cj + 1; j++) for (let i = ci - 1; i <= ci + 1; i++) {
+        const k = j * gw + i, dd = (sx[k] - x) ** 2 + (sy[k] - y) ** 2;
+        if (dd < d1) { d2 = d1; d1 = dd; best = k; } else if (dd < d2) d2 = dd;
+      }
+      const edge = Math.sqrt(d2) - Math.sqrt(d1);
+      const o = (y * W + x) * 4;
+      // 偶尔有一整块是翻滚的岩浆，没有结壳
+      const c = tone[best] === 255 ? (edge < 2 ? m2 : m1) : edge < 0.9 ? m2 : edge < 1.9 ? m1 : edge < 3.2 ? hot : CRUST[tone[best]];
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+    }
+  }
+}
 
 const LOOKS: Record<TerrainId, Look> = {
   lava: {
     edge: [30, 10, 8, 255], rim: [255, 122, 42, 255],
     tile(px, x, y, rng) {
-      px(x, y, MOLTEN, C, C);
-      if (rng.chance(0.12)) {
-        // 一小片翻滚的岩浆
-        px(x + rng.int(2, 8), y + rng.int(2, 8), MOLTEN2, rng.int(3, 6), rng.int(2, 4));
-        return;
-      }
-      // 结了壳的岩块，四边留出宽窄不一的裂缝
-      const a = rng.int(0, 2), b = rng.int(0, 2), c = rng.int(0, 2), d = rng.int(0, 2);
-      const crust = rng.pick(['#4a1e16', '#55241a', '#3f1a14']);
-      px(x + a, y + b, crust, C - a - c, C - b - d);
-      px(x + a + 1, y + b, '#6a3022', C - a - c - 2, 1);
-      if (rng.chance(0.5)) px(x + a, y + b, MOLTEN, 2, 1);
-      if (rng.chance(0.5)) px(x + C - c - 1, y + C - d - 2, MOLTEN, 1, 2);
-      if (rng.chance(0.55)) crack(px, rng, x + rng.int(3, 11), y + rng.int(3, 8), rng.int(3, 6), MOLTEN2);
-      for (let i = 0; i < 2; i++) px(x + rng.int(2, 13), y + rng.int(2, 13), '#6a3022');
+      // 岩壳上的小坑和裂纹
+      for (let i = 0; i < 2; i++) px(x + rng.int(1, 14), y + rng.int(1, 14), '#341410');
+      if (rng.chance(0.3)) crack(px, rng, x + rng.int(3, 11), y + rng.int(3, 8), rng.int(2, 4), '#5c2618');
     },
+    paint: lavaPlates,
     glow: { from: [MOLTEN, MOLTEN2], to: '#ffd060' },
     spots: 0.3,
     spot(ctx, s, t) {
@@ -86,10 +112,10 @@ const LOOKS: Record<TerrainId, Look> = {
     },
   },
   miasma: {
-    edge: [58, 24, 88, 235], rim: [176, 112, 232, 210],
+    edge: [52, 14, 84, 245], rim: [196, 120, 248, 225],
     tile(px, x, y, rng) {
-      px(x, y, 'rgba(84,36,128,0.42)', C, C);
-      if (rng.chance(0.6)) px(x + rng.int(0, 10), y + rng.int(0, 11), 'rgba(40,10,70,0.35)', rng.int(3, 6), rng.int(2, 4));
+      px(x, y, 'rgba(120,22,180,0.62)', C, C);
+      if (rng.chance(0.6)) px(x + rng.int(0, 10), y + rng.int(0, 11), 'rgba(44,8,76,0.4)', rng.int(3, 6), rng.int(2, 4));
       if (rng.chance(0.35)) {
         const bx = x + rng.int(3, 12), by = y + rng.int(3, 12);
         px(bx, by, '#8a4ac0', 2, 2);
@@ -195,15 +221,16 @@ const LOOKS: Record<TerrainId, Look> = {
     },
   },
   updraft: {
-    edge: [138, 160, 184, 220], rim: [255, 255, 255, 190],
+    edge: [84, 120, 168, 255], rim: [255, 255, 255, 235],
     tile(px, x, y, rng) {
-      px(x, y, 'rgba(226,238,255,0.17)', C, C);
-      if (rng.chance(0.4)) {
+      px(x, y, 'rgba(184,222,255,0.42)', C, C);
+      if (rng.chance(0.45)) {
         // 小旋涡
         const bx = x + rng.int(3, 9), by = y + rng.int(3, 9);
-        for (const [dx, dy] of [[1, 0], [2, 0], [3, 1], [3, 2], [2, 3], [1, 3], [0, 2], [1, 1]]) px(bx + dx, by + dy, 'rgba(255,255,255,0.5)');
+        for (const [dx, dy] of [[1, 0], [2, 0], [3, 1], [3, 2], [2, 3], [1, 3], [0, 2], [1, 1]]) px(bx + dx, by + dy, 'rgba(255,255,255,0.8)');
+        px(bx + 4, by + 1, 'rgba(120,170,230,0.6)', 1, 2);
       }
-      if (rng.chance(0.35)) px(x + rng.int(1, 10), y + rng.int(1, 14), 'rgba(255,255,255,0.3)', rng.int(3, 5), 1);
+      if (rng.chance(0.4)) px(x + rng.int(1, 10), y + rng.int(1, 14), 'rgba(255,255,255,0.55)', rng.int(3, 5), 1);
     },
     spots: 0.5,
     spot(ctx, s, t) {
@@ -211,8 +238,8 @@ const LOOKS: Record<TerrainId, Look> = {
       const ph = frac(t / (1.1 + s.k * 0.3) + s.p);
       const y = s.ct + 14 - ph * 11;
       const a0 = ctx.globalAlpha;
-      ctx.globalAlpha = a0 * (1 - ph) * 0.85;
-      dot(ctx, s.x, y - 3, '#ffffff', 1, 3);
+      ctx.globalAlpha = a0 * Math.min(1, (1 - ph) * 1.4);
+      dot(ctx, s.x, y - 3, '#ffffff', 1, 4);
       if (s.k === 0) dot(ctx, Math.min(s.cl + 13, s.x + 2 + Math.sin(ph * 10) * 1.5), y, '#a8e070', 2, 1);
       ctx.globalAlpha = a0;
     },
@@ -301,6 +328,11 @@ function build(t: Terrain): Art {
   const rng = new Rng(t.cx * 7919 + t.cy * 104729 + t.count * 31 + TERRAIN_SEED[t.kind]);
   const px: Px = (x, y, col, w = 1, h = 1) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
   const spots: Spot[] = [];
+  if (L.paint) {
+    const im = g.getImageData(0, 0, W, H);
+    L.paint(im.data, W, H, ox, oy, rng);
+    g.putImageData(im, 0, 0);
+  }
   for (let gy = y0; gy <= y1; gy++) {
     for (let gx = x0; gx <= x1; gx++) {
       if (!has(gx, gy)) continue;
