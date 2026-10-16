@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { RunSummary } from '../src/shared/meta';
-import { generateBuild } from '../src/shared/pvp/build';
+import { generateBuild, type SavedBuild } from '../src/shared/pvp/build';
+import { PvpRoom } from '../src/shared/pvp/room';
+import { cleanMeta } from '../src/shared/room';
 import { Rng } from '../src/shared/rng';
+import type { GameSim } from '../src/shared/sim/game';
+import { createPlayerFromBuild } from '../src/shared/sim/player';
 
 const store = new Map<string, string>();
 Object.assign(globalThis, {
@@ -49,4 +53,34 @@ test('背包：读存档时清理异常数据', () => {
   assert.equal(save.partyMax(p), 12);
   assert.equal(p.bestRun, null);
   assert.deepEqual(p.gymLog, {});
+});
+
+test('背包面板的属性 = 开局后对战里的属性（研究所强化、道馆徽章、训练家都算上）', () => {
+  store.clear();
+  const p = save.loadProfile();
+  p.trainer = 'brock';
+  p.badges = { pewter: 1, cerulean: 1 };
+  p.upgrades = { hp: 2, def: 1, atk: 3 };
+  const team: SavedBuild[] = [
+    { line: 'charmander', stage: 1, level: 16, skills: [{ id: 'ember', lv: 2 }, { id: 'scratch', lv: 1 }], items: [['charcoal', 1]], levelMods: { def: 5 } },
+    { line: 'squirtle', stage: 1, level: 14, skills: [{ id: 'water_gun', lv: 1 }], items: [], levelMods: { maxHp: 8 } },
+    generateBuild(rng, 12),
+  ];
+  // 浏览器里的练习赛直接用 runMeta；服务器匹配、道馆先 cleanMeta 再开局
+  for (const meta of [save.runMeta(p), cleanMeta(save.runMeta(p))]) {
+    const c = { send() {} };
+    const room = new PvpRoom('测试', '1v1', [
+      { id: 1, name: '小刚', team: 0, builds: team, meta, trainer: p.trainer, conn: c, bot: false, rating: 1000 },
+      { id: 2, name: '小茂', team: 1, builds: team, meta: {}, trainer: 'gary', conn: null, bot: true, rating: 1000 },
+    ], 3);
+    room.begin();
+    room.update();
+    const mine = room.sim.players.filter((q) => room.sim.ownerOf(q.id).owner === 1);
+    assert.equal(mine.length, 3);
+    mine.forEach((q, i) => assert.deepEqual(save.partyStats(p, team[i]).d, q.d, `第 ${i + 1} 只`));
+  }
+  // 训练家和徽章确实算进去了：比只算研究所强化的数值高
+  const bare = createPlayerFromBuild({ w: 0, h: 0 } as unknown as GameSim, 0, '', team[0], p.upgrades).d;
+  const full = save.partyStats(p, team[0]).d;
+  assert.ok(full.maxHp > bare.maxHp && full.def > bare.def && full.spd > bare.spd, `HP ${bare.maxHp}→${full.maxHp} 物防 ${bare.def}→${full.def}`);
 });

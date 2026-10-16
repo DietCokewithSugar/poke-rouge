@@ -23,8 +23,8 @@ import { initGamepad } from './gamepad';
 import { initInput, setInputEnabled } from './input';
 import { LocalPvpTransport, LocalTransport, WsTransport, type Incoming, type Transport } from './net';
 import {
-  PARTY_BONUS_TIER, addOwned, applyRun, autoAssistUnlocked, badgeMeta, buildMon, isUnlocked, loadProfile, monKey, notePvpBest, ownsMon, partnerOf, partyMax, pvpIdentity,
-  releaseFromParty, saveProfile, unlockedLines, watchProfile, winGym, type Mon, type PartyMon, type Profile, type Settings,
+  PARTY_BONUS_TIER, addOwned, applyRun, autoAssistUnlocked, buildMon, isUnlocked, loadProfile, monKey, notePvpBest, ownsMon, partnerOf, partyMax, pvpIdentity,
+  releaseFromParty, runMeta, saveProfile, unlockedLines, watchProfile, winGym, type Mon, type PartyMon, type Profile, type Settings,
 } from './save';
 import { Cloud } from './cloud';
 import { accountScreen, conflictScreen } from './ui/account';
@@ -395,10 +395,14 @@ class App {
     if (this.where !== 'game') this.loading(`正在回到房间 ${s.code} 的冒险…`);
   }
 
-  /** Esc / 手柄 Start / 左上角的按钮：单人暂停，联机和对战打开菜单 */
+  /** Esc / 手柄 Start / 右上角的按钮：单人暂停（波次中和升级、商店阶段都可以），联机和对战打开菜单 */
   private pauseOrMenu() {
     if (this.where !== 'game') return;
-    if (this.solo) { if (this.pub?.phase === 'wave' || this.paused) this.setPause(!this.paused); return; }
+    if (this.solo) {
+      const phase = this.pub?.phase;
+      if (this.paused || (!this.ending && (phase === 'wave' || phase === 'inter'))) this.setPause(!this.paused);
+      return;
+    }
     if (this.menuAuto !== null) this.closeGameMenu();
     else this.openGameMenu();
   }
@@ -432,6 +436,15 @@ class App {
     this.screen.classList.add('hidden');
     if (was === false && this.where === 'game') this.setAutoLocal(false);
     if (!this.inter?.visible) setInputEnabled(true);
+  }
+
+  /** 对局结束时菜单（或从菜单打开的设置）还开着：直接收起来，不再切换自动战斗 */
+  private dropGameMenu() {
+    if (this.menuAuto === null) return;
+    this.menuAuto = null;
+    this.accountOpen = false;
+    clear(this.screen);
+    this.screen.classList.add('hidden');
   }
 
   /** 离开联机冒险：AI 先替你战斗，在真新镇或宝可梦中心随时可以回来 */
@@ -616,6 +629,8 @@ class App {
     this.townHud.refresh();
     this.townHud.setRejoin(this.session);
     this.townHud.show(true);
+    // 进建筑时收起了互动按钮；出来还站在门口（或 NPC 身边）就要重新显示
+    this.town.syncSpot();
     setInputEnabled(true);
     playMusic('town');
     hideTip();
@@ -993,7 +1008,7 @@ class App {
   }
 
   /** 研究所强化 + 道馆徽章：开局时加到宝可梦身上（服务器端同样计算） */
-  private meta() { return { ...this.profile.upgrades, ...badgeMeta(this.profile) }; }
+  private meta() { return runMeta(this.profile); }
   private name() { return this.profile.name || TRAINERS[this.profile.trainer]?.name || '训练家'; }
   /** 加入房间时带上的身份 */
   private ident() {
@@ -1063,6 +1078,8 @@ class App {
 
   private onMessage(m: Incoming) {
     if (m instanceof ArrayBuffer) { this.view?.onSnapshot(m); return; }
+    // 菜单开着时对局结束：不收起来的话，下一局第一次 Esc 会去关一个看不见的菜单
+    if (m.t === 'end' || m.t === 'pvpEnd') this.dropGameMenu();
     switch (m.t) {
       case 'joined':
         this.you = m.you;
@@ -1223,7 +1240,7 @@ class App {
     } else {
       this.lastBiome = -1;
       this.hud = new Hud(this.ui, () => this.pauseOrMenu(), this.solo ? 'pause' : 'menu');
-      this.inter = new Intermission(this.ui, (c) => this.send(c));
+      this.inter = new Intermission(this.ui, (c) => this.send(c), { kind: this.solo ? 'pause' : 'menu', open: () => this.pauseOrMenu() });
       if (autoAssistUnlocked(this.profile)) {
         this.hud.enableAuto(() => this.toggleAuto(), 'AI 替你走位、躲开攻击、捡糖果和救队友；技能照常自动释放，商店和升级仍由你来选。');
         if (this.profile.autoAssist) this.setAutoLocal(true);
@@ -1326,6 +1343,11 @@ class App {
     this.send({ t: 'pause', on });
   }
 
+  /** 单人暂停菜单的「放弃本局」：波次中和升级、商店阶段都走这里，先进「逃跑了」结算 */
+  private abandonRun() {
+    this.forfeitSolo();
+  }
+
   private renderPause() {
     if (this.paused) {
       setInputEnabled(false);
@@ -1333,7 +1355,7 @@ class App {
       pauseScreen(this.screen, {
         resume: () => this.setPause(false),
         settings: () => this.openSettings(() => this.renderPause()),
-        quit: { label: '放弃本局，回到真新镇', confirm: '再点一次确认放弃', run: () => this.forfeitSolo() },
+        quit: { label: '放弃本局，回到真新镇', confirm: '再点一次确认放弃', run: () => this.abandonRun() },
       });
     } else {
       clear(this.screen);
@@ -1410,6 +1432,7 @@ class App {
     this.me = null;
     this.pub = null;
     this.paused = false;
+    this.menuAuto = null;
     setInputEnabled(false);
     if (this.where === 'game') this.where = 'results';
   }
