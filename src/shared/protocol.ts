@@ -190,7 +190,7 @@ export function encodeSnapshot(sim: GameSim, tick: number, box?: ViewBox | null)
     let f = 0;
     const st = e.st;
     if (e.hidden) f |= 1;
-    if (st.burn > 0) f |= 2;
+    if (st.burn > 0 || (e.fieldBurn ?? 0) > 0) f |= 2;
     if (st.poison > 0 || st.leech > 0) f |= 4;
     if (st.para > 0) f |= 8;
     if (st.freeze > 0 || st.stun > 0) f |= 16;

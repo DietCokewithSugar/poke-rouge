@@ -1247,6 +1247,7 @@ class App {
       }
     }
     this.hud.setTrainer(mine?.trainer ?? this.profile.trainer, mine?.name ?? this.name());
+    this.hud.fieldHere = () => this.view?.fieldHere() ?? null;
     setInputEnabled(true);
     playMusic('battle');
     this.presence();

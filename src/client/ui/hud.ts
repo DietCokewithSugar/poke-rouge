@@ -1,5 +1,7 @@
+import { FIELDS, fieldVerdict, type FieldVerdict } from '../../shared/fields';
 import { BOOSTS, BOOST_DUR, type BoostId } from '../../shared/pickups';
-import { LINES } from '../../shared/pokemon';
+import { LINES, formOf } from '../../shared/pokemon';
+import { SKILLS } from '../../shared/skills';
 import { BIOMES } from '../../shared/waves';
 import { DIFFICULTIES } from '../../shared/difficulty';
 import type { MeState, PublicState } from '../../shared/sim/game';
@@ -11,7 +13,9 @@ import { Animator } from '../gfx/sprites';
 import { trainerPortrait } from '../gfx/trainers';
 import { uiIcon } from '../gfx/uiicons';
 import { clear, h, tip } from './dom';
-import { skillIcon, skillInfo } from './describe';
+import { skillIcon, skillInfo, typeBadge } from './describe';
+
+const VERDICT: Record<FieldVerdict, string> = { good: '对你有利', bad: '对你不利', mixed: '有利有弊', none: '对你没影响' };
 
 export class Hud {
   root: HTMLElement;
@@ -50,6 +54,12 @@ export class Hud {
   /** 增幅种子的倒计时（左上角，在训练家信息下面） */
   private boostBox = h('div', { class: 'hud-boosts hidden' });
   private boostKey = '';
+  /** 局部属性场地的卡片（增幅下面）：获益属性、正负效果、对你有利还是不利；站在里面的那块会亮 */
+  private fieldBox = h('div', { class: 'hud-fields hidden' });
+  private fieldKey = '';
+  private hereId: number | null = null;
+  /** 自己现在站在哪块场地里（由画面提供） */
+  fieldHere: () => number | null = () => null;
   private boosts: { left: number; at: number; t: HTMLElement; bar: HTMLElement }[] = [];
   private raf = 0;
   private pvpSeats: PvpSeatInfo[] = [];
@@ -73,7 +83,7 @@ export class Hud {
           this.me.money,
         ),
       ),
-      this.boostBox,
+      h('div', { class: 'hud-left' }, this.boostBox, this.fieldBox),
       h('div', { class: 'hud-center' },
         h('div', { class: 'box tight hud-wavebox' }, this.wave, this.timer, this.hordeEl),
         this.pvpBox,
@@ -120,7 +130,39 @@ export class Hud {
       const w = `${Math.round((left / BOOST_DUR) * 100)}%`;
       if (b.bar.style.width !== w) b.bar.style.width = w;
     }
+    const here = this.fieldBox.childElementCount ? this.fieldHere() : null;
+    if (here !== this.hereId) {
+      this.hereId = here;
+      for (const el of this.fieldBox.children) el.classList.toggle('here', Number((el as HTMLElement).dataset.id) === here);
+    }
   };
+
+  /** 场地卡片：只在波次进行中显示；按自己的属性和会的招式写明对你有利还是不利 */
+  private setFields(pub: PublicState, me: MeState | null) {
+    const list = pub.phase === 'wave' ? pub.fields ?? [] : [];
+    const types = me ? formOf(me.line, me.stage).types : [];
+    const moves = (me?.skills ?? []).map((s) => SKILLS[s.id]).filter(Boolean).map((d) => ({ type: d.type, damaging: d.cat !== 'status', phys: d.cat === 'phys' }));
+    const verdicts = list.map((f) => fieldVerdict(f.kind, types, moves).verdict);
+    const key = list.map((f, i) => `${f.id}:${f.on ? 1 : 0}:${verdicts[i]}`).join(',');
+    if (key === this.fieldKey) return;
+    this.fieldKey = key;
+    clear(this.fieldBox);
+    list.forEach((f, i) => {
+      const F = FIELDS[f.kind];
+      this.fieldBox.appendChild(h('div', { class: `hud-field v-${verdicts[i]}${f.on ? '' : ' forming'}`, 'data-id': f.id, style: `--c: ${F.color}` },
+        h('div', { class: 'hf-head' },
+          h('span', { class: 'hf-name' }, F.name),
+          h('span', { class: 'hf-types' }, F.types.map(typeBadge)),
+          h('span', { class: 'hf-here' }, '你在这里'),
+          h('span', { class: 'hf-v' }, f.on ? VERDICT[verdicts[i]] : '即将出现'),
+        ),
+        h('div', { class: 'hf-line pos' }, `▲ ${F.short[0]}`),
+        h('div', { class: 'hf-line neg' }, `▼ ${F.short[1]}`),
+      ));
+    });
+    this.fieldBox.classList.toggle('hidden', !list.length);
+    this.hereId = null;
+  }
 
   /** 正在生效的增幅：小图标 + 名字 + 剩余秒数 + 进度条 */
   private setBoosts(list: [BoostId, number][]) {
@@ -264,6 +306,7 @@ export class Hud {
       this.updatePvp(pub);
       this.downBox.classList.toggle('hidden', !(me?.down && pub.phase === 'wave' && this.pvpSeats.filter((s) => s.team === this.myTeam).length > 1));
     } else if (pub) {
+      this.setFields(pub, me);
       const D = DIFFICULTIES[pub.difficulty];
       set(this.wave, `${D.name} · 第 ${pub.wave} / ${pub.total} 波 · ${BIOMES[pub.biome]?.name ?? ''}`);
       this.hordeEl.classList.toggle('hidden', !(pub.horde && pub.phase === 'wave'));
