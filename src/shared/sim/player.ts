@@ -1,13 +1,14 @@
+import { abilitiesOf } from '../abilities';
 import { ITEMS, ITEM_IDS, type ItemDef } from '../items';
 import { metaBonus } from '../meta';
-import { LINES, awakenings, formOf, isFinal, isNative, maxStageByLevel, type LineId } from '../pokemon';
+import { LINES, abilityAt, abilityIdAt, awakenings, formOf, isFinal, isNative, maxStageByLevel, type LineId } from '../pokemon';
 import { SKILLS, SKILL_IDS, SKILL_MAX_LV } from '../skills';
 import { BOOST_CRIT, BOOST_DODGE, BOOST_SPEED } from '../pickups';
 import { MOVE_SPEED_MAX, addMods, addTypeMods, derive, emptyMods, type Mods, type TypeMods } from '../stats';
 import { trainerOf } from '../trainers';
 import { priceMult } from '../waves';
 import type { SavedBuild } from '../pvp/build';
-import type { LevelCard, ShopOffer, SimPlayer, UndoBuy } from './entities';
+import { freshAbilityState, freshStatus, type LevelCard, type ShopOffer, type SimPlayer, type UndoBuy } from './entities';
 import type { GameSim } from './game';
 
 export const SKILL_PRICE = [0, 22, 48, 88, 145];
@@ -37,10 +38,12 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
     trainerTypeMods: addTypeMods({ ...(T.typeMods ?? {}) }, mb.typeMods),
     typeMods: {},
     d: derive(formOf(line, 0).base, emptyMods()),
+    baseTaken: { phys: 1, spec: 1 },
     slots: formOf(line, 0).slots,
     invuln: 1.5, shield: 0, shieldT: 0, buffT: 0, buff: { haste: 0, spe: 0 }, boosts: { crit: 0, dodge: 0, speed: 0 },
     fieldBurn: 0, fieldDot: 0, drainAt: -9, drained: 0,
     slowT: 0, slowAmt: 0, regenAcc: 0, lsWindow: 0, lsCount: 0, sashUsed: false, sturdyUsed: false,
+    ab: [], copied: [], suppressed: false, at: freshAbilityState(), st: freshStatus(),
     levelQueue: [], cards: null, cardRerolls: 0, crates: [], evoPrompt: false,
     shop: { offers: [], locked: [false, false, false, false], rerolls: 0, freeRerolls: 0 },
     undo: null,
@@ -51,6 +54,10 @@ export function createPlayer(sim: GameSim, id: number, name: string, line: LineI
       forms: [formOf(line, 0).dex], waves: [], mark: { kills: 0, damage: 0, taken: 0 }, kos: 0, deaths: 0, recruits: [], shinyRecruits: [],
     },
   };
+  // 战斗盔甲、变身者：冒险开局就带着粗骨头 / 金属粉或速度粉（对战按构筑里的道具，会被覆盖）
+  const a0 = abilityAt(line, 0, 1);
+  if (a0?.club) p.items.thick_club = 1;
+  if (a0?.powders) p.items[sim.rng.chance(0.5) ? 'metal_powder' : 'quick_powder'] = 1;
   recompute(p);
   p.hp = p.d.maxHp;
   return p;
@@ -74,8 +81,8 @@ export function createPlayerFromBuild(sim: GameSim, id: number, name: string, b:
 export function recompute(p: SimPlayer) {
   const L = LINES[p.line];
   const form = formOf(p.line, p.stage);
+  p.ab = p.suppressed ? [] : abilitiesOf([abilityIdAt(p.line, p.stage, p.level), ...p.copied]);
   const m: Mods = emptyMods();
-  if (!(L.flags.modsStage0Only && p.stage > 0)) addMods(m, L.mods);
   addMods(m, p.metaMods);
   addMods(m, p.levelMods);
   const tm: TypeMods = { ...p.trainerTypeMods };
@@ -93,18 +100,36 @@ export function recompute(p: SimPlayer) {
     if (it.special === 'light_ball' && p.line === 'pikachu' && p.stage === 0) { m.atkPct += 20; m.spaPct += 20; }
   }
   const aw = awakenings(p.line, p.level);
+  const base = emptyMods();
+  addMods(base, p.metaMods);
+  addMods(base, p.levelMods);
   if (aw > 0) {
     const pct = aw * 10;
-    m.atkPct += pct; m.spaPct += pct; m.defPct += pct; m.spdPct += pct; m.spePct += pct;
-    m.maxHp += aw * 8;
+    for (const x of [m, base]) { x.atkPct += pct; x.spaPct += pct; x.defPct += pct; x.spdPct += pct; x.spePct += pct; x.maxHp += aw * 8; }
   }
+  // 特性：常驻的能力加成、粗骨头、金属粉 / 速度粉、愤怒穴位
+  let hpPct = 0, pickup = 1;
+  for (const a of p.ab) {
+    if (a.mods) addMods(m, a.mods);
+    if (a.club) m.atkPct += a.club.atk * Math.min(a.club.max, p.items.thick_club ?? 0);
+    if (a.powders) {
+      const metal = Math.min(a.powders.max, p.items.metal_powder ?? 0), quick = Math.min(a.powders.max, p.items.quick_powder ?? 0);
+      hpPct += a.powders.pct * metal; m.defPct += a.powders.pct * metal; m.spdPct += a.powders.pct * metal;
+      m.atkPct += a.powders.pct * quick; m.spaPct += a.powders.pct * quick;
+    }
+    if (a.pickupBoost) pickup = Math.max(pickup, a.pickupBoost);
+  }
+  if (p.at.anger > 0) { m.atkPct += 100; m.defPct += 100; m.spaPct += 100; m.spdPct += 100; m.spePct += 100; }
   if (p.buffT > 0) { m.haste += p.buff.haste; m.spePct += p.buff.spe; }
-  if (p.boosts.crit > 0) m.crit += BOOST_CRIT;
-  if (p.boosts.dodge > 0) m.dodge += BOOST_DODGE;
+  if (p.boosts.crit > 0) m.crit += BOOST_CRIT * pickup;
+  if (p.boosts.dodge > 0) m.dodge += BOOST_DODGE * pickup;
   m.maxHp += p.level - 1;
   const prevMax = p.d.maxHp;
   p.d = derive(form.base, m, p.shiny);
-  if (p.boosts.speed > 0) p.d.moveSpeed = Math.max(p.d.moveSpeed, Math.min(MOVE_SPEED_MAX, p.d.moveSpeed * (1 + BOOST_SPEED)));
+  if (hpPct) p.d.maxHp = Math.max(1, Math.round(p.d.maxHp * (1 + hpPct / 100)));
+  const bd = derive(form.base, base, p.shiny);
+  p.baseTaken = { phys: bd.physTaken, spec: bd.specTaken };
+  if (p.boosts.speed > 0) p.d.moveSpeed = Math.max(p.d.moveSpeed, Math.min(MOVE_SPEED_MAX, p.d.moveSpeed * (1 + BOOST_SPEED * pickup)));
   p.typeMods = tm;
   p.slots = Math.max(1, form.slots + m.slots + (L.awakenSlot && aw >= L.awakenSlot ? 1 : 0));
   if (p.d.maxHp > prevMax && p.alive && !p.down) p.hp = Math.min(p.d.maxHp, p.hp + (p.d.maxHp - prevMax));
@@ -131,17 +156,39 @@ export function levelUp(sim: GameSim, p: SimPlayer) {
   p.levelQueue.push(p.level);
   sim.emit(['lvl', p.id, p.level]);
   const awBefore = awakenings(p.line, p.level - 1);
+  const abBefore = abilityIdAt(p.line, p.stage, p.level - 1);
   recompute(p);
   if (awakenings(p.line, p.level) > awBefore) {
     const f = formOf(p.line, p.stage);
-    sim.emit(['evo', p.id, f.dex, p.line === 'mewtwo' ? '基因觉醒' : `${f.name}觉醒了！`]);
+    sim.emit(['evo', p.id, f.dex, `${p.line === 'mewtwo' ? '基因觉醒！' : `${f.name}觉醒了！`}${abilityNote(p, abBefore)}`]);
   }
-  // 和原作一样，进化在战斗结束后发生，并且可以按 B 取消
+  // 和原作一样，进化在战斗结束后发生，并且可以按 B 取消；特性要求强制进化的不能取消
   if (!couldEvolve && canEvolve(p)) {
-    sim.emit(['evoReady', p.id, formOf(p.line, p.stage).name]);
-    if (sim.phase === 'inter') p.evoPrompt = true;
+    const forced = !!abilityAt(p.line, p.stage, p.level)?.forceEvo;
+    sim.emit(['evoReady', p.id, formOf(p.line, p.stage).name, forced ? 1 : 0]);
+    if (sim.phase === 'inter') {
+      if (forced) forceEvolve(sim, p);
+      else p.evoPrompt = true;
+    }
   }
   if (p.alive && !p.down) p.hp = Math.min(p.d.maxHp, p.hp + 2);
+}
+
+/** 特性换了的时候在进化、觉醒的提示后面写一句 */
+function abilityNote(p: SimPlayer, before: string): string {
+  const a = abilityAt(p.line, p.stage, p.level);
+  return a && a.id !== before ? `特性变成了「${a.name}」` : '';
+}
+
+/** 特性要求强制进化（绿毛虫、铁甲蛹、独角虫、铁壳蛹、哈克龙）：等级够了就直接进化，能连进就连进。返回有没有进化 */
+export function forceEvolve(sim: GameSim, p: SimPlayer): boolean {
+  let done = false;
+  while (canEvolve(p) && abilityAt(p.line, p.stage, p.level)?.forceEvo) {
+    evolve(sim, p);
+    done = true;
+  }
+  if (done) p.evoPrompt = canEvolve(p);
+  return done;
 }
 
 /** 等级已经够了、还没有进化、也没有携带不变之石。 */
@@ -168,13 +215,14 @@ export function evolve(sim: GameSim, p: SimPlayer, to = p.stage + 1) {
   const L = LINES[p.line];
   if (isFinal(p.line, p.stage) || to >= L.forms.length || to <= p.stage) return;
   const before = formOf(p.line, p.stage).name;
+  const abBefore = abilityIdAt(p.line, p.stage, p.level);
   p.stage = to;
   p.stats.evolved = true;
   const f = formOf(p.line, p.stage);
   p.stats.forms.push(f.dex);
   recompute(p);
   if (p.alive && !p.down) p.hp = p.d.maxHp;
-  sim.emit(['evo', p.id, f.dex, `${before}进化成了${f.name}！`]);
+  sim.emit(['evo', p.id, f.dex, `${before}进化成了${f.name}！${abilityNote(p, abBefore)}`]);
 }
 
 // ---------------------------------------------------------------- 升级卡片
@@ -298,6 +346,7 @@ function itemAllowed(p: SimPlayer, it: ItemDef): boolean {
   const finalForm = isFinal(p.line, p.stage);
   if (it.special === 'evo_stone' && (p.stage > 0 || p.items.everstone || LINES[p.line].stones?.[it.id] === undefined)) return false;
   if ((it.special === 'eviolite' || it.special === 'everstone') && finalForm) return false;
+  if (it.special === 'everstone' && abilityAt(p.line, p.stage, p.level)?.forceEvo) return false;
   if (it.special === 'light_ball' && p.stage > 0) return false;
   return true;
 }
@@ -317,7 +366,7 @@ function rollOffer(sim: GameSim, p: SimPlayer): ShopOffer {
       // 技能种类很多，本系和自己技能表里的招式要明显更容易刷到
       let w = 1;
       if (form.types.includes(s.type)) w += 4;
-      else if (s.type === L.bonusType) w += 2;
+      else if (s.type === L.mainType) w += 2;
       if (L.learnset.some((e) => e.skill === id)) w += 2;
       if (owned) w += 3;
       weights[id] = w;
@@ -368,6 +417,15 @@ export function rollShop(sim: GameSim, p: SimPlayer, keepLocked = true) {
     const i = s.locked.findIndex((l) => !l);
     const id = sim.rng.pick(stones);
     if (i >= 0) s.offers[i] = { kind: 'item', id, tier: 2, price: Math.round(ITEMS[id].price * priceMult(sim.wave)) };
+  }
+  // 战斗盔甲、变身者：刷新商店时有几率刷到粗骨头 / 金属粉、速度粉
+  for (const a of p.ab) {
+    const ids = a.club ? ['thick_club'] : a.powders ? ['metal_powder', 'quick_powder'] : null;
+    const chance = a.club?.shop ?? a.powders?.shop ?? 0;
+    if (!ids || s.offers.some((o) => o && ids.includes(o.id)) || !sim.rng.chance(chance)) continue;
+    const i = s.locked.findIndex((l, j) => !l && !(s.offers[j] && LINES[p.line].stones?.[s.offers[j]!.id] !== undefined));
+    const id = sim.rng.pick(ids);
+    if (i >= 0) s.offers[i] = { kind: 'item', id, tier: ITEMS[id].tier, price: Math.round(ITEMS[id].price * priceMult(sim.wave) * (1 - p.d.discount)) };
   }
 }
 

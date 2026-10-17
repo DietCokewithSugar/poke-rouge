@@ -8,9 +8,10 @@ import { FROST_SLOW, FROST_SLOW_DUR, fieldGrid } from '../fields';
 import { formOf } from '../pokemon';
 import { SKILLS } from '../skills';
 import { gameEffectiveness, type PType } from '../types';
+import { PLAYER_R, abilityEff, critChance, drainHeal, healMult, healPlayer, hurtPlayer, inflict, onHitAbility, type HitOpts, type HurtOpts } from '../sim/combat';
 import { fieldScores, towards } from '../sim/autopilot';
-import { PLAYER_R, applyStatus, drainHeal, healMult, healPlayer, hurtPlayer, type HitOpts } from '../sim/combat';
-import type { Enemy, SimPlayer } from '../sim/entities';
+import { findAb } from '../sim/abilityfx';
+import { freshStatus, type Enemy, type SimPlayer } from '../sim/entities';
 import { GameSim, REVIVE_RADIUS, type Command, type PublicState } from '../sim/game';
 import { createPlayerFromBuild } from '../sim/player';
 import type { SavedBuild } from './build';
@@ -91,8 +92,6 @@ export interface PvpMatchResult {
 
 interface BotMem { strafe: number; flipT: number; pref: number; wander: number }
 
-const ccFree = { burn: 0, burnDps: 0, burnSrc: -1, poison: 0, poisonDps: 0, poisonSrc: -1, leech: 0, leechDps: 0, leechSrc: -1, leechHeal: 0, para: 0, slow: 0, slowAmt: 0, freeze: 0, stun: 0, dotAcc: 0 };
-
 export class PvpSim extends GameSim {
   readonly mode: PvpMode;
   readonly def: PvpModeDef;
@@ -145,7 +144,7 @@ export class PvpSim extends GameSim {
       const def: EnemyDef = { id: 'pvp', dex: form.dex, name: p.name, types: form.types, hp: 1, dmg: 0, speed: 0, r: PLAYER_R + 1, ai: 'chase', rank: 'elite', candy: 0, knockResist: 1 };
       const e: Enemy = {
         id: this.newId(), def, kind: 0, x: p.x, y: p.y, vx: 0, vy: 0, hp: p.hp, maxHp: p.d.maxHp, dmg: 0, speed: 0, r: def.r,
-        st: { ...ccFree }, ai: { state: 0, t: 0, cd: 0, cd2: 0, tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
+        st: p.st, ai: { state: 0, t: 0, cd: 0, cd2: 0, tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
         dir: 0, hidden: false, lastHit: -1, age: 0, pvp: p,
       };
       this.proxies.set(p.id, e);
@@ -194,6 +193,7 @@ export class PvpSim extends GameSim {
   }
 
   proxyOf(id: number) { return this.proxies.get(id); }
+  override playerProxy(id: number) { return this.proxies.get(id); }
 
   /** 这只宝可梦属于哪位训练家（座位编号），是不是训练家派出的 AI 帮手 */
   ownerOf(id: number) { return this.owners.get(id) ?? { owner: id, helper: false }; }
@@ -202,35 +202,49 @@ export class PvpSim extends GameSim {
     const t = e.pvp;
     if (!t || !t.alive || t.down || this.phase !== 'wave') return 0;
     if (p && p.team === t.team) return 0;
+    const from = p ? this.proxies.get(p.id) : undefined;
+    // 特性的反弹、引爆：伤害已经算好，不受承伤上限约束
+    if (o.fixed) {
+      const dealt = hurtPlayer(this, t, raw, 'spec', { pvp: true, pure: true, flags: 16, by: p?.id ?? -1 });
+      if (p && dealt > 0) this.credit(p, t, dealt, '_other');
+      return dealt;
+    }
     let dmg = raw;
     let flags = 0;
+    const tTypes = formOf(t.line, t.stage).types;
     if (!o.noEff) {
-      const eff = gameEffectiveness(type, formOf(t.line, t.stage).types);
+      let eff = gameEffectiveness(type, tTypes);
+      if (p) { const r = abilityEff(p, type, tTypes, eff); eff = r.eff; dmg *= r.mult; }
       dmg *= eff;
       if (eff > 1) {
         flags |= 2;
         if (p) { dmg *= p.d.superEffMult; p.stats.superEff++; }
       } else if (eff < 1) flags |= 4;
     }
-    if (p && !o.dot && this.rng.chance(p.d.crit + (o.crit ?? 0) / 100)) { dmg *= 1.5; flags |= 1; p.stats.crits++; }
+    if (p && !o.dot && this.rng.chance(critChance(p, o))) { dmg *= 1.5; flags |= 1; p.stats.crits++; }
     if (o.dot) flags |= 8;
     dmg *= pvpDamageScale(t.level, this.mode) * this.overtime();
     const cat = o.skill?.cat === 'phys' ? 'phys' : 'spec';
-    // 只有近身的物理招式会触发对方的反伤与静电
-    const contact = p && !o.noEff && cat === 'phys' ? this.proxies.get(p.id) : undefined;
-    const dealt = this.hurt(t, dmg, cat, contact, { flags, by: p?.id ?? -1, dot: o.dot });
+    const dealt = this.hurt(t, dmg, cat, {
+      flags, by: p?.id ?? -1, dot: o.dot, from, type: o.dot ? undefined : type, crit: (flags & 1) !== 0,
+      // 只有近身的物理招式会触发对方的反伤
+      contact: !!p && !o.noEff && cat === 'phys',
+      moldBreaker: !!p?.ab.some((a) => a.moldBreaker),
+      sure: !!p && type === 'normal' && tTypes.includes('ghost') && p.ab.some((a) => a.scrappy),
+    });
     if (p && dealt > 0) {
       this.credit(p, t, dealt, o.dot ? '_dot' : o.skill?.id ?? '_other');
       if (!o.dot && p.d.lifesteal > 0 && this.rng.chance(p.d.lifesteal)) healPlayer(this, p, 1, true);
-      if (!o.dot && p.d.stun > 0 && this.rng.chance(p.d.stun)) applyStatus(e, { kind: 'stun', chance: 1, dur: 0.5 }, dealt, p.id);
+      if (!o.dot && p.d.stun > 0 && this.rng.chance(p.d.stun)) inflict(this, e, { kind: 'stun', chance: 1, dur: 0.5 }, dealt, p);
       // 场地效果：繁茂草丛的命中回复、寒霜区域的命中减速
       if (o.drain) drainHeal(this, p, dealt * o.drain);
+      if (!o.dot) onHitAbility(this, e, p, o, (flags & 1) !== 0);
     }
-    if (o.chill && dealt > 0) applyStatus(e, { kind: 'slow', chance: 1, dur: FROST_SLOW_DUR, amount: FROST_SLOW }, dealt, p?.id ?? -1);
+    if (o.chill && dealt > 0) inflict(this, e, { kind: 'slow', chance: 1, dur: FROST_SLOW_DUR, amount: FROST_SLOW }, dealt, p);
     if (o.status && dealt > 0 && this.rng.chance(o.status.chance)) {
       const s = t.items.safety_goggles && o.status.kind !== 'burn' && o.status.kind !== 'poison' && o.status.kind !== 'leech'
         ? { ...o.status, dur: (o.status.dur ?? 2) * 0.5 } : o.status;
-      applyStatus(e, s, dealt, p?.id ?? -1, o.heal);
+      inflict(this, e, s, dealt, p, o.heal);
     }
     return dealt;
   }
@@ -246,9 +260,9 @@ export class PvpSim extends GameSim {
   }
 
   /** 对战里所有伤害都经过这里：受承伤上限约束 */
-  private hurt(t: SimPlayer, raw: number, cat: 'phys' | 'spec', contact: Enemy | undefined, o: { flags: number; by: number; dot?: boolean }) {
+  private hurt(t: SimPlayer, raw: number, cat: 'phys' | 'spec', o: Omit<HurtOpts, 'pvp' | 'cap'> & { flags: number; by: number }) {
     const room = this.hpBudget.get(t.id) ?? 0;
-    const dealt = hurtPlayer(this, t, raw, cat, contact, { pvp: true, flags: o.flags, by: o.by, dot: o.dot, cap: room });
+    const dealt = hurtPlayer(this, t, raw, cat, { ...o, pvp: true, cap: room });
     this.hpBudget.set(t.id, Math.max(0, room - dealt));
     return dealt;
   }
@@ -285,8 +299,7 @@ export class PvpSim extends GameSim {
     const last = this.lastBy.get(p.id);
     const k = last && this.matchT - last.t < 8 ? this.byId.get(last.id) : undefined;
     if (k && k.team !== p.team) k.stats.kos++;
-    const e = this.proxies.get(p.id);
-    if (e) Object.assign(e.st, ccFree);
+    Object.assign(p.st, freshStatus());
     this.feed.push([Math.round(this.matchT * 10) / 10, k?.id ?? -1, p.id]);
     this.emit(['ko', k?.id ?? -1, p.id]);
   }
@@ -311,6 +324,8 @@ export class PvpSim extends GameSim {
     this.waveT = this.matchT;
     this.healScale = PVP_HEAL / this.overtime();
     this.refillBudget(dt);
+    this.expireFields();
+    this.teamFlags();
     for (const p of this.players) {
       if (p.bot) this.updateBot(p, dt);
       this.updateStatus(p, dt);
@@ -320,6 +335,7 @@ export class PvpSim extends GameSim {
     this.updateProjs(dt);
     this.updateZones(dt);
     this.updateStrikes(dt);
+    this.updatePickups();
     this.updateRing(dt);
     this.logAcc += dt;
     if (this.logAcc >= 1) { this.logAcc -= 1; this.log(); }
@@ -338,29 +354,56 @@ export class PvpSim extends GameSim {
     }
   }
 
-  /** 替身身上的异常状态作用到玩家本人：灼伤/中毒/寄生掉血，麻痹/减速/冰冻/畏缩影响移动和技能冷却 */
+  /** 每队在场的宝可梦：正义之心（己方比对手少）、斗争心（别的队友也有斗争心） */
+  private teamFlags() {
+    const alive = [this.aliveCount(0), this.aliveCount(1)];
+    for (const p of this.players) {
+      p.at.outnumbered = alive[p.team] < alive[1 - p.team];
+      p.at.rivalAlly = this.players.some((q) => q !== p && q.team === p.team && q.alive && !q.down && !!findAb(q, (a) => a.rivalry));
+    }
+  }
+
+  /**
+   * 玩家身上的异常状态（和替身共用一份）：灼伤/中毒/寄生/毒刺/日照掉血，
+   * 麻痹/减速/冰冻/畏缩/睡眠/定身影响移动和技能冷却（冷却的流逝在 updateSkills 里按 dt 算，这里补回暂停的部分）
+   */
   private updateStatus(p: SimPlayer, dt: number) {
-    const e = this.proxies.get(p.id)!;
-    const st = e.st;
+    const st = p.st;
     if (!p.alive || p.down) return;
-    st.para = Math.max(0, st.para - dt);
-    st.slow = Math.max(0, st.slow - dt);
-    st.freeze = Math.max(0, st.freeze - dt);
-    st.stun = Math.max(0, st.stun - dt);
+    for (const k of ['para', 'slow', 'freeze', 'stun', 'sleep', 'root', 'weak', 'burnPhys', 'cdUp'] as const) st[k] = Math.max(0, st[k] - dt);
     if (st.slow <= 0) st.slowAmt = 0;
-    const rooted = st.freeze > 0 || st.stun > 0;
+    if (st.para <= 0) st.paraAmt = 0;
+    const frozen = st.freeze > 0 || st.stun > 0 || st.sleep > 0;
     let slow = 0;
-    if (st.para > 0) slow = 0.3;
+    if (st.para > 0) slow = st.paraAmt || 0.3;
     if (st.slow > 0) slow = Math.max(slow, st.slowAmt);
-    if (rooted) slow = Math.max(slow, 0.7);
+    if (st.sun > 0) slow = Math.max(slow, Math.min(0.9, st.sunN * st.sunSlow));
+    if (frozen) slow = Math.max(slow, 0.7);
+    if (st.root > 0) slow = 1;
     if (slow > 0) {
       p.slowT = Math.max(p.slowT, 0.12);
       p.slowAmt = slow;
       this.dirty.add(p.id);
     }
-    // 冰冻/畏缩时技能冷却暂停，麻痹时变慢（updateSkills 会再减去 dt）
-    const tick = rooted ? 0 : st.para > 0 ? 0.75 : 1;
-    if (tick < 1) for (const s of p.skills) s.cd += dt * (1 - tick);
+    // 冰冻/畏缩/睡眠时技能冷却暂停，技能的麻痹让冷却变慢
+    const tick = frozen ? 0 : st.para > 0 && !st.paraAmt ? 0.75 : 1;
+    if (tick < 1) for (const s of p.skills) s.cd += dt * (1 - tick) * this.cdRate(p);
+    if (st.toxic > 0) {
+      st.toxicT += dt;
+      st.toxic = Math.max(0.01, st.toxic - dt);
+      if (st.toxicT >= 1) {
+        st.toxicT -= 1;
+        st.toxicN++;
+        this.statusDot(p, p.d.maxHp * 0.05 * st.toxicN, st.toxicSrc);
+      }
+      if (st.toxicN >= 3) st.toxic = 0;
+    }
+    if (st.sun > 0) {
+      st.sun -= dt;
+      st.sunT += dt;
+      if (st.sunT >= 0.5) { st.sunT -= 0.5; this.statusDot(p, p.d.maxHp * st.sunDot * 0.5, st.sunSrc); }
+      if (st.sun <= 0) st.sunN = 0;
+    }
     if (st.burn > 0 || st.poison > 0 || st.leech > 0) {
       st.dotAcc += dt;
       if (st.dotAcc >= 0.5) {
@@ -374,16 +417,19 @@ export class PvpSim extends GameSim {
           const src = this.byId.get(st.leechSrc);
           if (src) healPlayer(this, src, st.leechDps * 0.5 * st.leechHeal * healMult(src), true);
         }
-        for (const [d, sid] of parts) {
-          if (p.down || d <= 0) continue;
-          const src = this.byId.get(sid);
-          const dealt = this.hurt(p, d, 'spec', undefined, { dot: true, flags: 8, by: sid });
-          if (src && dealt > 0) this.credit(src, p, dealt, '_dot');
-        }
+        for (const [d, sid] of parts) this.statusDot(p, d, sid);
         if (st.burn <= 0) st.burnDps = 0;
         if (st.poison <= 0) st.poisonDps = 0;
       }
     }
+  }
+
+  /** 异常状态的持续伤害：按承伤上限扣血，记在让玩家陷入状态的那一方头上 */
+  private statusDot(p: SimPlayer, d: number, sid: number) {
+    if (p.down || d <= 0) return;
+    const src = this.byId.get(sid);
+    const dealt = this.hurt(p, d, 'spec', { dot: true, flags: 8, by: sid });
+    if (src && dealt > 0) this.credit(src, p, dealt, '_dot');
   }
 
   private updateRing(dt: number) {
@@ -496,12 +542,15 @@ export class PvpSim extends GameSim {
     m.flipT -= dt;
     if (m.flipT <= 0) { m.flipT = this.rng.range(1, 2.8); m.strafe = -m.strafe; }
     let vx = 0, vy = 0;
-    let foe: SimPlayer | null = null, fd = Infinity;
+    // 有「发光」的对手会被优先攻击
+    let foe: SimPlayer | null = null, fd = Infinity, lure: SimPlayer | null = null, ld = Infinity;
     for (const q of this.players) {
       if (q.team === p.team || !q.alive || q.down) continue;
       const d = Math.hypot(q.x - p.x, q.y - p.y);
       if (d < fd) { fd = d; foe = q; }
+      if (d < ld && q.ab.some((a) => a.aggro)) { ld = d; lure = q; }
     }
+    if (lure) { foe = lure; fd = ld; }
     // 救援倒下的队友（附近没有敌人时）
     let rescue: SimPlayer | null = null, rd = Infinity;
     for (const q of this.players) {

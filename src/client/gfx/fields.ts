@@ -24,6 +24,8 @@ export interface FieldVis {
   /** 本地时间（秒）：从这时起生效；born 是出现的时间 */
   activeAt: number;
   born: number;
+  /** 特性生成的场地：不在中间写名字（宝可梦头上已经飘过字了） */
+  byAbility?: boolean;
   /** 包围盒（世界坐标） */
   x0: number;
   y0: number;
@@ -867,6 +869,7 @@ export function drawCrystal(ctx: CanvasRenderingContext2D, f: FieldVis, t: numbe
 
 /** 场地的名字：预告时一闪一闪，生效后再显示几秒就淡出 */
 export function drawFieldName(ctx: CanvasRenderingContext2D, f: FieldVis, t: number) {
+  if (f.byAbility) return;
   const F = FIELDS[f.kind];
   const on = t >= f.activeAt;
   const k = t - f.activeAt;

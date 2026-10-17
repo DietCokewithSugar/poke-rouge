@@ -4,7 +4,7 @@ import { DEX } from '../src/shared/dex';
 import { ENEMIES } from '../src/shared/enemies';
 import { ITEMS } from '../src/shared/items';
 import { ACHIEVEMENTS, ACHIEVEMENT_BY_ID, unlockHint } from '../src/shared/meta';
-import { LINES, LINE_IDS, LINE_OF_DEX, STARTERS, isFinal, maxStage } from '../src/shared/pokemon';
+import { LINES, LINE_IDS, LINE_OF_DEX, STARTERS, abilityAt, isFinal, maxStage } from '../src/shared/pokemon';
 import { validateBuild } from '../src/shared/pvp/build';
 import { FX_KINDS, SKILLS } from '../src/shared/skills';
 import { GameSim, RECRUIT_BASE } from '../src/shared/sim/game';
@@ -132,5 +132,5 @@ test('特性：结实保留 1 HP、坚硬脑袋不受反作用伤害', () => {
   e.dmg = 9999;
   for (let i = 0; i < 3 && !p.down; i++) { p.invuln = 0; sim.step(1 / 30); }
   assert.ok(p.sturdyUsed, '结实触发了');
-  assert.ok(LINES.geodude.flags.rockHead);
+  assert.ok(abilityAt('rhyhorn', 0, 1)?.rockHead, '独角犀牛：坚硬脑袋');
 });

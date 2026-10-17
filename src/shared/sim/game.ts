@@ -1,3 +1,4 @@
+import { abFieldBurns, abFieldSpeed, abFieldVerdict, abMoveMod, auraRadius, squareCells, type AbilityDef } from '../abilities';
 import { difficultyOf, type Difficulty, type DifficultyId } from '../difficulty';
 import { ENEMIES, ENEMY_INDEX, EVOLVES } from '../enemies';
 import {
@@ -8,24 +9,26 @@ import {
 import { ITEMS } from '../items';
 import type { RunSummary } from '../meta';
 import {
-  BLAST_CROWD, BLAST_CROWD_R, BLAST_NAME, BLAST_RADIUS, BOOSTS, BOOST_DUR, BOOST_IDS, MAX_BERRIES, MAX_BLASTS, MAX_SEEDS, SEED_DROP_ELITE, SEED_DROP_MINION,
+  BLAST_CROWD, BLAST_CROWD_R, BLAST_NAME, BLAST_RADIUS, BOOSTS, BOOST_DUR, BOOST_IDS, MAX_BERRIES, MAX_BLASTS, MAX_HARVEST, MAX_SEEDS, SEED_DROP_ELITE, SEED_DROP_MINION, STARF_NAME,
   berryHeal, blastSeedCount, boostOfSeed, isSeed, pickupCode, type BoostId, type PickupKind,
 } from '../pickups';
-import { LINES, LINE_IDS, LINE_OF_DEX, formOf, isFinal, type LineId } from '../pokemon';
+import { LINES, LINE_IDS, LINE_OF_DEX, abilityAt, abilityOfDex, formOf, isFinal, type LineId } from '../pokemon';
 import { buildOf } from '../pvp/build';
 import type { PvpPublic } from '../pvp/sim';
 import { Rng } from '../rng';
 import { SHINY_STAT, shinyName, shinyRate } from '../shiny';
 import { SKILLS, type SkillDef } from '../skills';
+import { MOVE_SPEED_MAX } from '../stats';
 import { BIOME_TYPES, TOTAL_WAVES, WAVES, candyMult, enemyDmgMult, enemyHpMult, intruderCount, spawnRateMult, waveDuration } from '../waves';
 import type { PType } from '../types';
 import { updateEnemy } from './ai';
 import { autopilot } from './autopilot';
 import { autoShop } from './autoshop';
-import { PLAYER_R, beamHit, enemyHurt, healMult, healPlayer, hitEnemy, hurtPlayer, skillNums, updateSkills, type HitOpts, type SkillNums } from './combat';
-import type { Enemy, LevelCard, PendingSpawn, Pickup, Proj, ShopOffer, SimPlayer, Strike, Zone } from './entities';
+import { abilityMove, abilityRegen, findAb, ignoresFoeAbility, isLowHp } from './abilityfx';
+import { PLAYER_R, beamHit, enemyHurt, healMult, healPlayer, hitEnemy, hurtPlayer, rivalryMult, skillNums, slowPlayer, updateSkills, type HitOpts, type SkillNums } from './combat';
+import { cureStatus, freshAbilityState, freshStatus, hasStatus, type Enemy, type LevelCard, type PendingSpawn, type Pickup, type Proj, type ShopOffer, type SimPlayer, type Strike, type Zone } from './entities';
 import {
-  addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forgetSkill, nextCards, pickCard, recompute, refreshOffers, rerollCards,
+  addXp, canEvolve, cardRerollCost, chooseEvolution, crateSellValue, createPlayer, forceEvolve, forgetSkill, nextCards, pickCard, recompute, refreshOffers, rerollCards,
   rerollCost, resolveCrate, rollCrateItem, rollShop, shopBuy, shopLock, shopReroll, undoBuy, xpToNext,
 } from './player';
 
@@ -115,6 +118,8 @@ export interface MeState {
    * 能力、道具、等级一变就跟着变；不含脚下的场地（界面按脚下的场地自己修正，见 describe.ts 的 fieldNums）
    */
   nums: Record<string, SkillNums>;
+  /** 现在生效的特性 id：自己的，加上复制来的；被同步消去时为空 */
+  ab: string[];
 }
 
 export interface PublicState {
@@ -129,9 +134,10 @@ export interface PublicState {
   biome: number;
   interLeft: number;
   boss: { name: string; hp: number; max: number } | null;
-  players: { id: number; name: string; trainer: string; line: LineId; dex: number; shiny?: boolean; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean; away?: boolean }[];
-  /** 场上的局部属性场地（形状由 'field' 事件发送）；on：已经生效 */
-  fields: { id: number; kind: FieldId; on: boolean }[];
+  /** ab：现在生效的特性 id（客户端画光环用） */
+  players: { id: number; name: string; trainer: string; line: LineId; dex: number; shiny?: boolean; level: number; hp: number; maxHp: number; down: boolean; ready: boolean; kills: number; team?: number; bot?: boolean; away?: boolean; ab?: string[] }[];
+  /** 场上的局部属性场地（形状由 'field' 事件发送）；on：已经生效；temp：特性生成的临时场地 */
+  fields: { id: number; kind: FieldId; on: boolean; temp?: boolean }[];
   /** 对战模式的额外信息 */
   pvp?: PvpPublic;
 }
@@ -233,6 +239,203 @@ export class GameSim {
   reviveBlocked(_p: SimPlayer): boolean { return false; }
   /** 打到代表其他玩家的目标（对战模式），返回实际伤害 */
   pvpHit(_e: Enemy, _p: SimPlayer | null, _raw: number, _type: PType, _o: HitOpts): number { return 0; }
+  /** 对战：代表这位玩家的替身目标（特性把状态反弹给出手的一方时用） */
+  playerProxy(_id: number): Enemy | undefined { return undefined; }
+
+  // ------------------------------------------------------------ 特性
+
+  /** 光环覆盖到 (x, y)（半径 r 的目标）的玩家特性：pick 返回光环的格数（没有返回 0） */
+  private auraHits(x: number, y: number, r: number, pick: (a: AbilityDef) => number | undefined, who: (q: SimPlayer) => boolean): AbilityDef[] {
+    const out: AbilityDef[] = [];
+    for (const q of this.players) {
+      if (!q.alive || q.down || !who(q)) continue;
+      for (const a of q.ab) {
+        const cells = pick(a);
+        if (cells && (q.x - x) ** 2 + (q.y - y) ** 2 <= (auraRadius(cells) + r) ** 2) out.push(a);
+      }
+    }
+    return out;
+  }
+
+  /** 玩家技能冷却的流逝速度：磁力的光环（电系）加快，对手的压迫感、诅咒之躯减慢 */
+  cdRate(p: SimPlayer): number {
+    let k = p.st.cdUp > 0 ? 3 : 1;
+    if (formOf(p.line, p.stage).types.includes('electric')) for (const a of this.auraHits(p.x, p.y, PLAYER_R, (a) => a.magnet?.cells, () => true)) k *= a.magnet!.cd;
+    if (!ignoresFoeAbility(p)) for (const a of this.auraHits(p.x, p.y, PLAYER_R, (a) => a.pressure?.cells, (q) => q !== p && !this.isAlly(q, p))) k *= a.pressure!.cd;
+    return 1 / k;
+  }
+
+  /** 对手的压迫感光环里的移动速度倍率 */
+  private pressureMove(p: SimPlayer): number {
+    if (ignoresFoeAbility(p)) return 1;
+    let k = 1;
+    for (const a of this.auraHits(p.x, p.y, PLAYER_R, (a) => a.pressure?.cells, (q) => q !== p && !this.isAlly(q, p))) k *= 1 - a.pressure!.slow;
+    return k;
+  }
+
+  /** 野生宝可梦招式冷却的流逝速度：压迫感、诅咒之躯减慢，磁力的光环加快（电系） */
+  enemyCdRate(e: Enemy): number {
+    let k = e.st.cdUp > 0 ? 3 : 1;
+    for (const a of this.auraHits(e.x, e.y, e.r, (a) => a.pressure?.cells, () => true)) k *= a.pressure!.cd;
+    if (e.def.types.includes('electric')) for (const a of this.auraHits(e.x, e.y, e.r, (a) => a.magnet?.cells, () => true)) k *= a.magnet!.cd;
+    return 1 / k;
+  }
+
+  /** 野生宝可梦在压迫感光环里的移动速度倍率 */
+  enemyPressure(e: Enemy): number {
+    let k = 1;
+    for (const a of this.auraHits(e.x, e.y, e.r, (a) => a.pressure?.cells, () => true)) k *= 1 - a.pressure!.slow;
+    return k;
+  }
+
+  /** 替 p 分担伤害的队友（治愈之心+：p 在它的光环里） */
+  sharerOf(p: SimPlayer): SimPlayer | null {
+    for (const q of this.players) {
+      if (q === p || !q.alive || q.down || !this.isAlly(q, p)) continue;
+      const h = findAb(q, (a) => a.healer?.share)?.healer;
+      if (h && (q.x - p.x) ** 2 + (q.y - p.y) ** 2 <= (auraRadius(h.cells) + PLAYER_R) ** 2) return q;
+    }
+    return null;
+  }
+
+  /** 野生宝可梦要攻击的玩家：有「发光」的队友优先，否则最近的 */
+  targetPlayer(x: number, y: number): SimPlayer | null {
+    let best: SimPlayer | null = null, bd = Infinity;
+    for (const p of this.players) {
+      if (!p.alive || p.down || !p.ab.some((a) => a.aggro)) continue;
+      const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best ?? this.nearestPlayer(x, y);
+  }
+
+  /** 离 p 最近的 n 个对手的特性（复制、下载）：复制类的特性不会被复制，同一种只算一次 */
+  private nearestAbilities(p: SimPlayer, n: number): string[] {
+    const list = this.targetsFor(p.id).filter((e) => !e.dead && !e.hidden && e.hp > 0)
+      .map((e) => ({ e, d: (e.x - p.x) ** 2 + (e.y - p.y) ** 2 }))
+      .sort((a, b) => a.d - b.d);
+    const out: string[] = [];
+    for (const { e } of list) {
+      if (out.length >= n) break;
+      const t = e.pvp;
+      const a = t ? abilityAt(t.line, t.stage, t.level) : abilityOfDex(e.def.dex);
+      if (a && !a.copy && !out.includes(a.id)) out.push(a.id);
+    }
+    return out;
+  }
+
+  /** 同步（对手的光环里特性被消去）、复制和下载：变了就重新计算能力 */
+  private refreshAbilities(p: SimPlayer, dt: number) {
+    const own = abilityAt(p.line, p.stage, p.level);
+    let sup = false;
+    if (!own?.clearBody) {
+      for (const q of this.players) {
+        if (q === p || !q.alive || q.down || this.isAlly(q, p)) continue;
+        const s = abilityAt(q.line, q.stage, q.level)?.suppress;
+        if (s && (q.x - p.x) ** 2 + (q.y - p.y) ** 2 <= (auraRadius(s.cells) + PLAYER_R) ** 2) { sup = true; break; }
+      }
+    }
+    let copied = p.copied;
+    if (own?.copy && !sup) {
+      p.at.copyT -= dt;
+      if (p.at.copyT <= 0) { p.at.copyT = 1; copied = this.nearestAbilities(p, own.copy); }
+    } else copied = [];
+    const same = copied.length === p.copied.length && copied.every((id, i) => id === p.copied[i]);
+    if (sup === p.suppressed && same) return;
+    if (sup !== p.suppressed) this.emit(['txt', Math.round(p.x), Math.round(p.y) - 30, sup ? '特性被消去了' : '特性恢复了', '#c890ff']);
+    p.suppressed = sup;
+    p.copied = copied;
+    this.recompute(p);
+    if (!same && copied.length) this.emit(['txt', Math.round(p.x), Math.round(p.y) - 30, `复制：${copied.map((id) => p.ab.find((a) => a.id === id)?.name ?? '').join('、')}`, '#9fe8ff']);
+  }
+
+  /** 场地 f 对这只宝可梦来说是不是不利的（毅力、精神力、胆量） */
+  private fieldBad(p: SimPlayer, f: FieldId): boolean {
+    const moves = p.skills.map((s) => SKILLS[s.id]).filter(Boolean).map((d) => ({ type: d.type, damaging: d.cat !== 'status', phys: d.cat === 'phys' }));
+    return abFieldVerdict(f, formOf(p.line, p.stage).types, moves, p.ab).verdict === 'bad';
+  }
+
+  /** 特性每帧的结算：计时器、复制与同步、持续回复、HP 低于一半时的场地、收获、三圣鸟的场地 */
+  private abilityTick(p: SimPlayer, dt: number) {
+    const at = p.at;
+    const field = this.fields.length ? this.fieldAt(p.x, p.y) : null;
+    if (field !== at.field) at.bad = !!field && this.fieldBad(p, field);
+    at.field = field;
+    if (at.moveT > 0) at.moveT -= dt;
+    if (at.evade > 0) at.evade -= dt;
+    if (at.armor > 0) at.armor -= dt;
+    if (at.guard > 0) at.guard -= dt;
+    if (at.anger > 0) {
+      at.anger -= dt;
+      if (at.anger <= 0) { at.angerSlow = 2; this.recompute(p); }
+    } else if (at.angerSlow > 0) at.angerSlow -= dt;
+    this.refreshAbilities(p, dt);
+    at.regenT += dt;
+    if (at.regenT >= 0.5) {
+      let r = abilityRegen(p, this);
+      for (const a of this.auraHits(p.x, p.y, PLAYER_R, (a) => a.healer?.cells, (q) => this.isAlly(q, p))) r += a.healer!.regen;
+      if (r > 0 && p.hp < p.d.maxHp) healPlayer(this, p, p.d.maxHp * r * at.regenT);
+      at.regenT = 0;
+    }
+    for (const a of p.ab) {
+      if (a.lowHp?.field && !at.lowField && isLowHp(p)) {
+        at.lowField = true;
+        this.abilityField(p, a.lowHp.field, 3);
+      }
+      if (a.harvest) {
+        at.harvest += dt;
+        if (at.harvest >= (field === 'grass' ? a.harvest.grass : a.harvest.every)) { at.harvest = 0; this.harvestBerry(p); }
+      }
+      if (a.selfField) {
+        at.selfField += dt;
+        if (at.selfField >= a.selfField.every) { at.selfField = 0; this.abilityField(p, a.selfField.kind, a.selfField.cells, a.selfField.life); }
+      }
+    }
+  }
+
+  /** 特性在宝可梦身边生成一块 n×n 格的场地（马上生效；已经被别的场地占了的格子不算）；life 秒后消失，省略为一直到波次结束 */
+  private abilityField(p: SimPlayer, kind: FieldId, n: number, life?: number) {
+    const { cols, rows } = fieldGrid(this.w, this.h);
+    if (this.fieldCols !== cols) this.rebuildFieldMap();
+    const cells = squareCells(cols, rows, p.x, p.y, n).filter((c) => !this.fieldMap[c]);
+    if (!cells.length) return;
+    this.placeField(kind, cells, 0, { by: p.id, until: life === undefined ? undefined : this.waveT + life });
+    if (life === undefined) this.emit(['txt', Math.round(p.x), Math.round(p.y) - 30, `${FIELDS[kind].name}！`, FIELDS[kind].color]);
+  }
+
+  /** 收获：在身边生成一个橙橙果或星桃果 */
+  private harvestBerry(p: SimPlayer) {
+    let n = 0;
+    for (const pk of this.pickups) if (pk.kind === 'berry' || pk.kind === 'starf') n++;
+    if (n >= MAX_BERRIES + MAX_HARVEST) return;
+    const a = this.itemRng.range(0, Math.PI * 2), d = this.itemRng.range(4, FIELD_CELL);
+    this.dropPickup(this.itemRng.chance(0.5) ? 'berry' : 'starf', p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, 1);
+  }
+
+  /** 临时场地到时间就消失 */
+  protected expireFields() {
+    const gone = this.fields.filter((f) => f.until !== undefined && this.waveT >= f.until);
+    if (!gone.length) return;
+    this.fields = this.fields.filter((f) => !gone.includes(f));
+    for (const f of gone) { this.fieldOn.delete(f.id); this.emit(['fieldEnd', f.id]); }
+    this.rebuildFieldMap();
+  }
+
+  /** 引爆+：被击倒时爆炸，范围里的所有宝可梦（队友和对手）立刻损失一部分 HP（精英和首领少一些） */
+  private aftermath(p: SimPlayer, am: { cells: number; pct: number }) {
+    const r = auraRadius(am.cells);
+    this.emit(['boom', Math.round(p.x), Math.round(p.y), Math.round(r + 6), 'e_blast']);
+    this.emit(['txt', Math.round(p.x), Math.round(p.y) - 30, '引爆！', '#ffb070']);
+    for (const e of this.targetsFor(p.id).slice()) {
+      if (e.dead || e.hidden || e.hp <= 0 || (e.x - p.x) ** 2 + (e.y - p.y) ** 2 > (r + e.r) ** 2) continue;
+      const max = e.pvp ? e.pvp.d.maxHp : e.maxHp;
+      hitEnemy(this, e, p, max * am.pct * (e.pvp || e.def.rank === 'minion' ? 1 : LAVA_BIG), 'normal', { fixed: true });
+    }
+    for (const q of this.players) {
+      if (q === p || !q.alive || q.down || !this.isAlly(q, p) || (q.x - p.x) ** 2 + (q.y - p.y) ** 2 > (r + PLAYER_R) ** 2) continue;
+      hurtPlayer(this, q, q.d.maxHp * am.pct, 'spec', { pure: true });
+    }
+  }
 
   // ------------------------------------------------------------ 工具
 
@@ -268,13 +471,6 @@ export class GameSim {
     return best;
   }
 
-  pressureAt(x: number, y: number) {
-    for (const p of this.players) {
-      if (LINES[p.line].flags.pressure && p.alive && !p.down && (p.x - x) ** 2 + (p.y - y) ** 2 < 90 * 90) return true;
-    }
-    return false;
-  }
-
   // ------------------------------------------------------------ 局部属性场地
 
   /** (x, y) 所在的、已经生效的场地；forming：还在闪烁预告的也算 */
@@ -288,17 +484,23 @@ export class GameSim {
   /** 技能说明里的伤害换算（对战按自己的等级换算成对战伤害） */
   readoutScale(_p: SimPlayer): number { return 1; }
 
-  /** 玩家出招时脚下场地的修正；被熔岩灼伤时物理招式的伤害减半 */
+  /**
+   * 玩家出招时脚下场地的修正（算上特性：免疫负面效果、适应力、场地里的加成）；
+   * 被熔岩灼伤、被火焰之躯烧伤时物理招式的伤害减半，被威吓时伤害降低
+   */
   castMod(p: SimPlayer, s: SkillDef): Readonly<MoveMod> {
-    const m = moveMod(this.fieldAt(p.x, p.y), s.type);
-    return p.fieldBurn > 0 && s.cat === 'phys' ? { ...m, dmg: m.dmg * BURN_PHYS } : m;
+    const m = this.fields.length ? abMoveMod(this.fieldAt(p.x, p.y), s.type, p.ab) : p.ab.length ? abMoveMod(null, s.type, p.ab) : NO_MOVE_MOD;
+    let k = p.st.weak > 0 ? 1 - p.st.weakAmt : 1;
+    if (s.cat === 'phys' && (p.fieldBurn > 0 || p.st.burnPhys > 0)) k *= BURN_PHYS;
+    return k === 1 ? m : { ...m, dmg: m.dmg * k };
   }
 
-  /** 野生宝可梦出招时脚下场地的修正：按它的第一属性算；被灼伤时物理攻击（接触、冲撞、落石）伤害减半 */
+  /** 野生宝可梦出招时脚下场地的修正：按它的第一属性算；被灼伤、烧伤时物理攻击（接触、冲撞、落石）伤害减半，被威吓时伤害降低 */
   enemyMod(e: Enemy, cat: 'phys' | 'spec'): Readonly<MoveMod> {
-    if (!this.fields.length) return NO_MOVE_MOD;
-    const m = moveMod(this.fieldAt(e.x, e.y), e.def.types[0]);
-    return (e.fieldBurn ?? 0) > 0 && cat === 'phys' ? { ...m, dmg: m.dmg * BURN_PHYS } : m;
+    let k = e.st.weak > 0 ? 1 - e.st.weakAmt : 1;
+    if (cat === 'phys' && (e.st.burnPhys > 0 || (this.fields.length && (e.fieldBurn ?? 0) > 0))) k *= BURN_PHYS;
+    const m = this.fields.length ? moveMod(this.fieldAt(e.x, e.y), e.def.types[0]) : NO_MOVE_MOD;
+    return k === 1 ? m : { ...m, dmg: m.dmg * k };
   }
 
   /** 野生宝可梦站在场地里的移动速度倍率 */
@@ -384,9 +586,11 @@ export class GameSim {
       this.fieldNext = -1;
       this.spawnField(false);
     }
+    this.expireFields();
     for (const f of this.fields) {
       if (this.fieldOn.has(f.id) || this.waveT < f.activeAt) continue;
       this.fieldOn.add(f.id);
+      if (f.by !== undefined) continue;
       const F = FIELDS[f.kind];
       this.emit(['msg', `${F.name}出现了！${F.short[0]}`]);
     }
@@ -424,7 +628,7 @@ export class GameSim {
     const e: Enemy = {
       id: this.newId(), def, kind: ENEMY_INDEX[id], x, y, vx: 0, vy: 0, hp, maxHp: hp,
       dmg: def.dmg * enemyDmgMult(this.wave) * D.dmg, speed: def.speed * (1 + Math.min(0.25, this.wave * 0.012)) * D.speed, r: def.r,
-      st: { burn: 0, burnDps: 0, burnSrc: -1, poison: 0, poisonDps: 0, poisonSrc: -1, leech: 0, leechDps: 0, leechSrc: -1, leechHeal: 0, para: 0, slow: 0, slowAmt: 0, freeze: 0, stun: 0, dotAcc: 0 },
+      st: freshStatus(),
       ai: { state: 0, t: 0, cd: this.rng.range(0.6, 1.8), cd2: this.rng.range(1.5, 3), tx: 0, ty: 0, ax: 0, ay: 0, n: 0, flag: 0 },
       dir: Math.PI / 2, hidden: false, lastHit: -1, age: 0,
     };
@@ -705,6 +909,11 @@ export class GameSim {
     if (this.clearBoosts(p)) recompute(p);
     this.emit(['down', p.id]);
     this.dirty.add(p.id);
+    const am = findAb(p, (a) => a.aftermath)?.aftermath;
+    if (am && !p.at.aftermath) {
+      p.at.aftermath = true;
+      this.aftermath(p, am);
+    }
   }
 
   // ------------------------------------------------------------ 波次
@@ -754,6 +963,10 @@ export class GameSim {
       p.slowT = 0;
       p.sashUsed = false;
       p.sturdyUsed = false;
+      p.at = freshAbilityState();
+      p.st = freshStatus();
+      p.copied = [];
+      p.suppressed = false;
       p.ready = false;
       p.cards = null;
       p.undo = null;
@@ -829,6 +1042,7 @@ export class GameSim {
       p.cardRerolls = 0;
       p.shop.rerolls = 0;
       p.shop.freeRerolls = p.d.rerolls;
+      forceEvolve(this, p);
       p.evoPrompt = canEvolve(p);
       p.undo = null;
       rollShop(this, p);
@@ -853,7 +1067,15 @@ export class GameSim {
         this.dirty.add(q.id);
       }
     } else if (pk.kind === 'berry') {
-      healPlayer(this, p, berryHeal(p.d.maxHp));
+      // 贪吃鬼：回复量按倍率；捡拾：地图道具的效果翻倍
+      let k = 1;
+      for (const a of p.ab) k *= (a.gluttony?.berry ?? 1) * (a.pickupBoost ?? 1);
+      healPlayer(this, p, berryHeal(p.d.maxHp) * k);
+    } else if (pk.kind === 'starf') {
+      cureStatus(p.st);
+      p.slowT = 0;
+      p.fieldBurn = 0;
+      this.emit(['txt', Math.round(p.x), Math.round(p.y) - 26, `${STARF_NAME}！治好了异常状态`, '#ff9ad8']);
     } else if (pk.kind === 'ball') {
       p.crates.push(rollCrateItem(this, p));
       this.emit(['txt', Math.round(p.x), Math.round(p.y) - 26, '获得道具球！', '#ffd23f']);
@@ -1015,14 +1237,14 @@ export class GameSim {
       return;
     }
     if (this.fields.length || p.fieldBurn > 0) {
-      // 熔岩池：没有火、岩石属性的宝可梦站在里面会被灼伤，离开后还要再烧一会儿
-      if (fieldBurns(this.fieldAt(p.x, p.y), formOf(p.line, p.stage).types)) p.fieldBurn = LAVA_LINGER;
+      // 熔岩池：没有火、岩石属性的宝可梦站在里面会被灼伤，离开后还要再烧一会儿（不受场地负面效果影响、不会陷入异常状态的特性除外）
+      if (abFieldBurns(this.fieldAt(p.x, p.y), formOf(p.line, p.stage).types, p.ab)) p.fieldBurn = LAVA_LINGER;
       else p.fieldBurn = Math.max(0, p.fieldBurn - dt);
       if (p.fieldBurn > 0) {
         p.fieldDot += dt;
         if (p.fieldDot >= 0.5) {
           p.fieldDot -= 0.5;
-          hurtPlayer(this, p, p.d.maxHp * LAVA_DPS * 0.5, 'spec', undefined, { field: true });
+          hurtPlayer(this, p, p.d.maxHp * LAVA_DPS * 0.5, 'spec', { field: true });
           this.dirty.add(p.id);
           if (p.down) return;
         }
@@ -1051,17 +1273,23 @@ export class GameSim {
         p.stats.healed += p.hp - before;
       }
     }
+    this.abilityTick(p, dt);
+    if (p.down) return;
     updateSkills(this, p, dt);
   }
 
-  /** 不算场地的移动速度：客户端按自己脚下的场地再乘一次，走进场地时不用等服务器 */
+  /**
+   * 不算场地的移动速度（含特性的加速、减速和对手压迫感的光环）：客户端按自己脚下的场地再乘一次，走进场地时不用等服务器。
+   * 特性的加速可以超过平时的移速上限，但最多到上限的 1.6 倍
+   */
   baseMoveSpeed(p: SimPlayer) {
-    return p.d.moveSpeed * (p.slowT > 0 ? 1 - p.slowAmt : 1);
+    const v = p.d.moveSpeed * (p.slowT > 0 ? 1 - p.slowAmt : 1) * abilityMove(p) * this.pressureMove(p);
+    return Math.min(MOVE_SPEED_MAX * 1.6, v);
   }
 
   moveSpeed(p: SimPlayer) {
     const v = this.baseMoveSpeed(p);
-    return this.fields.length ? v * fieldSpeed(this.fieldAt(p.x, p.y), formOf(p.line, p.stage).types) : v;
+    return this.fields.length ? v * abFieldSpeed(this.fieldAt(p.x, p.y), formOf(p.line, p.stage).types, p.ab) : v;
   }
 
   private updateEnemies(dt: number) {
@@ -1100,6 +1328,7 @@ export class GameSim {
           if (st.poison <= 0) st.poisonDps = 0;
         }
       }
+      if (st.toxic > 0 || st.sun > 0) this.abilityDots(e, dt);
       if (e.dead) continue;
       // 接触伤害
       if (!e.hidden && e.dmg > 0) {
@@ -1138,6 +1367,32 @@ export class GameSim {
           }
         }
       }
+    }
+  }
+
+  /** 特性带来的持续伤害：毒刺的中毒（每秒 5%、10%、15%）、日照（每秒最大 HP 的 10%）；精英和首领掉得少一些 */
+  private abilityDots(e: Enemy, dt: number) {
+    const st = e.st;
+    const big = e.def.rank === 'minion' ? 1 : LAVA_BIG;
+    const src = (id: number) => this.players.find((p) => p.id === id) ?? null;
+    if (st.toxic > 0) {
+      st.toxicT += dt;
+      st.toxic = Math.max(0.01, st.toxic - dt);
+      if (st.toxicT >= 1) {
+        st.toxicT -= 1;
+        st.toxicN++;
+        hitEnemy(this, e, src(st.toxicSrc), e.maxHp * 0.05 * st.toxicN * big, 'poison', { dot: true, noEff: true });
+      }
+      if (st.toxicN >= 3) st.toxic = 0;
+    }
+    if (st.sun > 0 && !e.dead) {
+      st.sun -= dt;
+      st.sunT += dt;
+      if (st.sunT >= 0.5) {
+        st.sunT -= 0.5;
+        hitEnemy(this, e, src(st.sunSrc), e.maxHp * st.sunDot * 0.5 * big, 'fire', { dot: true, noEff: true });
+      }
+      if (st.sun <= 0) st.sunN = 0;
     }
   }
 
@@ -1199,8 +1454,8 @@ export class GameSim {
           const rr = PLAYER_R + pr.r - 1;
           if ((p.x - pr.x) ** 2 + (p.y - 6 - pr.y) ** 2 > rr * rr) continue;
           if (p.invuln <= 0) {
-            enemyHurt(this, p, pr.dmg, 'spec', pr, pr.drain ? this.enemies.find((e) => e.id === pr.src) : undefined);
-            if (pr.slow && !p.items.safety_goggles) { p.slowT = 1.6; p.slowAmt = pr.slow; this.dirty.add(p.id); }
+            const src = this.enemies.find((e) => e.id === pr.src);
+            if (enemyHurt(this, p, pr.dmg, 'spec', pr, src, false, pr.type) > 0 && pr.slow && !p.items.safety_goggles) slowPlayer(this, p, pr.slow, 1.6, src);
           }
           alive = false;
           break;
@@ -1231,18 +1486,15 @@ export class GameSim {
         z.t -= z.tick;
         if (z.owner >= 0) {
           const owner = this.players.find((p) => p.id === z.owner) ?? null;
-          for (const e of this.targetsFor(z.owner)) {
-            if (e.dead || e.hidden) continue;
-            if ((e.x - z.x) ** 2 + (e.y - z.y) ** 2 <= (z.r + e.r) ** 2) {
-              hitEnemy(this, e, owner, z.dmg, z.type, { status: z.skill?.status, skill: z.skill, crit: z.crit, drain: z.drain, chill: z.chill });
-            }
-          }
+          const hits = this.targetsFor(z.owner).filter((e) => !e.dead && !e.hidden && (e.x - z.x) ** 2 + (e.y - z.y) ** 2 <= (z.r + e.r) ** 2);
+          const dmg = z.dmg * rivalryMult(owner, hits.length);
+          for (const e of hits) hitEnemy(this, e, owner, dmg, z.type, { status: z.skill?.status, skill: z.skill, crit: z.crit, drain: z.drain, chill: z.chill });
         } else {
           for (const p of this.players) {
             if (!p.down && p.alive && !p.items.safety_goggles && (p.x - z.x) ** 2 + (p.y - z.y) ** 2 <= (z.r + PLAYER_R) ** 2) {
               const inv = p.invuln;
               p.invuln = 0;
-              hurtPlayer(this, p, z.dmg, 'spec');
+              hurtPlayer(this, p, z.dmg, 'spec', { type: z.type });
               p.invuln = Math.max(p.invuln > 0 ? 0.1 : 0, inv);
             }
           }
@@ -1260,9 +1512,9 @@ export class GameSim {
       if (s.t > 0) { keep.push(s); continue; }
       if (s.enemy) {
         this.emit(['boom', Math.round(s.x), Math.round(s.y), Math.round(s.r), s.fx]);
-        const src = s.drain ? this.enemies.find((e) => e.id === s.src) : undefined;
+        const src = this.enemies.find((e) => e.id === s.src);
         for (const p of this.players) {
-          if (!p.down && p.alive && Math.hypot(p.x - s.x, p.y - s.y) <= s.r + PLAYER_R) enemyHurt(this, p, s.dmg, s.cat, s, src);
+          if (!p.down && p.alive && Math.hypot(p.x - s.x, p.y - s.y) <= s.r + PLAYER_R) enemyHurt(this, p, s.dmg, s.cat, s, src, false, s.type);
         }
         continue;
       }
@@ -1273,17 +1525,16 @@ export class GameSim {
         continue;
       }
       this.emit(['boom', Math.round(s.x), Math.round(s.y), Math.round(s.r), s.fx]);
-      for (const e of this.targetsFor(s.owner).slice()) {
-        if (e.dead || e.hidden) continue;
-        if (Math.hypot(e.x - s.x, e.y - s.y) <= s.r + e.r) {
-          hitEnemy(this, e, owner, s.dmg, s.type, { crit: s.crit ?? s.skill?.crit, status: s.skill?.status, knock: s.skill?.knock, kx: e.x - s.x, ky: e.y - s.y, skill: s.skill, drain: s.drain, chill: s.chill });
-        }
+      const hits = this.targetsFor(s.owner).filter((e) => !e.dead && !e.hidden && Math.hypot(e.x - s.x, e.y - s.y) <= s.r + e.r);
+      const dmg = s.dmg * rivalryMult(owner, hits.length);
+      for (const e of hits) {
+        hitEnemy(this, e, owner, dmg, s.type, { crit: s.crit ?? s.skill?.crit, status: s.skill?.status, knock: s.skill?.knock, kx: e.x - s.x, ky: e.y - s.y, skill: s.skill, drain: s.drain, chill: s.chill });
       }
     }
     this.strikes = keep;
   }
 
-  private updatePickups() {
+  protected updatePickups() {
     if (!this.pickups.length) return;
     const keep: Pickup[] = [];
     for (const pk of this.pickups) {
@@ -1293,6 +1544,7 @@ export class GameSim {
         const r = pk.kind === 'candy' ? p.d.pickupRadius : 18;
         if ((p.x - pk.x) ** 2 + (p.y - pk.y) ** 2 <= r * r) {
           if (pk.kind === 'berry' && p.hp >= p.d.maxHp) continue;
+          if (pk.kind === 'starf' && !hasStatus(p.st) && p.slowT <= 0 && p.fieldBurn <= 0) continue;
           this.collect(p, pk);
           taken = true;
           break;
@@ -1452,6 +1704,7 @@ export class GameSim {
         : null,
       boosts: boostsOf(p),
       nums,
+      ab: p.ab.map((a) => a.id),
     };
   }
 
@@ -1471,8 +1724,9 @@ export class GameSim {
       players: this.players.map((p) => ({
         id: p.id, name: p.name, trainer: p.trainer, line: p.line, dex: formOf(p.line, p.stage).dex, shiny: p.shiny || undefined, level: p.level,
         hp: Math.ceil(p.hp), maxHp: p.d.maxHp, down: p.down, ready: p.ready, kills: p.stats.kills, bot: p.bot || undefined, away: p.away || undefined,
+        ...(p.ab.length ? { ab: p.ab.map((a) => a.id) } : {}),
       })),
-      fields: this.fields.map((f) => ({ id: f.id, kind: f.kind, on: this.waveT >= f.activeAt })),
+      fields: this.fields.map((f) => ({ id: f.id, kind: f.kind, on: this.waveT >= f.activeAt, ...(f.until !== undefined ? { temp: true } : {}) })),
     };
   }
 
@@ -1558,10 +1812,10 @@ export class GameSim {
     return this.mapItems ? this.dropPickup(kind, x, y, 1) : null;
   }
 
-  /** 测试与调试：放一块指定种类和格子的场地，formIn 秒后生效 */
-  placeField(kind: FieldId, cells: number[], formIn = 0): Field {
+  /** 放一块指定种类和格子的场地，formIn 秒后生效（测试、调试、特性生成的场地）；extra：特性生成的场地是谁的、什么时候消失 */
+  placeField(kind: FieldId, cells: number[], formIn = 0, extra: { by?: number; until?: number } = {}): Field {
     const c = fieldCenter(fieldGrid(this.w, this.h).cols, cells);
-    const f: Field = { id: this.newId(), kind, cells, cx: c.x, cy: c.y, activeAt: this.waveT + formIn };
+    const f: Field = { id: this.newId(), kind, cells, cx: c.x, cy: c.y, activeAt: this.waveT + formIn, ...extra };
     this.fields.push(f);
     this.rebuildFieldMap();
     this.emit(fieldEvent(f, this.waveT));
@@ -1586,9 +1840,9 @@ export class GameSim {
   }
 }
 
-/** 场地出现的事件：[field, id, 种类序号, 中心 x, 中心 y, 还要多少秒生效, 格子（连续段编码）] */
+/** 场地出现的事件：[field, id, 种类序号, 中心 x, 中心 y, 还要多少秒生效, 格子（连续段编码）, 是不是特性生成的场地（1 是）] */
 export function fieldEvent(f: Field, now: number): Ev {
-  return ['field', f.id, FIELD_IDS.indexOf(f.kind), Math.round(f.cx), Math.round(f.cy), Math.max(0, Math.round((f.activeAt - now) * 10) / 10), encodeCells(f.cells)];
+  return ['field', f.id, FIELD_IDS.indexOf(f.kind), Math.round(f.cx), Math.round(f.cy), Math.max(0, Math.round((f.activeAt - now) * 10) / 10), encodeCells(f.cells), f.by !== undefined ? 1 : 0];
 }
 
 /** 正在生效的增幅与剩余秒数（保留一位小数） */

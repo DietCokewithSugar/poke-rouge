@@ -1,8 +1,8 @@
 /**
- * 地图道具：踩到就生效，只在冒险里出现（对战场里没有）。
- * 线上用 PICKUP_KINDS 的下标表示种类：糖果 0、橙橙果 1、道具球 2，之后是三种增幅种子和爆炸之种。
+ * 地图道具：踩到就生效，只在冒险里出现（对战场里只有特性「收获」生成的树果）。
+ * 线上用 PICKUP_KINDS 的下标表示种类：糖果 0、橙橙果 1、道具球 2，之后是三种增幅种子、爆炸之种和星桃果。
  */
-export const PICKUP_KINDS = ['candy', 'berry', 'ball', 'seed_crit', 'seed_dodge', 'seed_speed', 'seed_blast'] as const;
+export const PICKUP_KINDS = ['candy', 'berry', 'ball', 'seed_crit', 'seed_dodge', 'seed_speed', 'seed_blast', 'starf'] as const;
 export type PickupKind = (typeof PICKUP_KINDS)[number];
 export const pickupCode = (k: PickupKind) => PICKUP_KINDS.indexOf(k);
 
@@ -10,6 +10,10 @@ export const pickupCode = (k: PickupKind) => PICKUP_KINDS.indexOf(k);
 export const BERRY_FLAT = 5;
 export const BERRY_PCT = 0.08;
 export const berryHeal = (maxHp: number) => BERRY_FLAT + maxHp * BERRY_PCT;
+/** 星桃果（特性「收获」生成）：治好任何异常状态；没有异常状态时不会捡，留在地上 */
+export const STARF_NAME = '星桃果';
+/** 「收获」生成的树果在场上最多这么多颗 */
+export const MAX_HARVEST = 4;
 
 export type BoostId = 'crit' | 'dodge' | 'speed';
 export const BOOST_IDS: BoostId[] = ['crit', 'dodge', 'speed'];

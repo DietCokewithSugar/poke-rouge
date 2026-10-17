@@ -1,7 +1,8 @@
-import { ABILITIES, DEX, FAMILIES, type ContactStatus, type DexEntry, type FamilyDef } from './dex';
+import { ABILITIES, type AbilityDef } from './abilities';
+import { DEX, FAMILIES, type DexEntry, type FamilyDef } from './dex';
 import { RANGED_PATTERNS, SIGNATURE, SKILLS, type SkillDef } from './skills';
-import type { BaseStats, Mods } from './stats';
-import { TYPE_NAME, type PType } from './types';
+import type { BaseStats } from './stats';
+import type { PType } from './types';
 
 export interface Form {
   dex: number;
@@ -11,36 +12,6 @@ export interface Form {
   slots: number;
 }
 
-export interface Passive { name: string; desc: string }
-
-/** 特性带来的战斗效果（模拟层按这些开关处理，不再按宝可梦写死） */
-export interface LineFlags {
-  /** HP 低于 1/3 时本系技能再 +50%（猛火、激流、茂盛、虫之预感） */
-  lowHp?: boolean;
-  /** 接触到自己的敌人有几率陷入异常 */
-  contact?: [ContactStatus, number];
-  /** 护盾类技能效果倍率 */
-  shieldMult?: number;
-  /** 回复类技能、吸取效果倍率 */
-  healMult?: number;
-  /** 附近敌人减速 */
-  pressure?: boolean;
-  /** 每波一次：受到致命伤害时保留 1 HP */
-  sturdy?: boolean;
-  /** 威力 15 以下的技能伤害 +40% */
-  technician?: boolean;
-  /** 本系加成 1.5 → 2 倍 */
-  adaptability?: boolean;
-  /** 不受反作用伤害 */
-  rockHead?: boolean;
-  /** 多发弹体的技能多发射 1 发 */
-  skillLink?: boolean;
-  /** 所有技能都享受本系加成 */
-  imposter?: boolean;
-  /** 只有未进化时才有 mods 加成（皮卡丘的电气球） */
-  modsStage0Only?: boolean;
-}
-
 /** 解锁方式：初始伙伴 / 成就 / 星之沙购买 / 冒险中结交（recruit 为崇拜几率倍率，0 表示不会崇拜） */
 export interface Unlock { start?: boolean; ach?: string; cost?: number; recruit: number }
 
@@ -48,15 +19,14 @@ export interface Line {
   id: LineId;
   name: string;
   forms: Form[];
-  /** 可以进化的等级（波次结束后由玩家决定是否进化）；只有一种形态时为"觉醒"等级（自动，只加属性）。 */
+  /** 可以进化的等级（波次结束后由玩家决定是否进化）；只有一种形态时为"觉醒"等级（自动：属性提升、换成下一个特性）。 */
   evoLevels: number[];
   /** 用进化石进化：道具 id → 进化后的形态序号（皮卡丘 → 雷丘，伊布 → 三种进化） */
   stones?: Record<string, number>;
-  bonusType: PType;
-  bonusPct: number;
-  passives: Passive[];
-  mods: Partial<Mods>;
-  flags: LineFlags;
+  /** 主属性：技能表围绕它挑选，商店里这个属性的招式更容易刷到 */
+  mainType: PType;
+  /** 每个形态的特性（abilities.ts）；只有一种形态的依次是 Lv1、第一次觉醒、第二次觉醒的特性 */
+  abilities: string[];
   /** 第几次觉醒时技能栏 +1 */
   awakenSlot?: number;
   /** 开局自带的技能 */
@@ -82,12 +52,8 @@ const HAND: Line[] = [
       { dex: 3, name: '妙蛙花', types: ['grass', 'poison'], base: S(80, 82, 83, 100, 100, 80), slots: 5 },
     ],
     evoLevels: [7, 14],
-    bonusType: 'grass', bonusPct: 20,
-    passives: [
-      { name: '茂盛', desc: '草系技能伤害 +20%；HP 低于 1/3 时草系伤害再 +50%。' },
-      { name: '叶绿素', desc: '生命回复 +4，回复类技能效果 +30%。毒系也享受本系加成。' },
-    ],
-    mods: { regen: 4 }, flags: { lowHp: true, healMult: 1.3 },
+    mainType: 'grass',
+    abilities: ['overgrow', 'overgrow_p', 'overgrow_pp'],
     start: ['vine_whip', 'tackle'],
     learnset: [
       { lv: 4, skill: 'leech_seed' }, { lv: 8, skill: 'razor_leaf' },
@@ -106,12 +72,8 @@ const HAND: Line[] = [
       { dex: 6, name: '喷火龙', types: ['fire', 'flying'], base: S(78, 84, 78, 109, 85, 100), slots: 5 },
     ],
     evoLevels: [7, 14],
-    bonusType: 'fire', bonusPct: 20,
-    passives: [
-      { name: '猛火', desc: '火系技能伤害 +20%；HP 低于 1/3 时火系伤害再 +50%。' },
-      { name: '好战', desc: '暴击率 +5%。' },
-    ],
-    mods: { crit: 5 }, flags: { lowHp: true },
+    mainType: 'fire',
+    abilities: ['blaze', 'blaze_p', 'blaze_pp'],
     start: ['ember', 'scratch'],
     learnset: [
       { lv: 4, skill: 'dragon_breath' }, { lv: 8, skill: 'fire_fang' },
@@ -129,12 +91,8 @@ const HAND: Line[] = [
       { dex: 9, name: '水箭龟', types: ['water'], base: S(79, 83, 100, 85, 105, 78), slots: 5 },
     ],
     evoLevels: [7, 14],
-    bonusType: 'water', bonusPct: 20,
-    passives: [
-      { name: '激流', desc: '水系技能伤害 +20%；HP 低于 1/3 时水系伤害再 +50%。' },
-      { name: '硬壳', desc: '物防、特防 +10%，护盾效果 +50%。' },
-    ],
-    mods: { defPct: 10, spdPct: 10 }, flags: { lowHp: true, shieldMult: 1.5 },
+    mainType: 'water',
+    abilities: ['torrent', 'torrent_p', 'torrent_pp'],
     start: ['water_gun', 'tackle'],
     learnset: [
       { lv: 4, skill: 'withdraw' }, { lv: 8, skill: 'bubble_beam' },
@@ -152,12 +110,8 @@ const HAND: Line[] = [
     ],
     evoLevels: [],
     stones: { thunder_stone: 1 },
-    bonusType: 'electric', bonusPct: 20,
-    passives: [
-      { name: '静电', desc: '电系技能伤害 +20%；接触到你的敌人有 30% 几率麻痹。' },
-      { name: '电气球', desc: '未进化时物攻、特攻 +15%。使用商店里的雷之石进化为雷丘（种族值大幅提升）。' },
-    ],
-    mods: { atkPct: 15, spaPct: 15 }, flags: { contact: ['para', 0.3], modsStage0Only: true },
+    mainType: 'electric',
+    abilities: ['static_pp', 'lightning_rod_p'],
     start: ['thunder_shock', 'quick_attack'],
     learnset: [
       { lv: 4, skill: 'electro_ball' }, { lv: 8, skill: 'spark' },
@@ -173,12 +127,9 @@ const HAND: Line[] = [
       { dex: 150, name: '超梦', types: ['psychic'], base: S(106, 110, 90, 154, 90, 130), slots: 3 },
     ],
     evoLevels: [10, 18],
-    bonusType: 'psychic', bonusPct: 30,
-    passives: [
-      { name: '压迫感', desc: '超能力系技能伤害 +30%；周围 90 像素内的敌人移速 -20%。' },
-      { name: '基因觉醒', desc: '无法进化，技能栏只有 3 个；Lv10、Lv18 觉醒时全属性 +10%，第二次觉醒技能栏 +1。' },
-    ],
-    mods: {}, flags: { pressure: true }, awakenSlot: 2,
+    mainType: 'psychic',
+    abilities: ['pressure', 'pressure', 'pressure'],
+    awakenSlot: 2,
     start: ['confusion'],
     learnset: [
       { lv: 3, skill: 'swift' }, { lv: 5, skill: 'barrier' }, { lv: 7, skill: 'psycho_cut' },
@@ -237,8 +188,8 @@ function slotsOf(f: FamilyDef, i: number): number {
   return i === f.dex.length - 1 ? 5 : 4;
 }
 
-/** 本系专精的属性：最终形态的第一属性（一般 + 飞行之类取飞行） */
-function bonusTypeOf(f: FamilyDef): PType {
+/** 主属性：最终形态的第一属性（一般 + 飞行之类取飞行） */
+function mainTypeOf(f: FamilyDef): PType {
   if (f.stones) return DEX[f.dex[0]].types[0];
   const t = DEX[f.dex[f.dex.length - 1]].types;
   return t[0] === 'normal' && t[1] ? t[1] : t[0];
@@ -275,7 +226,7 @@ function allowed(s: SkillDef, fam: string) {
 /** 按属性、等级段和物理/特殊偏好生成技能表（结果固定，服务器与客户端一致） */
 function genMoves(f: FamilyDef, types: PType[], pref: 'phys' | 'spec' | 'mix') {
   const used = new Set<string>();
-  const primary = bonusTypeOf(f);
+  const primary = mainTypeOf(f);
   const others = types.filter((t) => t !== primary);
   const cover = [...(f.cover ?? []), ...COVER[primary].filter((t) => !types.includes(t))];
   let n = 0;
@@ -347,38 +298,15 @@ function familyLine(f: FamilyDef): Line {
   const types = [...new Set(f.dex.flatMap((d) => DEX[d].types))];
   const last = DEX[f.dex[f.dex.length - 1]];
   const pref = last.atk >= last.spa * 1.15 ? 'phys' : last.spa >= last.atk * 1.15 ? 'spec' : 'mix';
-  const bonusType = bonusTypeOf(f);
   const legend = LEGENDS.has(f.dex[0]);
-  let bonusPct = legend ? 25 : 20;
-  const mods: Partial<Mods> = {};
-  const flags: LineFlags = {};
-  for (const a of f.abilities) {
-    const A = ABILITIES[a];
-    for (const [k, v] of Object.entries(A.mods ?? {})) mods[k as keyof Mods] = (mods[k as keyof Mods] ?? 0) + v;
-    if (A.lowHp) flags.lowHp = true;
-    if (A.contact) flags.contact = A.contact;
-    if (A.sturdy) flags.sturdy = true;
-    if (A.technician) flags.technician = true;
-    if (A.adaptability) flags.adaptability = true;
-    if (A.pressure) flags.pressure = true;
-    if (A.rockHead) flags.rockHead = true;
-    if (A.skillLink) flags.skillLink = true;
-    if (A.imposter) flags.imposter = true;
-    if (A.typeBoost) bonusPct += A.typeBoost;
-  }
-  const passives: Passive[] = [{ name: `${TYPE_NAME[bonusType]}系专精`, desc: `${TYPE_NAME[bonusType]}系技能伤害 +${bonusPct}%。` }];
-  for (const a of f.abilities) passives.push({ name: ABILITIES[a].name, desc: ABILITIES[a].desc });
-  const single = f.dex.length === 1;
-  if (single) passives.push({ name: legend ? '传说之力' : '觉醒', desc: `无法进化；Lv${f.lv[0]}、Lv${f.lv[1]} 觉醒时全属性 +10%，第二次觉醒技能栏 +1。` });
-  if (f.stones) passives.push({ name: '进化石', desc: `在商店里购买${Object.keys(f.stones).map((s) => STONE_NAME[s] ?? s).join('、')}进化。` });
   const { start, learnset } = genMoves(f, types, pref);
   const u = UNLOCKS[f.id] ?? {};
   return {
     id: f.id, name: DEX[f.dex[0]].name, forms,
     evoLevels: f.stones ? [] : f.lv,
     stones: f.stones,
-    bonusType, bonusPct, passives, mods, flags,
-    awakenSlot: single ? 2 : undefined,
+    mainType: mainTypeOf(f), abilities: f.abilities,
+    awakenSlot: f.dex.length === 1 ? 2 : undefined,
     start, learnset,
     unlock: { recruit: legend ? 0 : 1, ...u },
     flavor: f.flavor,
@@ -439,5 +367,30 @@ export function awakenings(line: LineId, level: number): number {
 /** 这个技能是不是这条进化线自己会的 */
 export function isNative(line: LineId, skill: string): boolean {
   const L = LINES[line];
-  return !!L && (L.flags.imposter || L.start.includes(skill) || L.learnset.some((e) => e.skill === skill));
+  return !!L && (L.start.includes(skill) || L.learnset.some((e) => e.skill === skill));
+}
+
+/** 这个形态 / 等级用的是第几个特性：有进化的按形态，只有一种形态的按觉醒次数 */
+export function abilityIndex(line: LineId, stage: number, level: number): number {
+  const L = LINES[line];
+  if (!L) return 0;
+  const i = L.forms.length === 1 ? awakenings(line, level) : stage;
+  return Math.max(0, Math.min(L.abilities.length - 1, i));
+}
+
+export function abilityIdAt(line: LineId, stage: number, level: number): string {
+  return LINES[line]?.abilities[abilityIndex(line, stage, level)] ?? '';
+}
+
+export function abilityAt(line: LineId, stage: number, level: number): AbilityDef | undefined {
+  return ABILITIES[abilityIdAt(line, stage, level)];
+}
+
+/** 野生宝可梦（图鉴编号）的特性：复制、下载用（只有一种形态的按没有觉醒算） */
+export function abilityOfDex(dex: number): AbilityDef | undefined {
+  const line = LINE_OF_DEX[dex];
+  const L = line ? LINES[line] : undefined;
+  if (!L) return undefined;
+  const stage = Math.max(0, L.forms.findIndex((f) => f.dex === dex));
+  return abilityAt(line, stage, 1);
 }

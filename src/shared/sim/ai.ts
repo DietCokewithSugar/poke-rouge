@@ -13,15 +13,19 @@ const cdOf = (sim: GameSim, e: Enemy) => sim.enemyMod(e, 'spec').cd;
 export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
   const st = e.st;
   e.age += dt;
-  for (const k of ['para', 'slow', 'freeze', 'stun'] as const) if (st[k] > 0) st[k] -= dt;
+  for (const k of ['para', 'slow', 'freeze', 'stun', 'sleep', 'root', 'weak', 'burnPhys', 'cdUp'] as const) if (st[k] > 0) st[k] -= dt;
   if (st.slow <= 0) st.slowAmt = 0;
+  if (st.para <= 0) st.paraAmt = 0;
 
-  const target = sim.nearestPlayer(e.x, e.y);
-  const stopped = st.freeze > 0 || st.stun > 0;
-  let mul = sim.enemyFieldSpeed(e);
-  if (st.para > 0) mul *= 0.5;
+  // 有「发光」的玩家会被优先攻击
+  const target = sim.targetPlayer(e.x, e.y);
+  const stopped = st.freeze > 0 || st.stun > 0 || st.sleep > 0;
+  let mul = sim.enemyFieldSpeed(e) * sim.enemyPressure(e);
+  // 技能的麻痹减速一半；静电、孢子的麻痹只剩 25% 的速度
+  if (st.para > 0) mul *= st.paraAmt > 0 ? 1 - st.paraAmt : 0.5;
   if (st.slow > 0) mul *= 1 - st.slowAmt;
-  if (sim.pressureAt(e.x, e.y)) mul *= 0.8;
+  if (st.sun > 0) mul *= 1 - Math.min(0.9, st.sunN * st.sunSlow);
+  if (st.root > 0) mul = 0;
   const spd = e.speed * mul;
 
   let mx = 0, my = 0;
@@ -30,8 +34,9 @@ export function updateEnemy(sim: GameSim, e: Enemy, dt: number): boolean {
     const d = Math.hypot(dx, dy) || 1;
     const ux = dx / d, uy = dy / d;
     const ai = e.ai;
-    ai.cd -= dt;
-    ai.cd2 -= dt;
+    const rate = sim.enemyCdRate(e);
+    ai.cd -= dt * rate;
+    ai.cd2 -= dt * rate;
     switch (e.def.ai) {
       case 'chase':
       case 'tank':
@@ -155,7 +160,7 @@ function explode(sim: GameSim, e: Enemy) {
   const radius = b.radius * m.size;
   sim.emit(['boom', r1(e.x), r1(e.y), r1(radius), b.cloud ? 'e_cloud' : 'e_blast']);
   for (const p of sim.players) {
-    if (Math.hypot(p.x - e.x, p.y - e.y) <= radius + PLAYER_R) enemyHurt(sim, p, dmg, 'spec', m, null);
+    if (Math.hypot(p.x - e.x, p.y - e.y) <= radius + PLAYER_R) enemyHurt(sim, p, dmg, 'spec', m, e);
   }
   if (b.cloud) {
     sim.zones.push({ id: sim.newId(), fx: 'e_cloud', owner: -1, skill: null, type: 'poison', x: e.x, y: e.y, r: radius * 0.9, life: 3.5, maxLife: 3.5, tick: 0.5, t: 0, dmg: dmg * 0.25 });
