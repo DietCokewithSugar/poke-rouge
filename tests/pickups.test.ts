@@ -117,7 +117,7 @@ test('增幅种子：遵守闪避与移速上限，倒下或波次结束时清�
 });
 
 test('地图道具：drop 事件区分种类，私有状态和增量消息都带上增幅', () => {
-  assert.deepEqual(PICKUP_KINDS.map(pickupCode), [0, 1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(PICKUP_KINDS.map(pickupCode), [0, 1, 2, 3, 4, 5, 6, 7]);
   const sim = new GameSim([{ id: 1, name: 'A', line: 'charmander', meta: {} }], 6);
   const p = sim.players[0];
   sim.flushEvents();

@@ -1,4 +1,5 @@
-import { FIELDS, fieldVerdict, type FieldVerdict } from '../../shared/fields';
+import { abFieldVerdict, abilitiesOf } from '../../shared/abilities';
+import { FIELDS, type FieldVerdict } from '../../shared/fields';
 import { BOOSTS, BOOST_DUR, type BoostId } from '../../shared/pickups';
 import { LINES, formOf } from '../../shared/pokemon';
 import { SKILLS } from '../../shared/skills';
@@ -127,7 +128,7 @@ export class Hud {
     if (!me) return undefined;
     const here = this.fieldHere();
     const kind = here === null ? null : this.lastPub?.fields?.find((f) => f.id === here)?.kind ?? null;
-    return fieldNums(id, numsOf(me, id, lv), kind, formOf(me.line, me.stage).types);
+    return fieldNums(id, numsOf(me, id, lv), kind, formOf(me.line, me.stage).types, abilitiesOf(me.ab ?? []));
   }
 
   /** 暂停时冷却圈停在原地（服务器也停了，不会再发新的冷却） */
@@ -164,12 +165,13 @@ export class Hud {
     }
   };
 
-  /** 场地卡片：只在波次进行中显示；按自己的属性和会的招式写明对你有利还是不利 */
+  /** 场地卡片：只在波次进行中显示（特性生成的临时场地不列出来）；按自己的属性、会的招式和特性写明对你有利还是不利 */
   private setFields(pub: PublicState, me: MeState | null) {
-    const list = pub.phase === 'wave' ? pub.fields ?? [] : [];
+    const list = pub.phase === 'wave' ? (pub.fields ?? []).filter((f) => !f.temp) : [];
     const types = me ? formOf(me.line, me.stage).types : [];
     const moves = (me?.skills ?? []).map((s) => SKILLS[s.id]).filter(Boolean).map((d) => ({ type: d.type, damaging: d.cat !== 'status', phys: d.cat === 'phys' }));
-    const verdicts = list.map((f) => fieldVerdict(f.kind, types, moves).verdict);
+    const ab = abilitiesOf(me?.ab ?? []);
+    const verdicts = list.map((f) => abFieldVerdict(f.kind, types, moves, ab).verdict);
     const key = list.map((f, i) => `${f.id}:${f.on ? 1 : 0}:${verdicts[i]}`).join(',');
     if (key === this.fieldKey) return;
     this.fieldKey = key;

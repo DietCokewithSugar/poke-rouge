@@ -1,5 +1,6 @@
+import { ABILITIES } from '../../shared/abilities';
 import { GROUP_NAME, ITEMS } from '../../shared/items';
-import { isNative, type LineId } from '../../shared/pokemon';
+import { LINES, isNative, type LineId } from '../../shared/pokemon';
 import { SHINY_MAX, SHINY_MAX_ODDS } from '../../shared/shiny';
 import { CAT_NAME, SKILLS, TIER_COLOR, TIER_NAME, skillLevelCd, skillLevelDmg } from '../../shared/skills';
 import type { SkillNums } from '../../shared/sim/combat';
@@ -20,6 +21,29 @@ export function tierBadge(tier: number) {
 const PATTERN_NAME: Record<string, string> = {
   proj: '弹体', melee: '近身', beam: '光束', nova: '范围', chain: '连锁', strike: '定点', orbit: '环绕', zone: '区域', heal: '回复', shield: '护盾', buff: '强化',
 };
+
+/** 特性的说明（悬浮提示）；label：哪个形态 / 觉醒 */
+export function abilityInfo(id: string, label?: string, extra?: string) {
+  const a = ABILITIES[id];
+  return h('div', { class: 'info' },
+    h('div', { class: 'info-head' }, h('b', null, a?.name ?? '无'), label ? h('span', { class: 'muted small' }, label) : null),
+    h('div', { class: 'desc' }, a?.desc ?? ''),
+    extra ? h('div', { class: 'muted small' }, extra) : null,
+  );
+}
+
+/** 一条进化线每个形态（只有一种形态的按觉醒）的特性；相邻形态是同一个特性时合成一行 */
+export function lineAbilities(line: LineId): { label: string; id: string }[] {
+  const L = LINES[line];
+  const rows: { label: string; id: string }[] = [];
+  L.abilities.forEach((id, i) => {
+    const label = L.forms.length === 1 ? (i === 0 ? '初始' : `Lv${L.evoLevels[i - 1]} 觉醒`) : L.forms[i]?.name ?? '';
+    const last = rows[rows.length - 1];
+    if (last && last.id === id) last.label += ` · ${label}`;
+    else rows.push({ label, id });
+  });
+  return rows;
+}
 
 /** 技能图标：像素徽章，右下角是强化等级，右上角的小宝石表示技能等级（中级/高级/究极） */
 export function skillIcon(id: string, lv = 1, small = false) {

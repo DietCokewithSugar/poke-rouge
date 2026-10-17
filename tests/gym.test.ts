@@ -8,6 +8,7 @@ import { LINES, formOf } from '../src/shared/pokemon';
 import { buildFor, generateBuild, validateBuild } from '../src/shared/pvp/build';
 import { gymFields, gymFoe, gymMeta, gymTeam, isUnderdog } from '../src/shared/pvp/gym';
 import { PvpSim, type PvpInit } from '../src/shared/pvp/sim';
+import { fieldScores } from '../src/shared/sim/autopilot';
 import { Rng } from '../src/shared/rng';
 import { cleanMeta } from '../src/shared/room';
 import { GameSim } from '../src/shared/sim/game';
@@ -185,6 +186,7 @@ test('道馆的场地在对战里生效：草丛命中回复、寒霜命中减�
   assert.ok(me.hp > before, '繁茂草丛：草系招式命中回复');
   // 承伤上限恢复一点再打
   for (let i = 0; i < 30; i++) sim.step(1 / 30);
+  foe.d.dodge = 0;
   sim.pvpHit(proxy, me, 400, 'water', { chill: true, skill: null });
   assert.ok(proxy.st.slow > 0 && proxy.st.slowAmt >= 0.2, '寒霜区域：命中减速');
   // 站进熔岩（克制莉佳的场地）的草系宝可梦会被灼伤
@@ -210,6 +212,8 @@ test('道馆的 AI 会守在自己的主场里', () => {
       if (i % 15) continue;
       for (const p of sim.players) {
         if (p.team !== 1 || p.down || !p.alive) continue;
+        // 别的场地也对它有利（例如奇迹皮肤在任何场地里都加伤害）时，去哪块都说得过去，不算
+        if ([...fieldScores(sim, p)].some(([k, v]) => k !== 'smog' && v > 0.5)) continue;
         total++;
         if (sim.fieldAt(p.x, p.y) === 'smog') inside++;
       }

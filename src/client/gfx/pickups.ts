@@ -1,5 +1,6 @@
 /**
- * 地图道具的像素图：橙橙果（蓝色圆果 + 绿叶）、三种增幅种子（同一个种子形状，按颜色区分）和爆炸之种（裂开的黑红种子，顶上冒火星）。
+ * 地图道具的像素图：橙橙果（蓝色圆果 + 绿叶）、三种增幅种子（同一个种子形状，按颜色区分）、爆炸之种（裂开的黑红种子，顶上冒火星）
+ * 和星桃果（粉色的五角星，特性「收获」生成）。
  * 字符图 + 调色板，和 icons.ts 的道具图标同一种画法：. 透明  k 描边  w 高光  1/2/3 深 → 浅  g/G 叶子  r/y 裂缝和火星
  */
 import { BLAST_COLOR, type BoostId } from '../../shared/pickups';
@@ -45,6 +46,20 @@ const BLAST = [
   '..kkkkk..',
 ];
 
+/** 星桃果（特性「收获」生成）：粉色的五角星形果子 */
+const STARF = [
+  '....gG...',
+  '....k....',
+  '...k3k...',
+  'kkk3w3kkk',
+  'k3w33322k',
+  '.k33322k.',
+  '..k3222k.',
+  '.k32k21k.',
+  '.k2k.k1k.',
+  '.kk...kk.',
+];
+
 interface Art { rows: string[]; pal: [string, string, string]; glow: string }
 
 /** 线上的种类编号（shared/pickups.ts 的 PICKUP_KINDS）→ 像素图 */
@@ -54,6 +69,7 @@ const ART: Record<number, Art> = {
   4: { rows: SEED, pal: ['#5a2a9a', '#9a5ae0', '#e0c0ff'], glow: '#d0a8ff' },
   5: { rows: SEED, pal: ['#9a7000', '#e8c020', '#fff4a0'], glow: '#ffe45a' },
   6: { rows: BLAST, pal: ['#3a0e0c', '#62201a', '#94402c'], glow: BLAST_COLOR },
+  7: { rows: STARF, pal: ['#a02868', '#e858a8', '#ffc0e4'], glow: '#ff9ad8' },
 };
 
 export const BOOST_KIND: Record<BoostId, number> = { crit: 3, dodge: 4, speed: 5 };

@@ -7,7 +7,11 @@ export type SkillCat = 'phys' | 'spec' | 'status';
  * orbit  环绕自身的弹体      zone   目标处持续伤害区域     heal/shield/buff  辅助
  */
 export type Pattern = 'proj' | 'melee' | 'beam' | 'nova' | 'chain' | 'strike' | 'orbit' | 'zone' | 'heal' | 'shield' | 'buff';
-export type StatusKind = 'burn' | 'poison' | 'para' | 'slow' | 'freeze' | 'stun' | 'leech';
+/**
+ * 技能的附加效果，以及特性带来的状态：sleep 睡眠（定身且不能放技能）、root 定身（技能照常）、toxic 毒刺的中毒、
+ * weak 威吓（技能伤害降低）、burnPhys 火焰之躯的烧伤（物理伤害减半）、cdUp 诅咒（冷却 +200%）、sun 日照（叠加的减速与掉血）
+ */
+export type StatusKind = 'burn' | 'poison' | 'para' | 'slow' | 'freeze' | 'stun' | 'leech' | 'sleep' | 'root' | 'toxic' | 'weak' | 'burnPhys' | 'cdUp' | 'sun';
 
 export interface SkillDef {
   id: string;
@@ -137,7 +141,7 @@ const LIST: SkillDef[] = [
   { id: 'headbutt', name: '头锤', type: 'normal', cat: 'phys', tier: 2, pattern: 'melee', power: 22, cd: 1.0, range: 36, radius: 36, arc: deg(100), status: { kind: 'stun', chance: 0.25, dur: 0.5 }, fx: 'headbutt', desc: '用头猛撞前方，可能使敌人畏缩。' },
   { id: 'hyper_fang', name: '必杀门牙', type: 'normal', cat: 'phys', tier: 2, pattern: 'melee', power: 25, cd: 1.0, range: 32, radius: 32, arc: deg(90), crit: 10, fx: 'hyperfang', desc: '用锋利的门牙狠狠咬下去。' },
   { id: 'pay_day', name: '聚宝功', type: 'normal', cat: 'spec', tier: 1, pattern: 'proj', power: 8, cd: 0.9, range: 150, speed: 230, count: 2, spread: deg(18), size: 3, payday: true, fx: 'payday', desc: '扔出金币攻击，命中时有几率捡到零钱。' },
-  { id: 'sing', name: '唱歌', type: 'normal', cat: 'spec', tier: 2, pattern: 'nova', power: 3, cd: 4.0, range: 80, radius: 82, status: { kind: 'stun', chance: 0.7, dur: 1.4 }, fx: 'sing', desc: '温柔的歌声让周围的敌人睡着（短暂定身）。' },
+  { id: 'sing', name: '唱歌', type: 'normal', cat: 'spec', tier: 2, pattern: 'nova', power: 3, cd: 4.0, range: 80, radius: 82, status: { kind: 'sleep', chance: 0.7, dur: 1.4 }, fx: 'sing', desc: '温柔的歌声让周围的敌人睡着（短暂定身）。' },
   { id: 'splash', name: '跃起', type: 'normal', cat: 'status', tier: 1, pattern: 'buff', power: 0, cd: 4, range: 130, buff: { spe: 25, dur: 2 }, fx: 'buff', desc: '只会跳来跳去……不过能跑得快一点。' },
   { id: 'tri_attack', name: '三重攻击', type: 'normal', cat: 'spec', tier: 3, pattern: 'proj', power: 20, cd: 1.3, range: 165, speed: 220, count: 3, spread: deg(34), size: 5, status: { kind: 'burn', chance: 0.12, dur: 3 }, fx: 'triattack', desc: '同时发射 3 道光线，可能灼伤。' },
   { id: 'body_slam', name: '泰山压顶', type: 'normal', cat: 'phys', tier: 3, pattern: 'nova', power: 36, cd: 1.7, range: 54, radius: 56, knock: 60, status: { kind: 'para', chance: 0.3, dur: 2 }, fx: 'bodyslam', desc: '用全身压向四周，可能麻痹敌人。' },
@@ -197,7 +201,7 @@ const LIST: SkillDef[] = [
   { id: 'brave_bird', name: '勇鸟猛攻', type: 'flying', cat: 'phys', tier: 4, pattern: 'melee', power: 120, cd: 1.8, range: 50, radius: 50, arc: deg(160), recoil: 0.06, knock: 90, fx: 'bravebird', desc: '收起翅膀低空猛冲，会受到少量反作用伤害。' },
 
   // ---------- 超能力 / 虫 ----------
-  { id: 'hypnosis', name: '催眠术', type: 'psychic', cat: 'spec', tier: 2, pattern: 'proj', power: 4, cd: 2.5, range: 160, speed: 170, size: 6, homing: 4, status: { kind: 'stun', chance: 0.8, dur: 1.2 }, fx: 'hypnosis', desc: '发出催眠的波动，让敌人睡着（短暂定身）。' },
+  { id: 'hypnosis', name: '催眠术', type: 'psychic', cat: 'spec', tier: 2, pattern: 'proj', power: 4, cd: 2.5, range: 160, speed: 170, size: 6, homing: 4, status: { kind: 'sleep', chance: 0.8, dur: 1.2 }, fx: 'hypnosis', desc: '发出催眠的波动，让敌人睡着（短暂定身）。' },
   { id: 'bug_bite', name: '虫咬', type: 'bug', cat: 'phys', tier: 1, pattern: 'melee', power: 11, cd: 0.8, range: 32, radius: 32, arc: deg(100), fx: 'bugbite', desc: '用小小的颚咬住敌人。' },
   { id: 'struggle_bug', name: '虫之抵抗', type: 'bug', cat: 'spec', tier: 1, pattern: 'proj', power: 7, cd: 0.8, range: 145, speed: 210, count: 2, spread: deg(22), size: 3, status: { kind: 'slow', chance: 0.25, dur: 1.2, amount: 0.3 }, fx: 'strugglebug', desc: '拼命抵抗，可能减速敌人。' },
   { id: 'pin_missile', name: '飞弹针', type: 'bug', cat: 'phys', tier: 2, pattern: 'proj', power: 7, cd: 1.0, range: 160, speed: 280, count: 4, spread: deg(26), size: 3, fx: 'pinmissile', desc: '连续射出 4 根尖针。' },

@@ -1,5 +1,6 @@
 import { GROUP_NAME, ITEMS } from '../../shared/items';
-import { LINES } from '../../shared/pokemon';
+import { ABILITIES } from '../../shared/abilities';
+import { LINES, abilityIdAt } from '../../shared/pokemon';
 import { SKILLS } from '../../shared/skills';
 import type { Command, MeState, PublicState } from '../../shared/sim/game';
 import type { LevelCard, ShopOffer } from '../../shared/sim/entities';
@@ -17,7 +18,7 @@ import { iconBtn, pager } from './layout';
 
 const INV_PER_PAGE = 26;
 const STATS_PER_PAGE = 12;
-import { STAT_ROWS, itemInfo, itemLines, numsOf, shinyStatTip, skillCardBody, skillHeadline, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
+import { STAT_ROWS, abilityInfo, itemInfo, itemLines, numsOf, shinyStatTip, skillCardBody, skillHeadline, skillIcon, skillInfo, tierBadge, typeBadge } from './describe';
 import { forgetRefund } from '../../shared/sim/player';
 
 const STAT_ICON: Record<string, string> = {
@@ -464,7 +465,7 @@ export class Intermission {
       h('div', null,
         h('div', { class: 'big' }, `${shinyName(me.form, me.shiny)}  Lv${me.level}`),
         h('div', null, ...L.forms[Math.min(me.stage, L.forms.length - 1)].types.map((t) => typeBadge(t))),
-        h('div', { class: 'muted small' }, `本系加成：${TYPE_NAME[L.bonusType]}系 +${L.bonusPct}%`),
+        abilityLine(me),
       ),
     ));
     // 进化按钮的位置始终保留，出现/消失时下面的内容不会跳动
@@ -508,4 +509,13 @@ export class Intermission {
 
 
   }
+}
+
+/** 侧栏上现在的特性（多边兽另外写出复制来的特性）；悬浮显示说明 */
+function abilityLine(me: MeState) {
+  const own = abilityIdAt(me.line, me.stage, me.level);
+  const copied = (me.ab ?? []).filter((id) => id !== own).map((id) => ABILITIES[id]?.name).filter(Boolean);
+  const el = h('div', { class: 'muted small' }, `特性：${ABILITIES[own]?.name ?? '无'}${copied.length ? `（复制：${copied.join('、')}）` : ''}`);
+  tip(el, () => abilityInfo(own, undefined, copied.length ? `正在复制：${copied.join('、')}` : undefined));
+  return el;
 }

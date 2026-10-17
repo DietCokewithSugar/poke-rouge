@@ -4,7 +4,8 @@
  * 局部属性场地：安全时往对自己有利的场地靠；血少时离开正在灼伤自己的熔岩。
  * 只负责走位：技能本来就是自动释放的，商店、升级与进化仍由玩家自己决定。
  */
-import { fieldVerdict, type FieldId } from '../fields';
+import { abFieldVerdict } from '../abilities';
+import type { FieldId } from '../fields';
 import { BLAST_RADIUS, boostOfSeed } from '../pickups';
 import { formOf } from '../pokemon';
 import { SKILLS } from '../skills';
@@ -14,12 +15,12 @@ import { REVIVE_RADIUS, blastable, type GameSim } from './game';
 /** 爆炸范围里有这么多只普通小怪才去踩爆炸之种，不然绕开它，留到需要的时候 */
 export const AUTO_BLAST_CROWD = 10;
 
-/** 场上每种场地对这只宝可梦的好坏（> 0 有利，< 0 不利） */
+/** 场上每种场地对这只宝可梦（属性、招式、特性）的好坏（> 0 有利，< 0 不利） */
 export function fieldScores(sim: GameSim, p: SimPlayer): Map<FieldId, number> {
   const types = formOf(p.line, p.stage).types;
   const moves = p.skills.map((s) => SKILLS[s.id]).filter(Boolean).map((d) => ({ type: d.type, damaging: d.cat !== 'status', phys: d.cat === 'phys' }));
   const out = new Map<FieldId, number>();
-  for (const f of sim.fields) if (!out.has(f.kind)) out.set(f.kind, fieldVerdict(f.kind, types, moves).score);
+  for (const f of sim.fields) if (!out.has(f.kind)) out.set(f.kind, abFieldVerdict(f.kind, types, moves, p.ab).score);
   return out;
 }
 

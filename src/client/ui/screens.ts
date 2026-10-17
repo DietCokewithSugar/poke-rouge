@@ -16,7 +16,8 @@ import { buyUpgrade, defaultSettings, isDifficultyUnlocked, refundUpgrades, save
 import { PAD_BTN, padState } from '../gamepad';
 import { clear, h, hideTip, tip, toast } from './dom';
 import { UI_SCALES, confirmButton, iconBtn, pager } from './layout';
-import { STAT_LABEL_6, skillIcon, skillInfo, typeBadge } from './describe';
+import { ABILITIES } from '../../shared/abilities';
+import { STAT_LABEL_6, abilityInfo, lineAbilities, skillIcon, skillInfo, typeBadge } from './describe';
 
 /**
  * 把界面放进容器。同一个界面重新渲染时（切换宝可梦、研究所升级、大厅刷新……）
@@ -72,8 +73,8 @@ export function lineSummary(line: LineId, shiny = false, onMore?: () => void, ex
       h('div', { class: 'ld-info' },
         h('h2', null, shinyName(L.name, shiny)),
         h('div', null, ...L.forms[0].types.map(typeBadge), shiny ? h('span', { class: 'shiny-tag' }, uiIcon('shiny', 1), '闪光 · 六项能力 +1%') : null),
-        h('div', { class: 'small ld-facts' }, `技能栏 ${L.forms[0].slots} 个 · ${TYPE_NAME[L.bonusType]}系技能 +${L.bonusPct}%`),
-        h('div', { class: 'small muted ld-facts' }, `特性：${L.passives.slice(1).map((x) => x.name).join('、') || '无'}`),
+        h('div', { class: 'small ld-facts' }, `技能栏 ${L.forms[0].slots} 个 · 主属性 ${TYPE_NAME[L.mainType]}系`),
+        h('div', { class: 'small muted ld-facts' }, `特性：${lineAbilities(line).map((r) => ABILITIES[r.id]?.name ?? '').join(' → ')}`),
       ),
     ),
     statBars(line, shiny),
@@ -121,12 +122,17 @@ export function lineDetail(line: LineId, compact = false, shiny = false) {
       h('div', { class: 'ld-info' },
         h('h2', null, shinyName(L.name, shiny)),
         h('div', null, ...L.forms[0].types.map(typeBadge), shiny ? h('span', { class: 'shiny-tag' }, uiIcon('shiny', 1), '闪光 · 六项能力 +1%') : null),
-        h('div', { class: 'muted small' }, `技能栏 ${L.forms[0].slots} 个 · ${TYPE_NAME[L.bonusType]}系技能 +${L.bonusPct}%`),
+        h('div', { class: 'muted small' }, `技能栏 ${L.forms[0].slots} 个 · 主属性 ${TYPE_NAME[L.mainType]}系`),
         h('p', { class: 'flavor' }, L.flavor),
       ),
     ),
     statBars(line, shiny),
-    h('div', { class: 'passives' }, L.passives.slice(compact ? 1 : 0).map((p) => h('div', { class: 'passive' }, h('b', null, p.name), ' ', p.desc))),
+    h('div', { class: 'passives' }, lineAbilities(line).map((r) => {
+      const a = ABILITIES[r.id];
+      const el = h('div', { class: 'passive' }, h('span', { class: 'muted' }, `${r.label}：`), h('b', null, a?.name ?? ''), ' ', a?.desc ?? '');
+      tip(el, () => abilityInfo(r.id, r.label));
+      return el;
+    })),
     h('div', { class: 'ld-row' }, h('span', { class: 'muted small ld-label' }, '初始技能'), h('div', { class: 'chips' }, L.start.map((id) => skillChip(id, SKILLS[id].name)))),
     h('div', { class: 'ld-row' }, h('span', { class: 'muted small ld-label' }, '升级领悟'), h('div', { class: 'chips learn' }, L.learnset.map((e) => skillChip(e.skill, `Lv${e.lv} ${SKILLS[e.skill].name}`)))),
     evo,

@@ -1,9 +1,10 @@
+import { abFieldBurns, abFieldSpeed, abilitiesOf, auraRadius, type AbilityDef } from '../../shared/abilities';
 import { DEX } from '../../shared/dex';
 import { ENEMIES, ENEMY_IDS } from '../../shared/enemies';
-import { FIELDS, FIELD_IDS, decodeCells, fieldBurns, fieldGrid, fieldSpeed, type FieldId } from '../../shared/fields';
+import { FIELDS, FIELD_IDS, decodeCells, fieldGrid, type FieldId } from '../../shared/fields';
 import { decodeSnapshot, type PvpSeatInfo, type SnapEnemy, type SnapPlayer, type SnapProj, type SnapZone, type Snapshot } from '../../shared/protocol';
 import { FX_KINDS, SKILLS } from '../../shared/skills';
-import { PH_BURN } from '../../shared/sim/combat';
+import { PH_BURN, PH_IMMUNE } from '../../shared/sim/combat';
 import { REVIVE_RADIUS, type Ev, type MeState, type PublicState } from '../../shared/sim/game';
 import { sfx } from '../audio';
 import { BOOSTS, PICKUP_KINDS, boostOfSeed, type BoostId } from '../../shared/pickups';
@@ -39,6 +40,15 @@ interface EnemyVis { anim: Animator; flash: number; lx: number; ly: number; dir:
 interface PlayerVis { anim: Animator; flash: number; down: boolean; evoFlash: number; tw: number }
 interface Corpse { anim: Animator; x: number; y: number; t: number; scale: number }
 interface Flyer { x: number; y: number; kind: number; value: number; pid: number; t: number }
+
+/** 有光环的特性：光环的格数和提示圈的颜色（磁力淡黄、治愈之心淡粉、压迫感淡白、同步淡紫） */
+function auraOf(a: AbilityDef): { cells: number; color: string } | null {
+  if (a.magnet) return { cells: a.magnet.cells, color: '#fff27a' };
+  if (a.healer) return { cells: a.healer.cells, color: '#ff9ad8' };
+  if (a.pressure) return { cells: a.pressure.cells, color: '#f4f4ff' };
+  if (a.suppress) return { cells: a.suppress.cells, color: '#c890ff' };
+  return null;
+}
 
 export interface ViewHooks {
   onMessage(text: string): void;
@@ -231,6 +241,7 @@ export class GameView {
         if (!pos) break;
         if (f & 1) this.fx.text(pos.x, pos.y - 26, '闪避', '#9fe8ff', 10);
         else if (f & 2) this.fx.text(pos.x, pos.y - 26, '护盾', '#9fd0ff', 10);
+        else if (f & PH_IMMUNE) this.fx.text(pos.x, pos.y - 26, '无效', '#e0e6f0', 10);
         else if (this.isFoe(pid)) {
           // 对战中打到对手：和打野生宝可梦一样显示伤害数字
           const v = this.playerVis.get(pid);
@@ -369,7 +380,7 @@ export class GameView {
         if (n(1) === this.you) {
           const pos = this.playerPos(this.you);
           if (pos) this.fx.text(pos.x, pos.y - 36, '咦？', '#ffffff', 13, 1.4);
-          this.hooks.onMessage(`${ev[2] as string}的样子有些不对劲……这一波结束后可以选择进化`);
+          this.hooks.onMessage(`${ev[2] as string}的样子有些不对劲……${ev[3] === 1 ? '这一波结束后会自动进化' : '这一波结束后可以选择进化'}`);
         }
         break;
       case 'evoCancel': break;
@@ -415,9 +426,11 @@ export class GameView {
         const kind = FIELD_IDS[n(2)];
         if (!kind) break;
         const f = buildField(n(1), kind, decodeCells(ev[6] as number[]), fieldGrid(this.w, this.h).cols, n(3), n(4), this.time + n(5), this.time);
+        if (ev[7] === 1) f.byAbility = true;
         this.fields.set(f.id, f);
         break;
       }
+      case 'fieldEnd': this.fields.delete(n(1)); break;
       case 'fieldOff': this.fields.clear(); break;
     }
   }
@@ -555,7 +568,7 @@ export class GameView {
     const mv = inWave && !down && this.canMove() ? moveVector() : { x: 0, y: 0 };
     // 服务器发来的是不算场地的速度：按自己脚下的场地在本地乘上，走进阵雨、草丛时马上变慢，不用等服务器
     const here = this.me && this.fieldKindAt(this.local.x, this.local.y);
-    const speed = (this.me?.speed ?? 100) * (here && this.me ? fieldSpeed(here, formOf(this.me.line, this.me.stage).types) : 1);
+    const speed = (this.me?.speed ?? 100) * (here && this.me ? abFieldSpeed(here, formOf(this.me.line, this.me.stage).types, abilitiesOf(this.me.ab ?? [])) : 1);
     this.local.moving = !!(mv.x || mv.y);
     if (this.local.moving) {
       this.local.x = Math.max(8, Math.min(this.w - 8, this.local.x + mv.x * speed * dt));
@@ -691,9 +704,9 @@ export class GameView {
         if (down && !vis.down) vis.anim.play('Faint', true);
         if (!down && vis.down) vis.anim.loop('Idle');
         vis.down = down;
-        // 站在熔岩池里、没有火和岩石属性：身上冒火苗
+        // 站在熔岩池里、没有火和岩石属性（也没有免疫的特性）：身上冒火苗
         const fk = !down && this.fields.size ? this.fieldKindAt(x, y) : null;
-        if (fk && fieldBurns(fk, DEX[p.dex]?.types ?? []) && Math.random() < 0.3) {
+        if (fk && abFieldBurns(fk, DEX[p.dex]?.types ?? [], this.abilitiesOf(p.id)) && Math.random() < 0.3) {
           this.fx.px(x + (Math.random() - 0.5) * 10, y - 6, Math.random() < 0.5 ? '#ff6a1f' : '#ffb22e', { vy: -35, life: 0.45 });
         }
         const moving = p.id === this.you ? this.local.moving : (p.flags & 8) !== 0;
@@ -890,11 +903,32 @@ export class GameView {
     }
   }
 
+  /** 这位玩家现在生效的特性（公共状态里的，自己的用私有状态） */
+  private abilitiesOf(id: number): AbilityDef[] {
+    const ids = id === this.you && this.me ? this.me.ab : this.pub?.players.find((q) => q.id === id)?.ab;
+    return abilitiesOf(ids ?? []);
+  }
+
+  /** 光环特性的提示圈：淡淡的一层底色，加一圈缓慢呼吸的虚线 */
+  private drawAuras(id: number, x: number, y: number, t: number) {
+    for (const a of this.abilitiesOf(id)) {
+      const au = auraOf(a);
+      if (!au) continue;
+      const r = auraRadius(au.cells);
+      this.ctx.globalAlpha = 0.1;
+      pxCircle(this.ctx, x, y, r, au.color);
+      this.ctx.globalAlpha = 0.35 + 0.15 * Math.sin(t * 3);
+      pxRing(this.ctx, x, y, r, au.color, 1, 1, 3);
+      this.ctx.globalAlpha = 1;
+    }
+  }
+
   private drawPlayer(p: SnapPlayer, x: number, y: number, v: PlayerVis, t: number) {
     const ctx = this.ctx;
     const mine = p.id === this.you;
     const foe = this.isFoe(p.id);
     const canRevive = this.names.size > 1 && (!this.pvp || this.pvp.revive);
+    if (!(p.flags & 1)) this.drawAuras(p.id, x, y, t);
     if (p.flags & 1 && canRevive) {
       // 救援圈：队友站进圈里就能把它救起来；对手的救援圈是红色的，靠近就能打断
       const col = foe ? '#ff6a6a' : '#78f878';

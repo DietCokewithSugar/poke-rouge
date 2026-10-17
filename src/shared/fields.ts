@@ -144,9 +144,9 @@ export const fieldTypesText = (f: FieldDef) => f.types.map((t) => TYPE_NAME[t]).
 
 // ---------------------------------------------------------------- 修正
 
-/** 一次出招受到的场地修正；size 是半径和宽度的倍率（覆盖面积开平方） */
-export interface MoveMod { dmg: number; cd: number; size: number; crit: number; drain: number; chill: boolean }
-export const NO_MOVE_MOD: Readonly<MoveMod> = Object.freeze({ dmg: 1, cd: 1, size: 1, crit: 0, drain: 0, chill: false });
+/** 一次出招受到的场地修正；size 是半径和宽度的倍率（覆盖面积开平方），range 是射程倍率（场地里的特性加成） */
+export interface MoveMod { dmg: number; cd: number; size: number; crit: number; drain: number; chill: boolean; range: number }
+export const NO_MOVE_MOD: Readonly<MoveMod> = Object.freeze({ dmg: 1, cd: 1, size: 1, crit: 0, drain: 0, chill: false, range: 1 });
 
 const MOVE_TABLE = {} as Record<FieldId, Partial<Record<PType, MoveMod>>>;
 for (const id of FIELD_IDS) {
@@ -228,6 +228,10 @@ export interface Field {
   cy: number;
   /** 波次时间：这之前是闪烁的预告，还不生效 */
   activeAt: number;
+  /** 特性生成的场地：是谁生成的 */
+  by?: number;
+  /** 波次时间：到了就消失（特性生成的临时场地） */
+  until?: number;
 }
 
 export function fieldGrid(w: number, h: number) {
