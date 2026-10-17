@@ -323,10 +323,7 @@ export function hurtPlayer(sim: GameSim, p: SimPlayer, raw: number, cat: 'phys' 
     const share = q ? findAb(q, (a) => a.healer?.share)?.healer?.share ?? 0 : 0;
     if (q && share > 0) {
       const part = Math.floor(dmg * share);
-      if (part > 0) {
-        dmg -= part;
-        hurtPlayer(sim, q, part, cat, { pure: true, pvp: o.pvp, flags: o.flags, by: o.by });
-      }
+      if (part > 0) dmg -= hurtPlayer(sim, q, part, cat, { pure: true, pvp: o.pvp, flags: o.flags, by: o.by });
     }
   }
   if (p.shield > 0) {

@@ -346,7 +346,11 @@ export class GameSim {
     p.suppressed = sup;
     p.copied = copied;
     this.recompute(p);
-    if (!same && copied.length) this.emit(['txt', Math.round(p.x), Math.round(p.y) - 30, `复制：${copied.map((id) => p.ab.find((a) => a.id === id)?.name ?? '').join('、')}`, '#9fe8ff']);
+    // 最近的对手一直在变：飘字最多 4 秒一次
+    if (!same && copied.length && this.time - p.at.copyMsgAt >= 4) {
+      p.at.copyMsgAt = this.time;
+      this.emit(['txt', Math.round(p.x), Math.round(p.y) - 30, `复制：${copied.map((id) => p.ab.find((a) => a.id === id)?.name ?? '').join('、')}`, '#9fe8ff']);
+    }
   }
 
   /** 场地 f 对这只宝可梦来说是不是不利的（毅力、精神力、胆量） */

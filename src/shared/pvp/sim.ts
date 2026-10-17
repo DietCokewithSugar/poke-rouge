@@ -379,7 +379,7 @@ export class PvpSim extends GameSim {
     if (st.slow > 0) slow = Math.max(slow, st.slowAmt);
     if (st.sun > 0) slow = Math.max(slow, Math.min(0.9, st.sunN * st.sunSlow));
     if (frozen) slow = Math.max(slow, 0.7);
-    if (st.root > 0) slow = 1;
+    if (st.root > 0 || st.sleep > 0) slow = 1;
     if (slow > 0) {
       p.slowT = Math.max(p.slowT, 0.12);
       p.slowAmt = slow;

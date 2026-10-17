@@ -170,10 +170,11 @@ export interface AbilityState {
   combat: number;
   /** 特性的持续回复：计时与这一段累计的量 */
   regenT: number;
-  /** 收获、生成场地、刷新复制的计时 */
+  /** 收获、生成场地、刷新复制的计时；上一次飘字说复制了什么的时间（模拟时间） */
   harvest: number;
   selfField: number;
   copyT: number;
+  copyMsgAt: number;
   /** 这一波已经因为 HP 第一次低于一半生成过场地 / 已经引爆过 */
   lowField: boolean;
   aftermath: boolean;
@@ -225,7 +226,7 @@ export function freshStatus(): StatusState {
 export function freshAbilityState(): AbilityState {
   return {
     moveT: 0, moveAmt: 0, evade: 0, anger: 0, angerSlow: 0, armor: 0, guard: 0, guardAmt: 0, combat: -99, regenT: 0,
-    harvest: 0, selfField: 0, copyT: 0, lowField: false, aftermath: false, field: null, bad: false, rivalAlly: false, outnumbered: false,
+    harvest: 0, selfField: 0, copyT: 0, copyMsgAt: -99, lowField: false, aftermath: false, field: null, bad: false, rivalAlly: false, outnumbered: false,
   };
 }
 
